@@ -1,0 +1,263 @@
+package engine
+
+import (
+	"context"
+	"encoding/base64"
+	"fmt"
+	"log/slog"
+	"path/filepath"
+	"time"
+
+	"my-bot/internal/config"
+	"my-bot/internal/events"
+	"my-bot/internal/inbox"
+	"my-bot/internal/llm"
+	"my-bot/internal/runtime"
+	"my-bot/internal/tools"
+)
+
+const (
+	workerEventBuf = 64
+	inLoopInboxBuf = 32
+)
+
+type ConversationWorker struct {
+	chatID string
+	cfg    *config.Config
+	agent  *llm.Agent
+	rt     runtime.Runtime
+	skills *tools.SkillLoader
+	loop   *llm.AgentLoop
+
+	Events      *inbox.Memory[events.WorkerEvent]
+	InLoopInbox *inbox.Memory[events.SteerMessage]
+
+	heartbeatTimer *time.Timer
+	lastHeartbeat  *events.HeartbeatEvent
+}
+
+func NewConversationWorker(
+	chatID string,
+	cfg *config.Config,
+	agent *llm.Agent,
+	rt runtime.Runtime,
+	skills *tools.SkillLoader,
+) *ConversationWorker {
+	workerAgent := agent.Fork()
+	cmdTools := tools.NewCommandToolset(rt, cfg.MaxOutputChars)
+	reg := tools.NewRegistry()
+	reg.RegisterToolset(tools.NewDefaultToolset(rt, skills, cfg))
+	reg.RegisterToolset(cmdTools)
+
+	return &ConversationWorker{
+		chatID:      chatID,
+		cfg:         cfg,
+		agent:       workerAgent,
+		rt:          rt,
+		skills:      skills,
+		loop:        llm.NewAgentLoop(cfg, workerAgent, reg, cmdTools),
+		Events:      inbox.NewMemory[events.WorkerEvent](workerEventBuf),
+		InLoopInbox: inbox.NewMemory[events.SteerMessage](inLoopInboxBuf),
+	}
+}
+
+func (w *ConversationWorker) Model() string {
+	return w.agent.Model()
+}
+
+func (w *ConversationWorker) SetModel(model string) {
+	w.agent.SetModel(model)
+}
+
+func (w *ConversationWorker) Run(ctx context.Context) error {
+	slog.Debug("worker started", "chat", w.chatID)
+	defer w.shutdown(ctx)
+	for {
+		select {
+		case msg := <-w.Events.C():
+			e := msg.Payload
+			if _, ok := e.(events.DumpCommand); ok {
+				path := fmt.Sprintf("session-%s.jsonl", w.chatID)
+				w.loop.DumpConversation(filepath.Join(w.cfg.SessionDir, path))
+				continue
+			}
+			w.stopHeartbeat()
+			if hb, ok := e.(events.HeartbeatEvent); ok {
+				w.lastHeartbeat = &hb
+			}
+			if err := w.handleEvent(ctx, e); err != nil {
+				w.reportError(ctx, err, e)
+			}
+			w.scheduleHeartbeat()
+		case msg := <-w.InLoopInbox.C():
+			s := msg.Payload
+			slog.Debug("steer received", "chat", w.chatID, "msg_id", s.MessageID, "text", s.Text)
+			w.stopHeartbeat()
+			if err := w.promoteSteer(ctx, s); err != nil {
+				slog.Error("steer promotion", "chat", w.chatID, "err", err)
+			}
+			w.scheduleHeartbeat()
+		case <-ctx.Done():
+			slog.Debug("worker context done", "chat", w.chatID)
+			return ctx.Err()
+		}
+	}
+}
+
+func (w *ConversationWorker) handleEvent(ctx context.Context, e events.WorkerEvent) error {
+	switch ev := e.(type) {
+	case events.TextInputEvent:
+		return w.processText(ctx, ev)
+	case events.ImageInputEvent:
+		return w.processImage(ctx, ev)
+	case events.HeartbeatEvent:
+		return w.processHeartbeat(ctx, ev)
+	case events.CronEvent:
+		return w.processCron(ctx, ev)
+	case events.NewSessionEvent:
+		return w.processNewSession(ctx, ev)
+	default:
+		return fmt.Errorf("unexpected event type %T", e)
+	}
+}
+
+func (w *ConversationWorker) processText(ctx context.Context, ev events.TextInputEvent) error {
+	slog.Debug("text input", "chat", w.chatID, "msg_id", ev.MessageID, "len", len(ev.Message), "content", ev.Message)
+	prompt := llm.NewMainPrompt(w.skills, w.rt)
+	if err := w.maybeCompress(ctx, prompt); err != nil {
+		slog.Error("compress", "chat", w.chatID, "err", err)
+	}
+	orch := llm.NewHumanInputOrchestrator(ev.Sender, w.InLoopInbox, w.agent, w.skills, w.cfg, w.rt)
+	ev.Sender.StartThinking(ctx)
+	err := w.loop.Run(ctx, orch, prompt, wrapUserMessage(ev.Message))
+	ev.Sender.EndThinking(ctx)
+	return err
+}
+
+func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageInputEvent) error {
+	slog.Debug("image input", "chat", w.chatID, "msg_id", ev.MessageID, "mime", ev.MIMEType, "bytes", len(ev.ImageData))
+	prompt := llm.NewMainPrompt(w.skills, w.rt)
+	if err := w.maybeCompress(ctx, prompt); err != nil {
+		slog.Error("compress", "chat", w.chatID, "err", err)
+	}
+	content := []map[string]any{
+		{"type": "text", "text": wrapUserMessage(ev.Message)},
+		{
+			"type": "image_url",
+			"image_url": map[string]any{
+				"url":    fmt.Sprintf("data:%s;base64,%s", ev.MIMEType, base64.StdEncoding.EncodeToString(ev.ImageData)),
+				"detail": "auto",
+			},
+		},
+	}
+	orch := llm.NewHumanInputOrchestrator(ev.Sender, w.InLoopInbox, w.agent, w.skills, w.cfg, w.rt)
+	ev.Sender.StartThinking(ctx)
+	err := w.loop.Run(ctx, orch, prompt, content)
+	ev.Sender.EndThinking(ctx)
+	return err
+}
+
+func (w *ConversationWorker) processHeartbeat(ctx context.Context, ev events.HeartbeatEvent) error {
+	slog.Debug("heartbeat start", "chat", w.chatID, "interval_s", ev.IntervalSeconds)
+	err := w.runBackground(ctx, ev.Sender, llm.NewHeartbeatPrompt(w.skills, w.rt), wrapUserMessage("SYSTEM EVENT: heartbeat"))
+	slog.Debug("heartbeat end", "chat", w.chatID, "err", err)
+	return err
+}
+
+func (w *ConversationWorker) processCron(ctx context.Context, ev events.CronEvent) error {
+	slog.Debug("cron start", "chat", w.chatID, "task", ev.TaskName)
+	prompt := fmt.Sprintf("SYSTEM EVENT: scheduled task '%s'\n\n%s", ev.TaskName, ev.Prompt)
+	err := w.runBackground(ctx, ev.Sender, llm.NewCronPrompt(w.skills, w.rt), wrapUserMessage(prompt))
+	slog.Debug("cron end", "chat", w.chatID, "task", ev.TaskName, "err", err)
+	return err
+}
+
+func (w *ConversationWorker) processNewSession(ctx context.Context, ev events.NewSessionEvent) error {
+	slog.Debug("new session", "chat", w.chatID)
+	w.loop.ResetConv()
+	return nil
+}
+
+func (w *ConversationWorker) runBackground(ctx context.Context, sender events.Outbound, prompt llm.SystemPrompt, content any) error {
+	orch := llm.NewBackgroundOrchestrator(sender, w.agent, w.skills, w.cfg, w.rt)
+	w.loop.ResetConv()
+	return w.loop.Run(ctx, orch, prompt, content)
+}
+
+func (w *ConversationWorker) promoteSteer(ctx context.Context, s events.SteerMessage) error {
+	ev := events.TextInputEvent{
+		ChatID:    w.chatID,
+		MessageID: s.MessageID,
+		Message:   s.Text,
+		Sender:    s.Sender,
+	}
+	return w.processText(ctx, ev)
+}
+
+func (w *ConversationWorker) maybeCompress(ctx context.Context, prompt llm.SystemPrompt) error {
+	if !w.cfg.ContextAutoCompressionEnabled {
+		return nil
+	}
+	threshold := int(float64(w.cfg.ContextMaxTokens) * w.cfg.ContextCompressionThreshold)
+	if threshold <= 0 || int(w.loop.TotalTokens()) < threshold {
+		return nil
+	}
+	slog.Debug("compressing context", "chat", w.chatID, "tokens", w.loop.TotalTokens(), "threshold", threshold)
+	return w.loop.Compress(ctx, prompt)
+}
+
+func (w *ConversationWorker) scheduleHeartbeat() {
+	if w.lastHeartbeat == nil {
+		return
+	}
+	hb := *w.lastHeartbeat
+	interval := time.Duration(hb.IntervalSeconds) * time.Second
+	w.heartbeatTimer = time.AfterFunc(interval, func() {
+		if !w.Events.TryPublish(workerEnvelope(w.chatID, hb)) {
+			slog.Warn("heartbeat dropped: events channel full", "chat", w.chatID)
+		}
+	})
+}
+
+func (w *ConversationWorker) stopHeartbeat() {
+	if w.heartbeatTimer != nil {
+		w.heartbeatTimer.Stop()
+		w.heartbeatTimer = nil
+	}
+}
+
+func (w *ConversationWorker) reportError(ctx context.Context, err error, e events.WorkerEvent) {
+	slog.Error("event handler", "chat", w.chatID, "event", fmt.Sprintf("%T", e), "err", err)
+	switch ev := e.(type) {
+	case events.TextInputEvent:
+		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
+	case events.ImageInputEvent:
+		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
+	}
+}
+
+func (w *ConversationWorker) shutdown(ctx context.Context) {
+	slog.Debug("worker shutting down", "chat", w.chatID)
+	w.stopHeartbeat()
+	ctx2, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := w.loop.Shutdown(ctx2); err != nil {
+		slog.Error("shutdown", "chat", w.chatID, "err", err)
+	}
+}
+
+func wrapUserMessage(msg string) string {
+	now := time.Now()
+	return fmt.Sprintf("Message Time: %s\nTimezone: %s\n\n%s",
+		now.Format("2006-01-02 15:04:05 MST-0700"),
+		now.Location(),
+		msg)
+}
+
+func workerEnvelope(chatID string, ev events.WorkerEvent) inbox.Envelope[events.WorkerEvent] {
+	return inbox.NewEnvelope(fmt.Sprintf("%T", ev), inbox.Address{Kind: "worker", ID: chatID}, ev)
+}
+
+func steerEnvelope(chatID string, msg events.SteerMessage) inbox.Envelope[events.SteerMessage] {
+	return inbox.NewEnvelope("steer", inbox.Address{Kind: "worker", ID: chatID}, msg)
+}

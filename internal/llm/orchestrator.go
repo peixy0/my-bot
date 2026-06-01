@@ -1,0 +1,409 @@
+package llm
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"strings"
+
+	"my-bot/internal/config"
+	"my-bot/internal/events"
+	"my-bot/internal/inbox"
+	"my-bot/internal/runtime"
+	"my-bot/internal/tools"
+
+	"github.com/google/uuid"
+	"golang.org/x/sync/errgroup"
+)
+
+func wireMetaTools(r *tools.Registry, agent *Agent, skills *tools.SkillLoader, cfg *config.Config, rt runtime.Runtime, _ events.Outbound) {
+	NewSubagentToolset(agent, skills, cfg, rt).Register(r)
+	if cfg.FleetToolEnabled {
+		NewFleetToolset(agent, skills, cfg, rt).Register(r)
+	}
+}
+
+type Orchestrator interface {
+	Wire(r *tools.Registry)
+	OnContentDelta(ctx context.Context, delta string)
+	OnContentFinal(ctx context.Context, content string)
+	OnFinalResponse(ctx context.Context, content string)
+	BeforeToolUse(ctx context.Context, content string)
+	DispatchTools(ctx context.Context, calls []ToolCall) ([]Message, error)
+}
+
+func sendBeforeToolUse(ctx context.Context, sender events.Outbound, content string) {
+	if sender == nil {
+		return
+	}
+	content = strings.TrimSpace(content)
+	if content != "" {
+		sender.Send(ctx, content)
+	}
+}
+
+type HumanInputOrchestrator struct {
+	registry    *tools.Registry
+	sender      events.Outbound
+	inLoopInbox inbox.Inbox[events.SteerMessage]
+	agent       *Agent
+	skills      *tools.SkillLoader
+	cfg         *config.Config
+	rt          runtime.Runtime
+}
+
+func NewHumanInputOrchestrator(
+	sender events.Outbound,
+	inLoopInbox inbox.Inbox[events.SteerMessage],
+	agent *Agent,
+	skills *tools.SkillLoader,
+	cfg *config.Config,
+	rt runtime.Runtime,
+) *HumanInputOrchestrator {
+	return &HumanInputOrchestrator{sender: sender, inLoopInbox: inLoopInbox, agent: agent, skills: skills, cfg: cfg, rt: rt}
+}
+
+func (o *HumanInputOrchestrator) Wire(r *tools.Registry) {
+	if registrar, ok := o.sender.(tools.ToolRegistrar); ok {
+		registrar.RegisterTools(r)
+	}
+	wireMetaTools(r, o.agent, o.skills, o.cfg, o.rt, o.sender)
+	o.registry = r
+}
+
+func (o *HumanInputOrchestrator) OnContentDelta(ctx context.Context, delta string) {
+	if o.sender == nil || delta == "" {
+		return
+	}
+	o.sender.SendDelta(ctx, delta)
+}
+
+func (o *HumanInputOrchestrator) OnContentFinal(ctx context.Context, _ string) {
+	if o.sender == nil {
+		return
+	}
+	o.sender.SendFinal(ctx)
+}
+
+func (o *HumanInputOrchestrator) OnFinalResponse(_ context.Context, _ string) {}
+
+func (o *HumanInputOrchestrator) BeforeToolUse(_ context.Context, _ string) {}
+
+func (o *HumanInputOrchestrator) DispatchTools(ctx context.Context, calls []ToolCall) ([]Message, error) {
+
+	toolMsgs, err := runDispatch(ctx, o.registry, calls)
+	if err != nil {
+		return nil, err
+	}
+	if inject := o.drainSteer(); inject != nil {
+		slog.Debug("steer injected after tool dispatch", "tools", len(calls))
+		toolMsgs = append(toolMsgs, *inject)
+	}
+	return toolMsgs, nil
+}
+
+func (o *HumanInputOrchestrator) drainSteer() *Message {
+	if o.inLoopInbox == nil {
+		return nil
+	}
+	var items []events.SteerMessage
+	for {
+		msg, ok := o.inLoopInbox.TryReceive()
+		if ok {
+			items = append(items, msg.Payload)
+			continue
+		}
+		break
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	plural := "MESSAGE"
+	article := "this message"
+	if len(items) > 1 {
+		plural = "MESSAGES"
+		article = "the following messages"
+	}
+	var sb strings.Builder
+	sb.WriteString("[USER ")
+	sb.WriteString(plural)
+	sb.WriteString(" - INTERRUPTING YOUR CURRENT WORK]\n")
+	sb.WriteString("The user sent ")
+	sb.WriteString(article)
+	sb.WriteString(" while you were working. Read carefully and adjust your plan immediately if it changes what you should do next:\n\n")
+	for _, s := range items {
+		sb.WriteString(s.Text)
+		sb.WriteString("\n\n")
+	}
+	msg := userMessage(strings.TrimSpace(sb.String()))
+	return &msg
+}
+
+type BackgroundOrchestrator struct {
+	registry *tools.Registry
+	sender   events.Outbound
+	agent    *Agent
+	skills   *tools.SkillLoader
+	cfg      *config.Config
+	rt       runtime.Runtime
+}
+
+func NewBackgroundOrchestrator(
+	sender events.Outbound,
+	agent *Agent,
+	skills *tools.SkillLoader,
+	cfg *config.Config,
+	rt runtime.Runtime,
+) *BackgroundOrchestrator {
+	return &BackgroundOrchestrator{sender: sender, agent: agent, skills: skills, cfg: cfg, rt: rt}
+}
+
+func (o *BackgroundOrchestrator) Wire(r *tools.Registry) {
+	wireMetaTools(r, o.agent, o.skills, o.cfg, o.rt, nil)
+	o.registry = r
+}
+
+func (o *BackgroundOrchestrator) OnContentDelta(_ context.Context, _ string) {}
+
+func (o *BackgroundOrchestrator) OnContentFinal(_ context.Context, _ string) {}
+
+func (o *BackgroundOrchestrator) OnFinalResponse(ctx context.Context, content string) {
+	const noReport = "NO_REPORT"
+	if o.sender == nil || content == "" || strings.HasSuffix(strings.TrimSpace(content), noReport) {
+		return
+	}
+	o.sender.Send(ctx, content)
+}
+
+func (o *BackgroundOrchestrator) BeforeToolUse(_ context.Context, _ string) {}
+
+func (o *BackgroundOrchestrator) DispatchTools(ctx context.Context, calls []ToolCall) ([]Message, error) {
+	return runDispatch(ctx, o.registry, calls)
+}
+
+type SubagentOrchestrator struct {
+	registry *tools.Registry
+	output   string
+}
+
+func NewSubagentOrchestrator() *SubagentOrchestrator {
+	return &SubagentOrchestrator{}
+}
+
+func (o *SubagentOrchestrator) Wire(r *tools.Registry) { o.registry = r }
+
+func (o *SubagentOrchestrator) OnContentDelta(_ context.Context, _ string) {}
+
+func (o *SubagentOrchestrator) OnContentFinal(_ context.Context, _ string) {}
+
+func (o *SubagentOrchestrator) OnFinalResponse(_ context.Context, content string) {
+	o.output = content
+}
+
+func (o *SubagentOrchestrator) BeforeToolUse(_ context.Context, _ string) {}
+
+func (o *SubagentOrchestrator) Output() string { return o.output }
+
+func (o *SubagentOrchestrator) DispatchTools(ctx context.Context, calls []ToolCall) ([]Message, error) {
+	return runDispatch(ctx, o.registry, calls)
+}
+
+type SubagentToolset struct {
+	runner *subagentRunner
+}
+
+func NewSubagentToolset(agent *Agent, skills *tools.SkillLoader, cfg *config.Config, rt runtime.Runtime) *SubagentToolset {
+	return &SubagentToolset{runner: newSubagentRunner(agent, skills, cfg, rt)}
+}
+
+type FleetToolset struct {
+	runner *subagentRunner
+}
+
+func NewFleetToolset(agent *Agent, skills *tools.SkillLoader, cfg *config.Config, rt runtime.Runtime) *FleetToolset {
+	return &FleetToolset{runner: newSubagentRunner(agent, skills, cfg, rt)}
+}
+
+type subagentRunner struct {
+	agent  *Agent
+	skills *tools.SkillLoader
+	cfg    *config.Config
+	rt     runtime.Runtime
+}
+
+func newSubagentRunner(agent *Agent, skills *tools.SkillLoader, cfg *config.Config, rt runtime.Runtime) *subagentRunner {
+	return &subagentRunner{agent: agent, skills: skills, cfg: cfg, rt: rt}
+}
+
+type subagentTaskMessage struct {
+	AgentID      string
+	Task         string
+	SystemPrompt string
+}
+
+type subagentResultMessage struct {
+	AgentID string
+	Output  string
+	Error   string
+}
+
+func newSubagentTask(systemPrompt, task string) subagentTaskMessage {
+	return subagentTaskMessage{
+		AgentID:      uuid.NewString(),
+		Task:         task,
+		SystemPrompt: systemPrompt,
+	}
+}
+
+func (r *subagentRunner) run(ctx context.Context, systemPrompt, task string) (subagentResultMessage, error) {
+	return runSubagentTask(ctx, r.agent, r.skills, r.cfg, r.rt, newSubagentTask(systemPrompt, task))
+}
+
+func (r *subagentRunner) runMany(ctx context.Context, systemPrompt string, tasks []string) []string {
+	results := make([]string, len(tasks))
+	g, gctx := errgroup.WithContext(ctx)
+	for i, task := range tasks {
+		i, task := i, task
+		g.Go(func() error {
+			result, err := r.run(gctx, systemPrompt, task)
+			if err != nil {
+				results[i] = fmt.Sprintf("error: %v", err)
+				return nil
+			}
+			results[i] = result.Output
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		slog.Error("fleet: errgroup failed", "err", err)
+	}
+	return results
+}
+
+func runSubagentTask(
+	ctx context.Context,
+	agent *Agent,
+	skills *tools.SkillLoader,
+	cfg *config.Config,
+	rt runtime.Runtime,
+	task subagentTaskMessage,
+) (subagentResultMessage, error) {
+	result := subagentResultMessage{
+		AgentID: task.AgentID,
+	}
+	cmdTools := tools.NewCommandToolset(rt, cfg.MaxOutputChars)
+	defer func() {
+		ctx2, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		_ = cmdTools.Shutdown(ctx2)
+	}()
+	reg := tools.NewRegistry()
+	reg.RegisterToolset(tools.NewDefaultToolset(rt, skills, cfg))
+	reg.RegisterToolset(cmdTools)
+	orch := NewSubagentOrchestrator()
+	loop := NewAgentLoop(cfg, agent, reg, cmdTools)
+	if err := loop.Run(ctx, orch, NewSubagentPrompt(skills, rt, task.SystemPrompt), task.Task); err != nil {
+		result.Error = err.Error()
+		return result, err
+	}
+	result.Output = orch.Output()
+	return result, nil
+}
+
+func (s *SubagentToolset) Register(r *tools.Registry) {
+	r.Register(tools.ToolSchema{
+		Name:        "agent",
+		Description: "Run an isolated subagent to handle a specific, self-contained task.\n\nThe subagent has access to the same tools and runs with a fresh conversation.\nIt cannot spawn further subagents.\nUse this to delegate well-defined, isolated work units that can be\ncompleted independently of the current conversation context.\nReturns the final text response from the subagent.",
+		ParameterDesc: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"task": map[string]any{
+					"type":        "string",
+					"description": "The task description for the subagent to execute. Provide full context as the subagent has no conversation history.",
+				},
+				"system_prompt": map[string]any{
+					"type":        "string",
+					"description": "System prompt for the subagent.",
+				},
+			},
+			"required": []string{"task", "system_prompt"},
+		},
+	}, func(ctx context.Context, args []byte) (tools.ToolResult, error) {
+		var p struct {
+			Task         string `json:"task"`
+			SystemPrompt string `json:"system_prompt"`
+		}
+		if err := json.Unmarshal(args, &p); err != nil {
+			return tools.ToolResult{}, err
+		}
+		slog.Debug("subagent start", "task_len", len(p.Task))
+		result, err := s.runner.run(ctx, p.SystemPrompt, p.Task)
+		if err != nil {
+			slog.Debug("subagent error", "err", err)
+			return tools.ToolResult{}, err
+		}
+		slog.Debug("subagent done", "agent_id", result.AgentID, "output_len", len(result.Output))
+		return tools.TextResult(result.Output), nil
+	})
+}
+
+func (s *FleetToolset) Register(r *tools.Registry) {
+	r.Register(tools.ToolSchema{
+		Name:        "fleet",
+		Description: "Run multiple isolated subagents in parallel, each handling one task.\n\nAll subagents share the same system prompt but receive independent tasks.\nThey have access to the same tools and run with fresh conversations.\nSubagents cannot spawn further subagents.\nUse this to fan out well-defined, independent work units that can be\nexecuted concurrently.\nReturns a list of outputs, one per task, in the original task order.",
+		ParameterDesc: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"system_prompt": map[string]any{
+					"type":        "string",
+					"description": "Shared system prompt applied to every subagent. Describe the role or constraints common to all tasks.",
+				},
+				"tasks": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "List of task descriptions to execute in parallel. Each task is handled by an independent subagent with full context.",
+				},
+			},
+			"required": []string{"system_prompt", "tasks"},
+		},
+	}, func(ctx context.Context, args []byte) (tools.ToolResult, error) {
+		var p struct {
+			SystemPrompt string   `json:"system_prompt"`
+			Tasks        []string `json:"tasks"`
+		}
+		if err := json.Unmarshal(args, &p); err != nil {
+			return tools.ToolResult{}, err
+		}
+		slog.Debug("fleet start", "tasks", len(p.Tasks))
+		results := s.runner.runMany(ctx, p.SystemPrompt, p.Tasks)
+		slog.Debug("fleet done", "tasks", len(p.Tasks))
+		return tools.TextResult(tools.MarshalResult(results)), nil
+	})
+}
+
+func runDispatch(ctx context.Context, r *tools.Registry, calls []ToolCall) ([]Message, error) {
+	msgs := make([]Message, len(calls))
+	for i, tc := range calls {
+		handler, ok := r.Handler(tc.Name)
+		if !ok {
+			slog.Debug("tool call: unknown tool", "tool", tc.Name, "id", tc.ID)
+			msgs[i] = toolResultMessage(tc.ID, fmt.Sprintf("unknown tool %q", tc.Name))
+			continue
+		}
+		slog.Debug("tool call start", "tool", tc.Name, "id", tc.ID, "args", string(tc.Args))
+		result, err := handler(ctx, tc.Args)
+		if err != nil {
+			slog.Debug("tool call error", "tool", tc.Name, "id", tc.ID, "err", err)
+			msgs[i] = toolResultMessage(tc.ID, fmt.Sprintf("error: %v", err))
+			continue
+		}
+		slog.Debug("tool call done", "tool", tc.Name, "id", tc.ID, "result", result.Text)
+		if result.Blocks != nil {
+			msgs[i] = toolResultBlocksMessage(tc.ID, result.Blocks)
+		} else {
+			msgs[i] = toolResultMessage(tc.ID, result.Text)
+		}
+	}
+	return msgs, nil
+}

@@ -1,0 +1,27 @@
+# Build output
+/main
+/bot
+
+# Workspace data
+workspace/
+
+# Environment / secrets
+.env
+*.env
+.env.*
+!.env.example
+
+# Go test cache and coverage
+*.test
+*.out
+coverage.html
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
