@@ -53,12 +53,6 @@ type DropSessionEvent struct {
 	ChatID string
 }
 
-type SteerMessage struct {
-	MessageID string
-	Text      string
-	Sender    Outbound
-}
-
 type DumpCommand struct {
 }
 

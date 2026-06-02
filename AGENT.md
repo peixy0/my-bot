@@ -77,7 +77,7 @@ Every long-lived goroutine and what it owns. This is the single source of truth 
 | Goroutine | Started by | Owns / Touches | Synchronization |
 |---|---|---|---|
 | `Scheduler.Run` | main | `workers`, `cronWorkers` maps; reads `queue` | none — single owner |
-| `ConversationWorker.Run` (per chat) | Scheduler | conversation state, `Events` chan, `Steer` chan | none within worker |
+| `ConversationWorker.Run` (per chat) | Scheduler | conversation state, `Events` chan, in-loop input chan | none within worker |
 | `cron.Cron` internal goroutines | CronWorker (via `cron.Cron.Start`) | invokes registered funcs that send on `workerCh` | callbacks only touch a channel; no shared map access |
 | Feishu image download | Feishu inbound | downloads bytes, enqueues an event, surfaces failures to user | fire-and-forget; logs every error path |
 | Heartbeat `time.AfterFunc` | ConversationWorker | non-blocking send to worker `Events` | timer is `Stop()`-ed on shutdown |
@@ -98,7 +98,7 @@ Every long-lived goroutine and what it owns. This is the single source of truth 
 
 ### Orchestrator Variants
 
-- **HumanInputOrchestrator** — Interactive conversation; sends partial content, handles steer interrupts.
+- **HumanInputOrchestrator** — Interactive conversation; sends partial content, handles live user interrupts.
 - **BackgroundOrchestrator** — Heartbeat/cron; suppresses output ending with `NO_REPORT`.
 - **SubagentOrchestrator** — Isolated execution; captures final output instead of sending.
 
@@ -109,7 +109,7 @@ These are non-obvious decisions worth preserving. If you're tempted to "fix" one
 - **Single-goroutine Scheduler dispatch.** `Scheduler.workers` and `cronWorkers` are deliberately unprotected by mutex. The invariant: only `Run()` reads/writes them. If you ever need access from elsewhere, send an event into the queue rather than introducing a lock. The maps are documented in `scheduler.go`.
 - **Per-chat ConversationWorker isolation.** Each chat has its own goroutine, its own `Events` channel, and its own conversation state. No cross-chat sharing means no cross-chat synchronization.
 - **Per-worker model selection.** `Scheduler` keeps one base `Agent` for dependency wiring, but each `ConversationWorker` forks its own `Agent`; `/model` changes only that worker's model.
-- **`Steer` is a separate channel, not a queued event.** Allows non-blocking interrupt semantics with a `default` fallthrough; falls back to the queue when the steer channel is full.
+- **Live user input uses a separate in-loop input inbox, not the worker queue.** While an agent loop is running, ordinary text/images are routed as non-blocking interrupts with a `default` fallthrough; `/queue` forces the worker queue for handling after the current loop finishes.
 - **Three orchestrator variants instead of mode flags.** Strategy pattern keeps each orchestrator's responsibility crisp; we'd rather grow a fourth variant than feature-flag an existing one.
 - **Raw `net/http` for LLM calls, no SDK.** The OpenAI-compatible provider serializes messages and tools as `map[string]any` and consumes streaming chat-completion events directly. Don't reintroduce `openai-go`.
 - **Composable system prompts.** Prompts compose workspace `.md` files; behavior is data-driven, not code-driven. New prompts should declare their section list, not duplicate file-reading logic.

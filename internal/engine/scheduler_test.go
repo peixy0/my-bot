@@ -76,3 +76,170 @@ func TestSendWorkerEventDropsWhenInboxFull(t *testing.T) {
 		t.Fatal("expected second publish to fail when inbox is full")
 	}
 }
+
+func TestSchedulerDispatchTextInputPublishesToExistingWorkerInLoopInbox(t *testing.T) {
+	worker := &ConversationWorker{
+		Events:      inbox.NewMemory[events.WorkerEvent](1),
+		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
+	}
+	s := &Scheduler{
+		workers: map[string]*workerEntry{
+			"chat-1": {worker: worker},
+		},
+	}
+
+	s.dispatchUserInput(context.Background(), "chat-1", events.TextInputEvent{
+		ChatID:    "chat-1",
+		MessageID: "msg-1",
+		Message:   "change direction",
+		Sender:    &captureOutbound{},
+	})
+
+	msg, err := worker.InLoopInbox.Receive(context.Background())
+	if err != nil {
+		t.Fatalf("receive in-loop input: %v", err)
+	}
+	ev, ok := msg.Payload.(events.TextInputEvent)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", msg.Payload)
+	}
+	if ev.Message != "change direction" {
+		t.Fatalf("unexpected in-loop text: %q", ev.Message)
+	}
+	if worker.Events.Len() != 0 {
+		t.Fatalf("expected worker queue to stay empty, got %d", worker.Events.Len())
+	}
+}
+
+func TestSchedulerDispatchImageInputPublishesToExistingWorkerInLoopInbox(t *testing.T) {
+	worker := &ConversationWorker{
+		Events:      inbox.NewMemory[events.WorkerEvent](1),
+		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
+	}
+	s := &Scheduler{
+		workers: map[string]*workerEntry{
+			"chat-1": {worker: worker},
+		},
+	}
+
+	s.dispatchUserInput(context.Background(), "chat-1", events.ImageInputEvent{
+		ChatID:    "chat-1",
+		MessageID: "msg-1",
+		Message:   "look at this",
+		MIMEType:  "image/png",
+		ImageData: []byte{1, 2, 3},
+		Sender:    &captureOutbound{},
+	})
+
+	msg, err := worker.InLoopInbox.Receive(context.Background())
+	if err != nil {
+		t.Fatalf("receive in-loop input: %v", err)
+	}
+	ev, ok := msg.Payload.(events.ImageInputEvent)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", msg.Payload)
+	}
+	if ev.Message != "look at this" || ev.MIMEType != "image/png" {
+		t.Fatalf("unexpected in-loop image input: %+v", ev)
+	}
+	if worker.Events.Len() != 0 {
+		t.Fatalf("expected worker queue to stay empty, got %d", worker.Events.Len())
+	}
+}
+
+func TestSchedulerDispatchTextInputQueuesWhenInLoopInboxFull(t *testing.T) {
+	worker := &ConversationWorker{
+		Events:      inbox.NewMemory[events.WorkerEvent](1),
+		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
+	}
+	worker.InLoopInbox.TryPublish(workerEnvelope("chat-1", events.TextInputEvent{ChatID: "chat-1", Message: "already pending"}))
+	s := &Scheduler{
+		workers: map[string]*workerEntry{
+			"chat-1": {worker: worker},
+		},
+	}
+
+	s.dispatchUserInput(context.Background(), "chat-1", events.TextInputEvent{
+		ChatID:  "chat-1",
+		Message: "fallback task",
+		Sender:  &captureOutbound{},
+	})
+
+	msg, err := worker.Events.Receive(context.Background())
+	if err != nil {
+		t.Fatalf("receive worker event: %v", err)
+	}
+	ev, ok := msg.Payload.(events.TextInputEvent)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", msg.Payload)
+	}
+	if ev.Message != "fallback task" {
+		t.Fatalf("unexpected queued text: %q", ev.Message)
+	}
+}
+
+func TestSchedulerQueueCommandQueuesWithExistingWorker(t *testing.T) {
+	worker := &ConversationWorker{
+		Events:      inbox.NewMemory[events.WorkerEvent](1),
+		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
+	}
+	s := &Scheduler{
+		workers: map[string]*workerEntry{
+			"chat-1": {worker: worker},
+		},
+	}
+
+	s.handleSlashCommand(context.Background(), "queue handle this later", events.TextInputEvent{
+		ChatID:  "chat-1",
+		Message: "/queue handle this later",
+		Sender:  &captureOutbound{},
+	})
+
+	msg, err := worker.Events.Receive(context.Background())
+	if err != nil {
+		t.Fatalf("receive worker event: %v", err)
+	}
+	ev, ok := msg.Payload.(events.TextInputEvent)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", msg.Payload)
+	}
+	if ev.Message != "handle this later" {
+		t.Fatalf("unexpected queued text: %q", ev.Message)
+	}
+	if worker.InLoopInbox.Len() != 0 {
+		t.Fatalf("expected in-loop inbox to stay empty, got %d", worker.InLoopInbox.Len())
+	}
+}
+
+func TestSchedulerRemovedSteerCommandQueuesAsUnknownSlashCommand(t *testing.T) {
+	worker := &ConversationWorker{
+		Events:      inbox.NewMemory[events.WorkerEvent](1),
+		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
+	}
+	s := &Scheduler{
+		workers: map[string]*workerEntry{
+			"chat-1": {worker: worker},
+		},
+	}
+
+	s.handleSlashCommand(context.Background(), "steer old command", events.TextInputEvent{
+		ChatID:  "chat-1",
+		Message: "/steer old command",
+		Sender:  &captureOutbound{},
+	})
+
+	if worker.InLoopInbox.Len() != 0 {
+		t.Fatalf("expected removed /steer command not to publish in-loop input, got %d", worker.InLoopInbox.Len())
+	}
+	msg, err := worker.Events.Receive(context.Background())
+	if err != nil {
+		t.Fatalf("receive worker event: %v", err)
+	}
+	ev, ok := msg.Payload.(events.TextInputEvent)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", msg.Payload)
+	}
+	if ev.Message != "/steer old command" {
+		t.Fatalf("unexpected queued text: %q", ev.Message)
+	}
+}

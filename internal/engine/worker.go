@@ -30,7 +30,7 @@ type ConversationWorker struct {
 	loop   *llm.AgentLoop
 
 	Events      *inbox.Memory[events.WorkerEvent]
-	InLoopInbox *inbox.Memory[events.SteerMessage]
+	InLoopInbox *inbox.Memory[events.WorkerEvent]
 
 	heartbeatTimer *time.Timer
 	lastHeartbeat  *events.HeartbeatEvent
@@ -57,7 +57,7 @@ func NewConversationWorker(
 		skills:      skills,
 		loop:        llm.NewAgentLoop(cfg, workerAgent, reg, cmdTools),
 		Events:      inbox.NewMemory[events.WorkerEvent](workerEventBuf),
-		InLoopInbox: inbox.NewMemory[events.SteerMessage](inLoopInboxBuf),
+		InLoopInbox: inbox.NewMemory[events.WorkerEvent](inLoopInboxBuf),
 	}
 }
 
@@ -90,11 +90,11 @@ func (w *ConversationWorker) Run(ctx context.Context) error {
 			}
 			w.scheduleHeartbeat()
 		case msg := <-w.InLoopInbox.C():
-			s := msg.Payload
-			slog.Debug("steer received", "chat", w.chatID, "msg_id", s.MessageID, "text", s.Text)
+			e := msg.Payload
+			slog.Debug("in-loop input", "chat", w.chatID, "event", fmt.Sprintf("%T", e))
 			w.stopHeartbeat()
-			if err := w.promoteSteer(ctx, s); err != nil {
-				slog.Error("steer promotion", "chat", w.chatID, "err", err)
+			if err := w.handleEvent(ctx, e); err != nil {
+				slog.Error("in-loop input", "chat", w.chatID, "err", err)
 			}
 			w.scheduleHeartbeat()
 		case <-ctx.Done():
@@ -129,9 +129,8 @@ func (w *ConversationWorker) processText(ctx context.Context, ev events.TextInpu
 	}
 	orch := llm.NewHumanInputOrchestrator(ev.Sender, w.InLoopInbox, w.agent, w.skills, w.cfg, w.rt)
 	ev.Sender.StartThinking(ctx)
-	err := w.loop.Run(ctx, orch, prompt, wrapUserMessage(ev.Message))
-	ev.Sender.EndThinking(ctx)
-	return err
+	defer ev.Sender.EndThinking(ctx)
+	return w.loop.Run(ctx, orch, prompt, wrapUserMessage(ev.Message))
 }
 
 func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageInputEvent) error {
@@ -152,9 +151,8 @@ func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageIn
 	}
 	orch := llm.NewHumanInputOrchestrator(ev.Sender, w.InLoopInbox, w.agent, w.skills, w.cfg, w.rt)
 	ev.Sender.StartThinking(ctx)
-	err := w.loop.Run(ctx, orch, prompt, content)
-	ev.Sender.EndThinking(ctx)
-	return err
+	defer ev.Sender.EndThinking(ctx)
+	return w.loop.Run(ctx, orch, prompt, content)
 }
 
 func (w *ConversationWorker) processHeartbeat(ctx context.Context, ev events.HeartbeatEvent) error {
@@ -182,16 +180,6 @@ func (w *ConversationWorker) runBackground(ctx context.Context, sender events.Ou
 	orch := llm.NewBackgroundOrchestrator(sender, w.agent, w.skills, w.cfg, w.rt)
 	w.loop.ResetConv()
 	return w.loop.Run(ctx, orch, prompt, content)
-}
-
-func (w *ConversationWorker) promoteSteer(ctx context.Context, s events.SteerMessage) error {
-	ev := events.TextInputEvent{
-		ChatID:    w.chatID,
-		MessageID: s.MessageID,
-		Message:   s.Text,
-		Sender:    s.Sender,
-	}
-	return w.processText(ctx, ev)
 }
 
 func (w *ConversationWorker) maybeCompress(ctx context.Context, prompt llm.SystemPrompt) error {
@@ -256,8 +244,4 @@ func wrapUserMessage(msg string) string {
 
 func workerEnvelope(chatID string, ev events.WorkerEvent) inbox.Envelope[events.WorkerEvent] {
 	return inbox.NewEnvelope(fmt.Sprintf("%T", ev), inbox.Address{Kind: "worker", ID: chatID}, ev)
-}
-
-func steerEnvelope(chatID string, msg events.SteerMessage) inbox.Envelope[events.SteerMessage] {
-	return inbox.NewEnvelope("steer", inbox.Address{Kind: "worker", ID: chatID}, msg)
 }

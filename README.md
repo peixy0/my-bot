@@ -8,7 +8,7 @@ An event-driven AI agent framework in Go. Connects messaging platforms (Feishu/L
 - **OpenAI-compatible LLM provider.** Chat completions are streamed via raw `net/http` (no vendor SDK).
 - **Composable tools.** Built-in tools for filesystem, shell, web search, fetch, edit, glob, grep, and long-running background processes. Add new tools by implementing a small `Toolset` interface.
 - **Composable prompts.** System prompts assemble from workspace `.md` files (`PERSONA.md`, `RULES.md`, `CONTEXT.md`, `TOOLS.md`, plus per-mode files).
-- **Three orchestration modes.** Interactive (with steer interrupts), background (heartbeat / cron), and isolated subagents.
+- **Three orchestration modes.** Interactive (with live user interrupts), background (heartbeat / cron), and isolated subagents.
 - **Runtime abstraction.** Tools execute on host bash or in a podman/docker sandbox with no caller changes.
 - **Skills system.** Markdown files with frontmatter become discoverable, on-demand-loadable agent skills.
 
@@ -58,7 +58,7 @@ While chatting with the bot:
 | `/drop` | Drop the current session and worker |
 | `/heartbeat [seconds]` | Begin autonomous heartbeat cycles in this chat, optionally overriding `WAKE_INTERVAL_SECONDS` |
 | `/model <name>` | Switch the active LLM model for the current chat/session |
-| `/steer <text>` | Inject a steer message into a running turn |
+| `/queue <text>` | Queue a message to run after the current agent loop finishes |
 | `/cron load <name>` | Reload cron tasks defined in `.cron/<name>/*.md` |
 | `/cron unload <name>` | Stop a loaded cron job |
 | `/cron ls` | List available and loaded cron jobs |

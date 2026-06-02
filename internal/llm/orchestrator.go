@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -46,7 +47,7 @@ func sendBeforeToolUse(ctx context.Context, sender events.Outbound, content stri
 type HumanInputOrchestrator struct {
 	registry    *tools.Registry
 	sender      events.Outbound
-	inLoopInbox inbox.Inbox[events.SteerMessage]
+	inLoopInbox inbox.Inbox[events.WorkerEvent]
 	agent       *Agent
 	skills      *tools.SkillLoader
 	cfg         *config.Config
@@ -55,7 +56,7 @@ type HumanInputOrchestrator struct {
 
 func NewHumanInputOrchestrator(
 	sender events.Outbound,
-	inLoopInbox inbox.Inbox[events.SteerMessage],
+	inLoopInbox inbox.Inbox[events.WorkerEvent],
 	agent *Agent,
 	skills *tools.SkillLoader,
 	cfg *config.Config,
@@ -96,18 +97,18 @@ func (o *HumanInputOrchestrator) DispatchTools(ctx context.Context, calls []Tool
 	if err != nil {
 		return nil, err
 	}
-	if inject := o.drainSteer(); inject != nil {
-		slog.Debug("steer injected after tool dispatch", "tools", len(calls))
+	if inject := o.drainInLoopInput(); inject != nil {
+		slog.Debug("in-loop user input injected after tool dispatch", "tools", len(calls))
 		toolMsgs = append(toolMsgs, *inject)
 	}
 	return toolMsgs, nil
 }
 
-func (o *HumanInputOrchestrator) drainSteer() *Message {
+func (o *HumanInputOrchestrator) drainInLoopInput() *Message {
 	if o.inLoopInbox == nil {
 		return nil
 	}
-	var items []events.SteerMessage
+	var items []events.WorkerEvent
 	for {
 		msg, ok := o.inLoopInbox.TryReceive()
 		if ok {
@@ -119,24 +120,37 @@ func (o *HumanInputOrchestrator) drainSteer() *Message {
 	if len(items) == 0 {
 		return nil
 	}
-	plural := "MESSAGE"
-	article := "this message"
-	if len(items) > 1 {
-		plural = "MESSAGES"
-		article = "the following messages"
-	}
 	var sb strings.Builder
-	sb.WriteString("[USER ")
-	sb.WriteString(plural)
-	sb.WriteString(" - INTERRUPTING YOUR CURRENT WORK]\n")
-	sb.WriteString("The user sent ")
-	sb.WriteString(article)
-	sb.WriteString(" while you were working. Read carefully and adjust your plan immediately if it changes what you should do next:\n\n")
-	for _, s := range items {
-		sb.WriteString(s.Text)
-		sb.WriteString("\n\n")
+	sb.WriteString("[USER MESSAGE INTERRUPTING YOUR CURRENT WORK]\n")
+	sb.WriteString("The user sent additional message while you were working. Read carefully and adjust your plan immediately if it changes what you should do next:\n\n")
+	var imageParts []map[string]any
+	for _, item := range items {
+		switch ev := item.(type) {
+		case events.TextInputEvent:
+			sb.WriteString(ev.Message)
+			sb.WriteString("\n\n")
+		case events.ImageInputEvent:
+			if strings.TrimSpace(ev.Message) != "" {
+				sb.WriteString(ev.Message)
+				sb.WriteString("\n\n")
+			}
+			imageParts = append(imageParts, map[string]any{
+				"type": "image_url",
+				"image_url": map[string]any{
+					"url":    fmt.Sprintf("data:%s;base64,%s", ev.MIMEType, base64.StdEncoding.EncodeToString(ev.ImageData)),
+					"detail": "auto",
+				},
+			})
+		}
 	}
-	msg := userMessage(strings.TrimSpace(sb.String()))
+	text := strings.TrimSpace(sb.String())
+	if len(imageParts) == 0 {
+		msg := userMessage(text)
+		return &msg
+	}
+	parts := []map[string]any{{"type": "text", "text": text}}
+	parts = append(parts, imageParts...)
+	msg := Message{"role": "user", "content": parts}
 	return &msg
 }
 

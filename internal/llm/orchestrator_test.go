@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"my-bot/internal/config"
@@ -31,15 +32,15 @@ func (s *mockSender) SendFinal(_ context.Context) {
 func (s *mockSender) StartThinking(_ context.Context) {}
 func (s *mockSender) EndThinking(_ context.Context)   {}
 
-func TestHumanInputOrchestrator_DrainSteer(t *testing.T) {
+func TestHumanInputOrchestrator_DrainInLoopInputTextOnly(t *testing.T) {
 	sender := &mockSender{}
-	steerInbox := inbox.NewMemory[events.SteerMessage](32)
+	inLoopInbox := inbox.NewMemory[events.WorkerEvent](32)
 
-	orch := NewHumanInputOrchestrator(sender, steerInbox, nil, nil, &config.Config{}, nil)
+	orch := NewHumanInputOrchestrator(sender, inLoopInbox, nil, nil, &config.Config{}, nil)
 	orch.Wire(tools.NewRegistry())
 
-	steerInbox.TryPublish(inbox.NewEnvelope("steer", inbox.Address{Kind: "worker", ID: "chat"}, events.SteerMessage{Text: "stop doing that"}))
-	steerInbox.TryPublish(inbox.NewEnvelope("steer", inbox.Address{Kind: "worker", ID: "chat"}, events.SteerMessage{Text: "do this instead"}))
+	inLoopInbox.TryPublish(inbox.NewEnvelope[events.WorkerEvent]("in-loop", inbox.Address{Kind: "worker", ID: "chat"}, events.TextInputEvent{ChatID: "chat", Message: "stop doing that"}))
+	inLoopInbox.TryPublish(inbox.NewEnvelope[events.WorkerEvent]("in-loop", inbox.Address{Kind: "worker", ID: "chat"}, events.TextInputEvent{ChatID: "chat", Message: "do this instead"}))
 
 	calls := []ToolCall{{ID: "c1", Name: "unknown_tool", Args: []byte(`{}`)}}
 	msgs, err := orch.DispatchTools(context.Background(), calls)
@@ -48,16 +49,55 @@ func TestHumanInputOrchestrator_DrainSteer(t *testing.T) {
 	}
 
 	if len(msgs) < 2 {
-		t.Fatalf("expected at least 2 messages (steer + tool result), got %d", len(msgs))
+		t.Fatalf("expected at least 2 messages (in-loop input + tool result), got %d", len(msgs))
 	}
 
-	steerMsg := msgs[1]
-	if steerMsg["role"] != "user" {
-		t.Errorf("expected steer message role=user, got %v", steerMsg["role"])
+	inputMsg := msgs[1]
+	if inputMsg["role"] != "user" {
+		t.Errorf("expected in-loop input role=user, got %v", inputMsg["role"])
 	}
-	content, _ := steerMsg["content"].(string)
-	if content == "" {
-		t.Error("steer message content should not be empty")
+	content, ok := inputMsg["content"].(string)
+	if !ok {
+		t.Fatalf("expected text content, got %T", inputMsg["content"])
+	}
+	if !strings.Contains(content, "stop doing that") || !strings.Contains(content, "do this instead") {
+		t.Fatalf("expected drained text inputs in content, got %q", content)
+	}
+}
+
+func TestHumanInputOrchestrator_DrainInLoopInputWithImageUsesMultipart(t *testing.T) {
+	sender := &mockSender{}
+	inLoopInbox := inbox.NewMemory[events.WorkerEvent](32)
+
+	orch := NewHumanInputOrchestrator(sender, inLoopInbox, nil, nil, &config.Config{}, nil)
+	orch.Wire(tools.NewRegistry())
+
+	inLoopInbox.TryPublish(inbox.NewEnvelope[events.WorkerEvent]("in-loop", inbox.Address{Kind: "worker", ID: "chat"}, events.TextInputEvent{ChatID: "chat", Message: "stop doing that"}))
+	inLoopInbox.TryPublish(inbox.NewEnvelope[events.WorkerEvent]("in-loop", inbox.Address{Kind: "worker", ID: "chat"}, events.ImageInputEvent{ChatID: "chat", Message: "see image", MIMEType: "image/png", ImageData: []byte{1, 2, 3}}))
+
+	calls := []ToolCall{{ID: "c1", Name: "unknown_tool", Args: []byte(`{}`)}}
+	msgs, err := orch.DispatchTools(context.Background(), calls)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(msgs) < 2 {
+		t.Fatalf("expected at least 2 messages (in-loop input + tool result), got %d", len(msgs))
+	}
+
+	inputMsg := msgs[1]
+	if inputMsg["role"] != "user" {
+		t.Errorf("expected in-loop input role=user, got %v", inputMsg["role"])
+	}
+	content, ok := inputMsg["content"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected multimodal content, got %T", inputMsg["content"])
+	}
+	if len(content) != 2 {
+		t.Fatalf("expected text plus image content, got %d parts", len(content))
+	}
+	if content[1]["type"] != "image_url" {
+		t.Fatalf("expected final content part to be image_url, got %+v", content[1])
 	}
 }
 

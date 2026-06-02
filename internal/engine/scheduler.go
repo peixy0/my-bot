@@ -71,7 +71,9 @@ func (s *Scheduler) dispatch(ctx context.Context, ev events.AgentEvent) {
 			s.handleSlashCommand(ctx, cmd, e)
 			return
 		}
-		s.dispatchToWorker(ctx, e.ChatID, e)
+		s.dispatchUserInput(ctx, e.ChatID, e)
+	case events.ImageInputEvent:
+		s.dispatchUserInput(ctx, e.ChatID, e)
 	default:
 		if we, ok := ev.(events.WorkerEvent); ok {
 			s.dispatchToWorker(ctx, chatIDOf(we), we)
@@ -110,20 +112,13 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 		}
 		worker.SetModel(parts[1])
 		e.Sender.Send(ctx, fmt.Sprintf("model set to: %s", parts[1]))
-	case "steer":
-		text := strings.TrimSpace(strings.TrimPrefix(cmd, "steer"))
-		entry, ok := s.workers[e.ChatID]
-		if !ok {
-			e.Sender.Send(ctx, "no active session")
+	case "queue":
+		text := strings.TrimSpace(strings.TrimPrefix(cmd, "queue"))
+		if text == "" {
+			e.Sender.Send(ctx, "usage: /queue <message>")
 			return
 		}
-		if entry.worker.InLoopInbox.TryPublish(steerEnvelope(e.ChatID, events.SteerMessage{
-			MessageID: e.MessageID,
-			Text:      text,
-			Sender:    e.Sender,
-		})) {
-			return
-		}
+		e.Message = text
 		s.dispatchToWorker(ctx, e.ChatID, e)
 	case "dump":
 		entry, ok := s.workers[e.ChatID]
@@ -139,6 +134,15 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 	default:
 		s.dispatchToWorker(ctx, e.ChatID, e)
 	}
+}
+
+func (s *Scheduler) dispatchUserInput(ctx context.Context, chatID string, e events.WorkerEvent) {
+	if entry, ok := s.workers[chatID]; ok {
+		if entry.worker.InLoopInbox.TryPublish(workerEnvelope(chatID, e)) {
+			return
+		}
+	}
+	s.dispatchToWorker(ctx, chatID, e)
 }
 
 func (s *Scheduler) heartbeatInterval(ctx context.Context, args []string, sender events.Outbound) (int, bool) {
