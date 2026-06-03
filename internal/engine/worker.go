@@ -134,6 +134,9 @@ func (w *ConversationWorker) processText(ctx context.Context, ev events.TextInpu
 }
 
 func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageInputEvent) error {
+	if !w.cfg.VisionSupport {
+		return nil
+	}
 	slog.Debug("image input", "chat", w.chatID, "msg_id", ev.MessageID, "mime", ev.MIMEType, "bytes", len(ev.ImageData))
 	prompt := llm.NewMainPrompt(w.skills, w.rt)
 	if err := w.maybeCompress(ctx, prompt); err != nil {

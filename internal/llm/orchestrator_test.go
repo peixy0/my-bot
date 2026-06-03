@@ -69,7 +69,7 @@ func TestHumanInputOrchestrator_DrainInLoopInputWithImageUsesMultipart(t *testin
 	sender := &mockSender{}
 	inLoopInbox := inbox.NewMemory[events.WorkerEvent](32)
 
-	orch := NewHumanInputOrchestrator(sender, inLoopInbox, nil, nil, &config.Config{}, nil)
+	orch := NewHumanInputOrchestrator(sender, inLoopInbox, nil, nil, &config.Config{VisionSupport: true}, nil)
 	orch.Wire(tools.NewRegistry())
 
 	inLoopInbox.TryPublish(inbox.NewEnvelope[events.WorkerEvent]("in-loop", inbox.Address{Kind: "worker", ID: "chat"}, events.TextInputEvent{ChatID: "chat", Message: "stop doing that"}))

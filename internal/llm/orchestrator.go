@@ -128,6 +128,9 @@ func (o *HumanInputOrchestrator) drainInLoopInput() *Message {
 			sb.WriteString(ev.Message)
 			sb.WriteString("\n\n")
 		case events.ImageInputEvent:
+			if !o.cfg.VisionSupport {
+				continue
+			}
 			if strings.TrimSpace(ev.Message) != "" {
 				sb.WriteString(ev.Message)
 				sb.WriteString("\n\n")
