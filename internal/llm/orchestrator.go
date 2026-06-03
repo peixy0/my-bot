@@ -110,11 +110,10 @@ func (o *HumanInputOrchestrator) drainInLoopInput() *Message {
 	var items []events.WorkerEvent
 	for {
 		msg, ok := o.inLoopInbox.TryReceive()
-		if ok {
-			items = append(items, msg.Payload)
-			continue
+		if !ok {
+			break
 		}
-		break
+		items = append(items, msg.Payload)
 	}
 	if len(items) == 0 {
 		return nil
