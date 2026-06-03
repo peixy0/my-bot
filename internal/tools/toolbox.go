@@ -47,6 +47,7 @@ func (d *DefaultToolset) registerWebSearch(r *Registry) {
 	r.Register(ToolSchema{
 		Name:        "web_search",
 		Description: "Search the web for up-to-date information.\n\nUse this tool when you need current information, facts, documentation, or\nanything not in your training data. Returns results with title, URL,\nand a snippet - use fetch() to retrieve the full content of a promising URL.",
+		Parallel:    true,
 		ParameterDesc: (map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -83,6 +84,7 @@ func (d *DefaultToolset) registerFetch(r *Registry) {
 	r.Register(ToolSchema{
 		Name:        "fetch",
 		Description: "Fetch a web page and return its content as clean Markdown text.\n\nUse this when you have a specific URL and need its full content - e.g., to read\ndocumentation, an article, or a search result from web_search(). Returns the\nentire page body; for large pages, focus on the section relevant to your task.",
+		Parallel:    true,
 		ParameterDesc: (map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -113,6 +115,7 @@ func (d *DefaultToolset) registerReadFile(r *Registry) {
 	r.Register(ToolSchema{
 		Name:        "read_file",
 		Description: "Read a text file from the workspace, with optional line-range pagination.\n\nALWAYS use this instead of running cat/head/tail/sed via run_command(). Returns content with 1-based line numbers so you can reference exact locations when using edit_file().\n\nFor large files, paginate with start_line and limit. Do NOT use this for binary files.",
+		Parallel:    true,
 		ParameterDesc: (map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -275,6 +278,7 @@ func (d *DefaultToolset) registerGrep(r *Registry) {
 	r.Register(ToolSchema{
 		Name:        "grep",
 		Description: "Search for a regex pattern across files and return matching lines with context.\n\nALWAYS use this instead of grep/rg via run_command(). For finding files by name/path pattern, use glob().",
+		Parallel:    true,
 		ParameterDesc: (map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -348,6 +352,7 @@ func (d *DefaultToolset) registerGlob(r *Registry) {
 	r.Register(ToolSchema{
 		Name:        "glob",
 		Description: "List workspace files whose paths match a glob pattern.\n\nALWAYS use this instead of find/ls via run_command(). Supports ** for recursive matching.",
+		Parallel:    true,
 		ParameterDesc: (map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -377,6 +382,7 @@ func (d *DefaultToolset) registerReadImage(r *Registry) {
 	r.Register(ToolSchema{
 		Name:        "read_image",
 		Description: "Read an image file and return it as a vision content block.\n\nUse this to inspect screenshots, diagrams, or visual assets. Supported formats: PNG, JPEG, GIF, WebP.",
+		Parallel:    true,
 		ParameterDesc: (map[string]any{
 			"type": "object",
 			"properties": map[string]any{

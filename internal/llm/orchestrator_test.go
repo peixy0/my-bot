@@ -335,7 +335,7 @@ func TestForBackground_HasMetaTools(t *testing.T) {
 	skills := tools.NewSkillLoader("")
 	rt := &nullRuntime{}
 	sender := &mockSender{}
-	cfg := &config.Config{FleetToolEnabled: true}
+	cfg := &config.Config{}
 
 	reg := tools.NewRegistry()
 	orch := NewBackgroundOrchestrator(sender, agent, skills, cfg, rt)

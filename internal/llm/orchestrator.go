@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"my-bot/internal/config"
 	"my-bot/internal/events"
@@ -20,9 +21,7 @@ import (
 
 func wireMetaTools(r *tools.Registry, agent *Agent, skills *tools.SkillLoader, cfg *config.Config, rt runtime.Runtime, _ events.Outbound) {
 	NewSubagentToolset(agent, skills, cfg, rt).Register(r)
-	if cfg.FleetToolEnabled {
-		NewFleetToolset(agent, skills, cfg, rt).Register(r)
-	}
+	NewFleetToolset(agent, skills, cfg, rt).Register(r)
 }
 
 type Orchestrator interface {
@@ -396,28 +395,46 @@ func (s *FleetToolset) Register(r *tools.Registry) {
 	})
 }
 
+func execOne(ctx context.Context, r *tools.Registry, tc ToolCall) Message {
+	handler, ok := r.Handler(tc.Name)
+	if !ok {
+		return toolResultMessage(tc.ID, fmt.Sprintf("unknown tool %q", tc.Name))
+	}
+	slog.Debug("tool call start", "tool", tc.Name, "id", tc.ID, "args", string(tc.Args))
+	result, err := handler(ctx, tc.Args)
+	if err != nil {
+		slog.Debug("tool call error", "tool", tc.Name, "id", tc.ID, "err", err)
+		return toolResultMessage(tc.ID, fmt.Sprintf("error: %v", err))
+	}
+	slog.Debug("tool call done", "tool", tc.Name, "id", tc.ID, "result", result.Text)
+	if result.Blocks != nil {
+		return toolResultBlocksMessage(tc.ID, result.Blocks)
+	}
+	return toolResultMessage(tc.ID, result.Text)
+}
+
 func runDispatch(ctx context.Context, r *tools.Registry, calls []ToolCall) ([]Message, error) {
 	msgs := make([]Message, len(calls))
-	for i, tc := range calls {
-		handler, ok := r.Handler(tc.Name)
-		if !ok {
-			slog.Debug("tool call: unknown tool", "tool", tc.Name, "id", tc.ID)
-			msgs[i] = toolResultMessage(tc.ID, fmt.Sprintf("unknown tool %q", tc.Name))
-			continue
-		}
-		slog.Debug("tool call start", "tool", tc.Name, "id", tc.ID, "args", string(tc.Args))
-		result, err := handler(ctx, tc.Args)
-		if err != nil {
-			slog.Debug("tool call error", "tool", tc.Name, "id", tc.ID, "err", err)
-			msgs[i] = toolResultMessage(tc.ID, fmt.Sprintf("error: %v", err))
-			continue
-		}
-		slog.Debug("tool call done", "tool", tc.Name, "id", tc.ID, "result", result.Text)
-		if result.Blocks != nil {
-			msgs[i] = toolResultBlocksMessage(tc.ID, result.Blocks)
-		} else {
-			msgs[i] = toolResultMessage(tc.ID, result.Text)
-		}
+
+	if len(calls) == 1 {
+		msgs[0] = execOne(ctx, r, calls[0])
+		return msgs, nil
 	}
-	return msgs, nil
+
+	var seqMu sync.Mutex
+	g, gctx := errgroup.WithContext(ctx)
+	for i, tc := range calls {
+		i, tc := i, tc
+		g.Go(func() error {
+			if r.IsParallel(tc.Name) {
+				msgs[i] = execOne(gctx, r, tc)
+			} else {
+				seqMu.Lock()
+				msgs[i] = execOne(gctx, r, tc)
+				seqMu.Unlock()
+			}
+			return nil
+		})
+	}
+	return msgs, g.Wait()
 }

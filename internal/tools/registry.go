@@ -30,6 +30,7 @@ type ToolSchema struct {
 	Name          string
 	Description   string
 	ParameterDesc map[string]any
+	Parallel      bool
 }
 
 type ToolRegistrar interface {
@@ -64,6 +65,11 @@ func (r *Registry) RegisterToolset(t Toolset) {
 func (r *Registry) Handler(name string) (ToolHandler, bool) {
 	h, ok := r.handlers[name]
 	return h, ok
+}
+
+func (r *Registry) IsParallel(name string) bool {
+	s, ok := r.schemas[name]
+	return ok && s.Parallel
 }
 
 func (r *Registry) Schema(name string) (ToolSchema, bool) {

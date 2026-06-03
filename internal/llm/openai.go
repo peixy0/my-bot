@@ -68,6 +68,7 @@ func (p *OpenAIProvider) doComplete(ctx context.Context, req CompletionRequest) 
 	}
 	if len(req.Tools) > 0 {
 		body["tools"] = req.Tools
+		body["parallel_tool_calls"] = true
 	}
 
 	payload, err := util.ToJSON(body)

@@ -43,8 +43,6 @@ type Config struct {
 	VisionSupport     bool
 	MaxImageSizeBytes int
 
-	FleetToolEnabled bool
-
 	WebUIEnabled bool
 	WebUIHost    string
 	WebUIPort    int
@@ -87,8 +85,6 @@ func Load() (*Config, error) {
 
 		VisionSupport:     getEnvBool("VISION_SUPPORT", false),
 		MaxImageSizeBytes: getEnvInt("MAX_IMAGE_SIZE_BYTES", 5*1024*1024),
-
-		FleetToolEnabled: getEnvBool("FLEET_TOOL_ENABLED", false),
 
 		WebUIEnabled: getEnvBool("WEBUI_ENABLED", true),
 		WebUIHost:    getEnv("WEBUI_HOST", "127.0.0.1"),

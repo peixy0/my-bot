@@ -92,15 +92,12 @@ func main() {
 }
 
 func buildRuntime(cfg *config.Config) runtime.Runtime {
-	if cfg.ContainerName != "" {
+	if cfg.ContainerName != "" && cfg.ContainerRuntime != "" {
 		bin := cfg.ContainerRuntime
-		if bin == "" {
-			bin = "podman"
-		}
 		rt, err := runtime.NewContainerRuntime(cfg.ContainerName, bin, "/workspace", cfg.MaxOutputChars)
 		if err != nil {
-			slog.Warn("container runtime unavailable, falling back to host", "err", err)
-			return runtime.NewHostRuntime(cfg.MaxOutputChars)
+			slog.Error("container runtime unavailable", "err", err)
+			os.Exit(1)
 		}
 		slog.Info("using container runtime", "container", cfg.ContainerName)
 		return rt
