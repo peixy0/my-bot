@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 
 	"my-bot/internal/config"
 	"my-bot/internal/tools"
@@ -13,28 +12,14 @@ import (
 
 type Agent struct {
 	client CompletionClient
-	mu     sync.RWMutex
-	model  string
 }
 
-func NewAgent(client CompletionClient, model string) *Agent {
-	return &Agent{client: client, model: model}
+func NewAgent(client CompletionClient) *Agent {
+	return &Agent{client: client}
 }
 
 func (a *Agent) Fork() *Agent {
-	return NewAgent(a.client, a.Model())
-}
-
-func (a *Agent) Model() string {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.model
-}
-
-func (a *Agent) SetModel(model string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.model = model
+	return NewAgent(a.client)
 }
 
 func (a *Agent) Run(
@@ -51,7 +36,7 @@ func (a *Agent) Run(
 
 	for {
 		allMessages := append(systemMessages, conv.Messages...)
-		model := a.Model()
+		model := cfg.OpenAIModel
 		slog.Debug("llm request", "model", model, "messages", len(allMessages), "tools", len(reg.Schemas()))
 		resp, err := a.client.Complete(ctx, CompletionRequest{
 			Model:          model,
@@ -82,7 +67,7 @@ func (a *Agent) Run(
 
 		if cfg.ContextAutoCompressionEnabled && int(conv.TotalTokens) >= int(float64(cfg.ContextMaxTokens)*cfg.ContextCompressionThreshold) {
 			slog.Debug("context compression triggered", "tokens", conv.TotalTokens, "max", cfg.ContextMaxTokens)
-			if err := a.Compress(ctx, systemPrompt, conv); err != nil {
+			if err := a.Compress(ctx, cfg, systemPrompt, conv); err != nil {
 				return fmt.Errorf("compress: %w", err)
 			}
 			slog.Debug("context compression done", "tokens", conv.TotalTokens)
@@ -97,7 +82,7 @@ func (a *Agent) Run(
 	}
 }
 
-func (a *Agent) Compress(ctx context.Context, systemPrompt string, conv *Conversation) error {
+func (a *Agent) Compress(ctx context.Context, cfg *config.Config, systemPrompt string, conv *Conversation) error {
 	if len(conv.Messages) < 2 {
 		return nil
 	}
@@ -107,7 +92,7 @@ func (a *Agent) Compress(ctx context.Context, systemPrompt string, conv *Convers
 
 	compressMessages := buildCompressionMessages(systemPrompt, toEvict)
 	resp, err := a.client.Complete(ctx, CompletionRequest{
-		Model:    a.Model(),
+		Model:    cfg.OpenAIModel,
 		Messages: compressMessages,
 	})
 	if err != nil {

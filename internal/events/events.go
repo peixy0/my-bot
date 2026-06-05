@@ -49,6 +49,24 @@ type NewSessionEvent struct {
 	Sender Outbound
 }
 
+const (
+	ConfigKeyModel  = "model"
+	ConfigKeyVision = "vision"
+)
+
+type ConfigQueryEvent struct {
+	ChatID string
+	Key    string
+	Sender Outbound
+}
+
+type ConfigChangeEvent struct {
+	ChatID string
+	Key    string
+	Value  string
+	Sender Outbound
+}
+
 type DropSessionEvent struct {
 	ChatID string
 }
@@ -62,9 +80,11 @@ func (CronEvent) agentEvent()        {}
 func (DumpCommand) agentEvent()      {}
 func (DropSessionEvent) agentEvent() {}
 
-func (TextInputEvent) workerEvent()  {}
-func (ImageInputEvent) workerEvent() {}
-func (HeartbeatEvent) workerEvent()  {}
-func (CronEvent) workerEvent()       {}
-func (NewSessionEvent) workerEvent() {}
-func (DumpCommand) workerEvent()     {}
+func (TextInputEvent) workerEvent()    {}
+func (ImageInputEvent) workerEvent()   {}
+func (HeartbeatEvent) workerEvent()    {}
+func (CronEvent) workerEvent()         {}
+func (NewSessionEvent) workerEvent()   {}
+func (ConfigQueryEvent) workerEvent()  {}
+func (ConfigChangeEvent) workerEvent() {}
+func (DumpCommand) workerEvent()       {}

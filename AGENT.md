@@ -108,7 +108,7 @@ These are non-obvious decisions worth preserving. If you're tempted to "fix" one
 
 - **Single-goroutine Scheduler dispatch.** `Scheduler.workers` and `cronWorkers` are deliberately unprotected by mutex. The invariant: only `Run()` reads/writes them. If you ever need access from elsewhere, send an event into the queue rather than introducing a lock. The maps are documented in `scheduler.go`.
 - **Per-chat ConversationWorker isolation.** Each chat has its own goroutine, its own `Events` channel, and its own conversation state. No cross-chat sharing means no cross-chat synchronization.
-- **Per-worker model selection.** `Scheduler` keeps one base `Agent` for dependency wiring, but each `ConversationWorker` forks its own `Agent`; `/model` changes only that worker's model.
+- **Per-worker model and vision selection.** `Scheduler` keeps one base `Agent` for dependency wiring, but each `ConversationWorker` owns its config copy; `/model` and `/vision` change only that worker's config.
 - **Live user input uses a separate in-loop input inbox, not the worker queue.** While an agent loop is running, ordinary text/images are routed as non-blocking interrupts with a `default` fallthrough; `/queue` forces the worker queue for handling after the current loop finishes.
 - **Three orchestrator variants instead of mode flags.** Strategy pattern keeps each orchestrator's responsibility crisp; we'd rather grow a fourth variant than feature-flag an existing one.
 - **Raw `net/http` for LLM calls, no SDK.** The OpenAI-compatible provider serializes messages and tools as `map[string]any` and consumes streaming chat-completion events directly. Don't reintroduce `openai-go`.
@@ -145,7 +145,7 @@ These are the load-bearing invariants that an earlier draft expressed via inline
 - `CronWorker.jobs` is mutated only from the Scheduler goroutine. The `cron.Cron` library invokes registered funcs on its own goroutines, but those funcs only send on `workerCh` — they never touch the `jobs` map. No mutex.
 - `messaging.dedup` is the canonical example of the channel-as-single-owner pattern: one goroutine owns the `expires` map and `order` slice; all callers reach it via the request channel `dedup.in`. The goroutine dies cleanly when the inbound context is cancelled. If `dedup.check` cannot reach the goroutine within 1s, it fails open (returns true) — under shutdown we'd rather risk a duplicate than a deadlock.
 - `ConversationWorker.heartbeatTimer` is a `time.AfterFunc` that may outlive normal event processing. It is `Stop()`-ed at the top of every event-loop iteration and once more in `shutdown()`.
-- `ConversationWorker.agent` is worker-local. `Scheduler.agent` is the startup default and should not be mutated by slash commands.
+- `ConversationWorker.cfg` owns per-chat model and vision settings. `Scheduler.agent` is dependency wiring only and should not be mutated by slash commands.
 - The Feishu image-download goroutine is fire-and-forget but every error path logs at `Warn` and surfaces a single user-visible failure message via `outbound.Send`. Don't add new fire-and-forget paths without the same discipline.
 
 ### Configuration

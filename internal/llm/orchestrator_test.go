@@ -209,7 +209,7 @@ func TestSubagentToolset_DoesNotForwardSubagentToolContent(t *testing.T) {
 			{Content: "subagent result", FinishReason: "stop", TotalTokens: 20},
 		},
 	}
-	agent := NewAgent(client, "m")
+	agent := NewAgent(client)
 	skills := tools.NewSkillLoader("")
 	rt := &nullRuntime{}
 	sender := &mockSender{}
@@ -246,7 +246,7 @@ func TestSubagentTaskCarriesAgentID(t *testing.T) {
 }
 
 func TestFleetToolset_ReturnsResultsInTaskOrder(t *testing.T) {
-	agent := NewAgent(&echoTaskClient{}, "m")
+	agent := NewAgent(&echoTaskClient{})
 	skills := tools.NewSkillLoader("")
 	rt := &nullRuntime{}
 	cfg := &config.Config{MaxOutputChars: 1000}
@@ -331,7 +331,7 @@ func TestForBackground_HasMetaTools(t *testing.T) {
 			{Content: "done", FinishReason: "stop", TotalTokens: 10},
 		},
 	}
-	agent := NewAgent(client, "m")
+	agent := NewAgent(client)
 	skills := tools.NewSkillLoader("")
 	rt := &nullRuntime{}
 	sender := &mockSender{}

@@ -29,6 +29,9 @@ type ConversationWorker struct {
 	skills *tools.SkillLoader
 	loop   *llm.AgentLoop
 
+	cmdTools *tools.CommandToolset
+	reg      *tools.Registry
+
 	Events      *inbox.Memory[events.WorkerEvent]
 	InLoopInbox *inbox.Memory[events.WorkerEvent]
 
@@ -43,30 +46,46 @@ func NewConversationWorker(
 	rt runtime.Runtime,
 	skills *tools.SkillLoader,
 ) *ConversationWorker {
+	workerCfg := *cfg
 	workerAgent := agent.Fork()
-	cmdTools := tools.NewCommandToolset(rt, cfg.MaxOutputChars)
-	reg := tools.NewRegistry()
-	reg.RegisterToolset(tools.NewDefaultToolset(rt, skills, cfg))
-	reg.RegisterToolset(cmdTools)
-
-	return &ConversationWorker{
+	cmdTools := tools.NewCommandToolset(rt, workerCfg.MaxOutputChars)
+	w := &ConversationWorker{
 		chatID:      chatID,
-		cfg:         cfg,
+		cfg:         &workerCfg,
 		agent:       workerAgent,
 		rt:          rt,
 		skills:      skills,
-		loop:        llm.NewAgentLoop(cfg, workerAgent, reg, cmdTools),
+		cmdTools:    cmdTools,
 		Events:      inbox.NewMemory[events.WorkerEvent](workerEventBuf),
 		InLoopInbox: inbox.NewMemory[events.WorkerEvent](inLoopInboxBuf),
 	}
+	w.reg = w.newRegistry()
+	w.loop = llm.NewAgentLoop(w.cfg, workerAgent, cmdTools)
+	return w
 }
 
 func (w *ConversationWorker) Model() string {
-	return w.agent.Model()
+	return w.cfg.OpenAIModel
 }
 
 func (w *ConversationWorker) SetModel(model string) {
-	w.agent.SetModel(model)
+	w.cfg.OpenAIModel = model
+}
+
+func (w *ConversationWorker) VisionSupported() bool {
+	return w.cfg.VisionSupport
+}
+
+func (w *ConversationWorker) SetVisionSupported(enabled bool) {
+	w.cfg.VisionSupport = enabled
+	w.reg = w.newRegistry()
+}
+
+func (w *ConversationWorker) newRegistry() *tools.Registry {
+	reg := tools.NewRegistry()
+	reg.RegisterToolset(tools.NewDefaultToolset(w.rt, w.skills, w.cfg))
+	reg.RegisterToolset(w.cmdTools)
+	return reg
 }
 
 func (w *ConversationWorker) Run(ctx context.Context) error {
@@ -95,6 +114,7 @@ func (w *ConversationWorker) Run(ctx context.Context) error {
 			w.stopHeartbeat()
 			if err := w.handleEvent(ctx, e); err != nil {
 				slog.Error("in-loop input", "chat", w.chatID, "err", err)
+				w.reportError(ctx, err, e)
 			}
 			w.scheduleHeartbeat()
 		case <-ctx.Done():
@@ -116,6 +136,10 @@ func (w *ConversationWorker) handleEvent(ctx context.Context, e events.WorkerEve
 		return w.processCron(ctx, ev)
 	case events.NewSessionEvent:
 		return w.processNewSession(ctx, ev)
+	case events.ConfigQueryEvent:
+		return w.processConfigQuery(ctx, ev)
+	case events.ConfigChangeEvent:
+		return w.processConfigChange(ctx, ev)
 	default:
 		return fmt.Errorf("unexpected event type %T", e)
 	}
@@ -130,11 +154,11 @@ func (w *ConversationWorker) processText(ctx context.Context, ev events.TextInpu
 	orch := llm.NewHumanInputOrchestrator(ev.Sender, w.InLoopInbox, w.agent, w.skills, w.cfg, w.rt)
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
-	return w.loop.Run(ctx, orch, prompt, wrapUserMessage(ev.Message))
+	return w.loop.Run(ctx, w.reg, orch, prompt, wrapUserMessage(ev.Message))
 }
 
 func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageInputEvent) error {
-	if !w.cfg.VisionSupport {
+	if !w.VisionSupported() {
 		return nil
 	}
 	slog.Debug("image input", "chat", w.chatID, "msg_id", ev.MessageID, "mime", ev.MIMEType, "bytes", len(ev.ImageData))
@@ -155,7 +179,7 @@ func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageIn
 	orch := llm.NewHumanInputOrchestrator(ev.Sender, w.InLoopInbox, w.agent, w.skills, w.cfg, w.rt)
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
-	return w.loop.Run(ctx, orch, prompt, content)
+	return w.loop.Run(ctx, w.reg, orch, prompt, content)
 }
 
 func (w *ConversationWorker) processHeartbeat(ctx context.Context, ev events.HeartbeatEvent) error {
@@ -179,10 +203,40 @@ func (w *ConversationWorker) processNewSession(ctx context.Context, ev events.Ne
 	return nil
 }
 
+func (w *ConversationWorker) processConfigQuery(ctx context.Context, ev events.ConfigQueryEvent) error {
+	switch ev.Key {
+	case events.ConfigKeyModel:
+		ev.Sender.Send(ctx, fmt.Sprintf("current model: %s", w.Model()))
+	case events.ConfigKeyVision:
+		ev.Sender.Send(ctx, fmt.Sprintf("current vision: %s", onOff(w.VisionSupported())))
+	}
+	return nil
+}
+
+func (w *ConversationWorker) processConfigChange(ctx context.Context, ev events.ConfigChangeEvent) error {
+	switch ev.Key {
+	case events.ConfigKeyModel:
+		w.SetModel(ev.Value)
+		ev.Sender.Send(ctx, fmt.Sprintf("model set to: %s", ev.Value))
+	case events.ConfigKeyVision:
+		switch ev.Value {
+		case "on":
+			w.SetVisionSupported(true)
+			ev.Sender.Send(ctx, "vision set to: on")
+		case "off":
+			w.SetVisionSupported(false)
+			ev.Sender.Send(ctx, "vision set to: off")
+		default:
+			ev.Sender.Send(ctx, "usage: /vision on|off")
+		}
+	}
+	return nil
+}
+
 func (w *ConversationWorker) runBackground(ctx context.Context, sender events.Outbound, prompt llm.SystemPrompt, content any) error {
 	orch := llm.NewBackgroundOrchestrator(sender, w.agent, w.skills, w.cfg, w.rt)
 	w.loop.ResetConv()
-	return w.loop.Run(ctx, orch, prompt, content)
+	return w.loop.Run(ctx, w.reg, orch, prompt, content)
 }
 
 func (w *ConversationWorker) maybeCompress(ctx context.Context, prompt llm.SystemPrompt) error {
@@ -223,6 +277,10 @@ func (w *ConversationWorker) reportError(ctx context.Context, err error, e event
 	case events.TextInputEvent:
 		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
 	case events.ImageInputEvent:
+		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
+	case events.ConfigQueryEvent:
+		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
+	case events.ConfigChangeEvent:
 		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
 	}
 }

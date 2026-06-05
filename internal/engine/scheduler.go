@@ -105,13 +105,35 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 		s.dropWorker(e.ChatID)
 		e.Sender.Send(ctx, fmt.Sprintf("dropped session: %s", e.ChatID))
 	case "model":
-		worker := s.getOrCreate(ctx, e.ChatID)
 		if len(parts) < 2 {
-			e.Sender.Send(ctx, fmt.Sprintf("current model: %s", worker.Model()))
+			s.dispatchToWorker(ctx, e.ChatID, events.ConfigQueryEvent{
+				ChatID: e.ChatID,
+				Key:    events.ConfigKeyModel,
+				Sender: e.Sender,
+			})
 			return
 		}
-		worker.SetModel(parts[1])
-		e.Sender.Send(ctx, fmt.Sprintf("model set to: %s", parts[1]))
+		s.dispatchToWorker(ctx, e.ChatID, events.ConfigChangeEvent{
+			ChatID: e.ChatID,
+			Key:    events.ConfigKeyModel,
+			Value:  parts[1],
+			Sender: e.Sender,
+		})
+	case "vision":
+		if len(parts) < 2 {
+			s.dispatchToWorker(ctx, e.ChatID, events.ConfigQueryEvent{
+				ChatID: e.ChatID,
+				Key:    events.ConfigKeyVision,
+				Sender: e.Sender,
+			})
+			return
+		}
+		s.dispatchToWorker(ctx, e.ChatID, events.ConfigChangeEvent{
+			ChatID: e.ChatID,
+			Key:    events.ConfigKeyVision,
+			Value:  parts[1],
+			Sender: e.Sender,
+		})
 	case "queue":
 		text := strings.TrimSpace(strings.TrimPrefix(cmd, "queue"))
 		if text == "" {
@@ -284,6 +306,13 @@ func isSlashCommand(msg string) (string, bool) {
 	return strings.TrimPrefix(msg, "/"), true
 }
 
+func onOff(enabled bool) string {
+	if enabled {
+		return "on"
+	}
+	return "off"
+}
+
 func chatIDOf(e events.WorkerEvent) string {
 	switch ev := e.(type) {
 	case events.TextInputEvent:
@@ -295,6 +324,10 @@ func chatIDOf(e events.WorkerEvent) string {
 	case events.CronEvent:
 		return ev.ChatID
 	case events.NewSessionEvent:
+		return ev.ChatID
+	case events.ConfigQueryEvent:
+		return ev.ChatID
+	case events.ConfigChangeEvent:
 		return ev.ChatID
 	}
 	return ""

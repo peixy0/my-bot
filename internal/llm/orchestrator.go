@@ -317,8 +317,8 @@ func runSubagentTask(
 	reg.RegisterToolset(tools.NewDefaultToolset(rt, skills, cfg))
 	reg.RegisterToolset(cmdTools)
 	orch := NewSubagentOrchestrator()
-	loop := NewAgentLoop(cfg, agent, reg, cmdTools)
-	if err := loop.Run(ctx, orch, NewSubagentPrompt(skills, rt, task.SystemPrompt), task.Task); err != nil {
+	loop := NewAgentLoop(cfg, agent, cmdTools)
+	if err := loop.Run(ctx, reg, orch, NewSubagentPrompt(skills, rt, task.SystemPrompt), task.Task); err != nil {
 		result.Error = err.Error()
 		return result, err
 	}

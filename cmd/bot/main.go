@@ -49,7 +49,7 @@ func main() {
 	skills := tools.NewSkillLoader(cfg.SkillsDir)
 
 	llmClient := buildLLMClient(cfg)
-	agent := llm.NewAgent(llmClient, effectiveModel(cfg))
+	agent := llm.NewAgent(llmClient)
 
 	mainInbox := inbox.NewMemory[events.AgentEvent](256)
 
@@ -84,7 +84,7 @@ func main() {
 	cronLoader := engine.NewCronLoader(cfg.CronsDir)
 	scheduler := engine.NewScheduler(cfg, agent, rt, skills, mainInbox, cronLoader)
 
-	slog.Info("bot started", "model", agent.Model())
+	slog.Info("bot started", "model", cfg.OpenAIModel)
 	if err := scheduler.Run(ctx); err != nil && err != context.Canceled {
 		slog.Error("scheduler", "err", err)
 		os.Exit(1)
@@ -108,8 +108,4 @@ func buildRuntime(cfg *config.Config) runtime.Runtime {
 
 func buildLLMClient(cfg *config.Config) llm.CompletionClient {
 	return llm.NewOpenAIProvider(cfg.OpenAIBaseURL, cfg.OpenAIAPIKey)
-}
-
-func effectiveModel(cfg *config.Config) string {
-	return cfg.OpenAIModel
 }

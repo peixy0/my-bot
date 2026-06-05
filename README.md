@@ -58,6 +58,7 @@ While chatting with the bot:
 | `/drop` | Drop the current session and worker |
 | `/heartbeat [seconds]` | Begin autonomous heartbeat cycles in this chat, optionally overriding `WAKE_INTERVAL_SECONDS` |
 | `/model <name>` | Switch the active LLM model for the current chat/session |
+| `/vision on|off` | Toggle image input support for the current chat/session |
 | `/queue <text>` | Queue a message to run after the current agent loop finishes |
 | `/cron load <name>` | Reload cron tasks defined in `.cron/<name>/*.md` |
 | `/cron unload <name>` | Stop a loaded cron job |

@@ -7,6 +7,7 @@ import (
 	"my-bot/internal/config"
 	"my-bot/internal/events"
 	"my-bot/internal/inbox"
+	"my-bot/internal/llm"
 )
 
 type captureOutbound struct {
@@ -25,6 +26,10 @@ func (o *captureOutbound) SendFinal(context.Context) {}
 
 func (o *captureOutbound) StartThinking(context.Context) {}
 func (o *captureOutbound) EndThinking(context.Context)   {}
+
+func newConfigTestWorker(cfg *config.Config) *ConversationWorker {
+	return NewConversationWorker("chat-1", cfg, llm.NewAgent(nil), nil, nil)
+}
 
 func TestSchedulerHeartbeatInterval(t *testing.T) {
 	s := &Scheduler{cfg: &config.Config{WakeIntervalSeconds: 1800}}
@@ -208,6 +213,158 @@ func TestSchedulerQueueCommandQueuesWithExistingWorker(t *testing.T) {
 	}
 	if worker.InLoopInbox.Len() != 0 {
 		t.Fatalf("expected in-loop inbox to stay empty, got %d", worker.InLoopInbox.Len())
+	}
+}
+
+func TestSchedulerModelCommandQueuesConfigChange(t *testing.T) {
+	worker := &ConversationWorker{
+		Events:      inbox.NewMemory[events.WorkerEvent](1),
+		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
+	}
+	s := &Scheduler{
+		workers: map[string]*workerEntry{
+			"chat-1": {worker: worker},
+		},
+	}
+
+	s.handleSlashCommand(context.Background(), "model gpt-test", events.TextInputEvent{
+		ChatID: "chat-1",
+		Sender: &captureOutbound{},
+	})
+
+	msg, err := worker.Events.Receive(context.Background())
+	if err != nil {
+		t.Fatalf("receive config event: %v", err)
+	}
+	ev, ok := msg.Payload.(events.ConfigChangeEvent)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", msg.Payload)
+	}
+	if ev.Key != events.ConfigKeyModel || ev.Value != "gpt-test" {
+		t.Fatalf("unexpected model event: %+v", ev)
+	}
+}
+
+func TestSchedulerVisionCommandReportsCurrentSetting(t *testing.T) {
+	worker := newConfigTestWorker(&config.Config{VisionSupport: true, MaxOutputChars: 1000})
+	out := &captureOutbound{}
+	s := &Scheduler{
+		workers: map[string]*workerEntry{
+			"chat-1": {worker: worker},
+		},
+	}
+
+	s.handleSlashCommand(context.Background(), "vision", events.TextInputEvent{
+		ChatID: "chat-1",
+		Sender: out,
+	})
+
+	msg, err := worker.Events.Receive(context.Background())
+	if err != nil {
+		t.Fatalf("receive config event: %v", err)
+	}
+	ev, ok := msg.Payload.(events.ConfigQueryEvent)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", msg.Payload)
+	}
+	if ev.Key != events.ConfigKeyVision {
+		t.Fatalf("unexpected query key: %q", ev.Key)
+	}
+	if err := worker.processConfigQuery(context.Background(), ev); err != nil {
+		t.Fatalf("process config query: %v", err)
+	}
+	if len(out.messages) != 1 || out.messages[0] != "current vision: on" {
+		t.Fatalf("unexpected response: %v", out.messages)
+	}
+}
+
+func TestSchedulerVisionCommandTogglesWorkerSetting(t *testing.T) {
+	worker := newConfigTestWorker(&config.Config{MaxOutputChars: 1000})
+	out := &captureOutbound{}
+	s := &Scheduler{
+		workers: map[string]*workerEntry{
+			"chat-1": {worker: worker},
+		},
+	}
+
+	s.handleSlashCommand(context.Background(), "vision on", events.TextInputEvent{
+		ChatID: "chat-1",
+		Sender: out,
+	})
+	msg, err := worker.Events.Receive(context.Background())
+	if err != nil {
+		t.Fatalf("receive config event: %v", err)
+	}
+	ev, ok := msg.Payload.(events.ConfigChangeEvent)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", msg.Payload)
+	}
+	if ev.Key != events.ConfigKeyVision || ev.Value != "on" {
+		t.Fatalf("unexpected vision event: %+v", ev)
+	}
+	if err := worker.processConfigChange(context.Background(), ev); err != nil {
+		t.Fatalf("process config change: %v", err)
+	}
+	if !worker.VisionSupported() {
+		t.Fatal("expected vision to be enabled")
+	}
+
+	s.handleSlashCommand(context.Background(), "vision off", events.TextInputEvent{
+		ChatID: "chat-1",
+		Sender: out,
+	})
+	msg, err = worker.Events.Receive(context.Background())
+	if err != nil {
+		t.Fatalf("receive config event: %v", err)
+	}
+	ev, ok = msg.Payload.(events.ConfigChangeEvent)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", msg.Payload)
+	}
+	if ev.Key != events.ConfigKeyVision || ev.Value != "off" {
+		t.Fatalf("unexpected vision event: %+v", ev)
+	}
+	if err := worker.processConfigChange(context.Background(), ev); err != nil {
+		t.Fatalf("process config change: %v", err)
+	}
+	if worker.VisionSupported() {
+		t.Fatal("expected vision to be disabled")
+	}
+	if len(out.messages) != 2 || out.messages[0] != "vision set to: on" || out.messages[1] != "vision set to: off" {
+		t.Fatalf("unexpected responses: %v", out.messages)
+	}
+}
+
+func TestWorkerVisionConfigChangeRejectsInvalidValue(t *testing.T) {
+	worker := newConfigTestWorker(&config.Config{MaxOutputChars: 1000})
+	out := &captureOutbound{}
+	s := &Scheduler{
+		workers: map[string]*workerEntry{
+			"chat-1": {worker: worker},
+		},
+	}
+
+	s.handleSlashCommand(context.Background(), "vision maybe", events.TextInputEvent{
+		ChatID: "chat-1",
+		Sender: out,
+	})
+
+	msg, err := worker.Events.Receive(context.Background())
+	if err != nil {
+		t.Fatalf("receive config event: %v", err)
+	}
+	ev, ok := msg.Payload.(events.ConfigChangeEvent)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", msg.Payload)
+	}
+	if err := worker.processConfigChange(context.Background(), ev); err != nil {
+		t.Fatalf("process config change: %v", err)
+	}
+	if worker.VisionSupported() {
+		t.Fatal("expected invalid value to leave vision disabled")
+	}
+	if len(out.messages) != 1 || out.messages[0] != "usage: /vision on|off" {
+		t.Fatalf("unexpected response: %v", out.messages)
 	}
 }
 

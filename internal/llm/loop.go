@@ -13,16 +13,14 @@ import (
 type AgentLoop struct {
 	cfg      *config.Config
 	agent    *Agent
-	reg      *tools.Registry
 	cmdTools *tools.CommandToolset
 	conv     *Conversation
 }
 
-func NewAgentLoop(cfg *config.Config, agent *Agent, reg *tools.Registry, cmdTools *tools.CommandToolset) *AgentLoop {
+func NewAgentLoop(cfg *config.Config, agent *Agent, cmdTools *tools.CommandToolset) *AgentLoop {
 	return &AgentLoop{
 		cfg:      cfg,
 		agent:    agent,
-		reg:      reg,
 		cmdTools: cmdTools,
 		conv:     NewConversation(),
 	}
@@ -32,15 +30,15 @@ func (l *AgentLoop) TotalTokens() int64 { return l.conv.TotalTokens }
 
 func (l *AgentLoop) ResetConv() { l.conv = NewConversation() }
 
-func (l *AgentLoop) Run(ctx context.Context, orch Orchestrator, prompt SystemPrompt, content any) error {
-	r := l.reg.Fork()
+func (l *AgentLoop) Run(ctx context.Context, reg *tools.Registry, orch Orchestrator, prompt SystemPrompt, content any) error {
+	r := reg.Fork()
 	orch.Wire(r)
 	l.conv.Messages = append(l.conv.Messages, Message{"role": "user", "content": content})
 	return l.agent.Run(ctx, l.cfg, prompt.Build(ctx), l.conv, orch, r)
 }
 
 func (l *AgentLoop) Compress(ctx context.Context, prompt SystemPrompt) error {
-	return l.agent.Compress(ctx, prompt.Build(ctx), l.conv)
+	return l.agent.Compress(ctx, l.cfg, prompt.Build(ctx), l.conv)
 }
 
 func (l *AgentLoop) Shutdown(ctx context.Context) error {

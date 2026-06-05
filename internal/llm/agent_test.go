@@ -108,12 +108,12 @@ func TestAgent_ToolCallDispatch(t *testing.T) {
 		},
 	}
 
-	agent := NewAgent(client, "test-model")
+	agent := NewAgent(client)
 	conv := NewConversation()
 	conv.Messages = append(conv.Messages, userMessage("do something"))
 	orch := newMockOrchestrator()
 
-	err := agent.Run(context.Background(), &config.Config{}, "sys", conv, orch, tools.NewRegistry())
+	err := agent.Run(context.Background(), &config.Config{OpenAIModel: "test-model"}, "sys", conv, orch, tools.NewRegistry())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -146,12 +146,12 @@ func TestAgent_BeforeToolUseErrorNonFatal(t *testing.T) {
 		},
 	}
 
-	agent := NewAgent(client, "test-model")
+	agent := NewAgent(client)
 	conv := NewConversation()
 	conv.Messages = append(conv.Messages, userMessage("hi"))
 	orch := newMockOrchestrator()
 
-	err := agent.Run(context.Background(), &config.Config{}, "sys", conv, orch, tools.NewRegistry())
+	err := agent.Run(context.Background(), &config.Config{OpenAIModel: "test-model"}, "sys", conv, orch, tools.NewRegistry())
 	if err != nil {
 		t.Fatalf("error should not propagate, got: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 		},
 	}
 
-	agent := NewAgent(client, "test-model")
+	agent := NewAgent(client)
 	conv := NewConversation()
 	conv.Messages = append(conv.Messages, userMessage("start"))
 	orch := newMockOrchestrator()
@@ -185,6 +185,7 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 	)
 
 	cfg := &config.Config{
+		OpenAIModel:                   "test-model",
 		ContextAutoCompressionEnabled: true,
 		ContextMaxTokens:              8000,
 		ContextCompressionThreshold:   1.0,
