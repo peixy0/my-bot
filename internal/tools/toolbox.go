@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -102,12 +104,65 @@ func (d *DefaultToolset) registerFetch(r *Registry) {
 		if err := json.Unmarshal(args, &p); err != nil {
 			return ToolResult{}, err
 		}
-		md, err := fetchMarkdown(ctx, p.URL, d.cfg.FetchProxy)
+		proxyURL := d.cfg.FetchProxy
+		transport := &http.Transport{}
+		if proxyURL != "" {
+			u, err := url.Parse(proxyURL)
+			if err != nil {
+				return ToolResult{}, err
+			}
+			transport.Proxy = http.ProxyURL(u)
+		}
+
+		rawURL := p.URL
+		client := &http.Client{Transport: transport, Timeout: 3 * time.Minute}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 		if err != nil {
 			return ToolResult{}, err
 		}
-		truncated := d.rt.Truncate(ctx, md, d.cfg.MaxOutputChars)
-		return TextResult(truncated), nil
+		req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; bot/1.0)")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return ToolResult{}, err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return ToolResult{}, fmt.Errorf("request failed with status code: %d", resp.StatusCode)
+		}
+
+		contentType := resp.Header.Get("content-type")
+		mediaType, _, _ := mime.ParseMediaType(contentType)
+
+		switch mediaType {
+		case "text/html":
+			markdown, err := htmltomarkdown.ConvertReader(resp.Body)
+			if err != nil {
+				return ToolResult{}, fmt.Errorf("failed to convert HTML to Markdown: %w", err)
+			}
+			truncated := d.rt.Truncate(ctx, string(markdown), d.cfg.MaxOutputChars)
+			return TextResult(truncated), nil
+
+		case "text/markdown", "text/x-markdown", "text/plain", "application/json":
+			rawBytes, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return ToolResult{}, fmt.Errorf("failed to read raw content: %w", err)
+			}
+			truncated := d.rt.Truncate(ctx, string(rawBytes), d.cfg.MaxOutputChars)
+			return TextResult(truncated), nil
+
+		default:
+			rawBytes, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return ToolResult{}, fmt.Errorf("failed to read unknown content type: %w", err)
+			}
+			path, err := d.rt.WriteTmpFile(ctx, string(rawBytes))
+			if err != nil {
+				return TextResult(fmt.Sprintf("Content-Type: %s\n\n[output not readable]", contentType)), nil
+			}
+			return TextResult(fmt.Sprintf("Content-Type: %s\n\n[output saved to %s]", contentType, path)), nil
+		}
 	})
 }
 
@@ -407,7 +462,7 @@ func (d *DefaultToolset) registerReadImage(r *Registry) {
 		if len(data) > d.cfg.MaxImageSizeBytes {
 			return ToolResult{}, fmt.Errorf("image too large: %d bytes", len(data))
 		}
-		mimeType := detectMIME(data)
+		mimeType := detectImageMIME(data)
 		b64 := base64.StdEncoding.EncodeToString(data)
 		return ImageResult([]map[string]any{
 			{
@@ -421,7 +476,7 @@ func (d *DefaultToolset) registerReadImage(r *Registry) {
 	})
 }
 
-func detectMIME(data []byte) string {
+func detectImageMIME(data []byte) string {
 	if len(data) < 4 {
 		return "image/jpeg"
 	}
@@ -435,31 +490,4 @@ func detectMIME(data []byte) string {
 	default:
 		return "image/jpeg"
 	}
-}
-
-func fetchMarkdown(ctx context.Context, rawURL, proxyURL string) (string, error) {
-	transport := &http.Transport{}
-	if proxyURL != "" {
-		u, err := url.Parse(proxyURL)
-		if err != nil {
-			return "", err
-		}
-		transport.Proxy = http.ProxyURL(u)
-	}
-	client := &http.Client{Transport: transport, Timeout: 3 * time.Minute}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; bot/1.0)")
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	markdown, err := htmltomarkdown.ConvertReader(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	return string(markdown), nil
 }

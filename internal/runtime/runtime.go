@@ -55,6 +55,7 @@ type Runtime interface {
 	ReadRawBytes(ctx context.Context, filename string) ([]byte, error)
 	ReadFile(ctx context.Context, filename string, startLine, limit int) (ReadFileResult, error)
 	WriteFile(ctx context.Context, filename, content string) error
+	WriteTmpFile(ctx context.Context, content string) (string, error)
 	Glob(ctx context.Context, pattern string) (GlobResult, error)
 	EditFile(ctx context.Context, filename string, edits []Edit) error
 	OSInfo(ctx context.Context) (string, error)
@@ -77,12 +78,17 @@ func truncateWithRedirection(
 	if !cut {
 		return text
 	}
-	path := fmt.Sprintf("./tmp/trunc-%s.txt", uuid.NewString())
-	err := rt.WriteFile(ctx, path, text)
+	path, err := writeTmpFile(ctx, rt, text)
 	if err != nil {
 		return fmt.Sprintf("[output truncated; showing the first %d chars]\n\n%s", len(short), short)
 	}
 	return fmt.Sprintf("[output truncated; showing the first %d chars; full output saved to %s]\n\n%s", len(short), path, short)
+}
+
+func writeTmpFile(ctx context.Context, rt Runtime, content string) (string, error) {
+	path := fmt.Sprintf("./tmp/output-%s", uuid.NewString())
+	err := rt.WriteFile(ctx, path, content)
+	return path, err
 }
 
 func truncateLinesWithNote(

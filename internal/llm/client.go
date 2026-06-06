@@ -24,6 +24,7 @@ type CompletionRequest struct {
 	Model          string
 	Messages       []Message
 	Tools          []map[string]any
+	MaxTokens      int64
 	OnContentDelta func(ctx context.Context, delta string)
 }
 

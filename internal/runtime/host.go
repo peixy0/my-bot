@@ -110,6 +110,10 @@ func (r *HostRuntime) WriteFile(ctx context.Context, filename, content string) e
 	return os.WriteFile(filename, []byte(content), 0644)
 }
 
+func (r *HostRuntime) WriteTmpFile(ctx context.Context, content string) (string, error) {
+	return writeTmpFile(ctx, r, content)
+}
+
 func (r *HostRuntime) Glob(ctx context.Context, pattern string) (GlobResult, error) {
 	return runPythonGlob(ctx, r, pattern)
 }

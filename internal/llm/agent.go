@@ -42,6 +42,7 @@ func (a *Agent) Run(
 			Model:          model,
 			Messages:       allMessages,
 			Tools:          reg.Schemas(),
+			MaxTokens:      cfg.ContextMaxTokens,
 			OnContentDelta: orch.OnContentDelta,
 		})
 		if err != nil {

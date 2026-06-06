@@ -70,6 +70,9 @@ func (p *OpenAIProvider) doComplete(ctx context.Context, req CompletionRequest) 
 		body["tools"] = req.Tools
 		body["parallel_tool_calls"] = true
 	}
+	if req.MaxTokens > 0 {
+		body["max_tokens"] = req.MaxTokens
+	}
 
 	payload, err := util.ToJSON(body)
 	if err != nil {

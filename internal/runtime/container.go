@@ -162,6 +162,10 @@ func (r *ContainerRuntime) WriteFile(ctx context.Context, filename, content stri
 	return nil
 }
 
+func (r *ContainerRuntime) WriteTmpFile(ctx context.Context, content string) (string, error) {
+	return writeTmpFile(ctx, r, content)
+}
+
 func (r *ContainerRuntime) Glob(ctx context.Context, pattern string) (GlobResult, error) {
 	return runPythonGlob(ctx, r, pattern)
 }

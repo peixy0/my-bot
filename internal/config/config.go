@@ -32,7 +32,7 @@ type Config struct {
 	WakeIntervalSeconds int
 
 	ContextAutoCompressionEnabled bool
-	ContextMaxTokens              int
+	ContextMaxTokens              int64
 	ContextCompressionThreshold   float64
 
 	FeishuAppID             string
@@ -75,7 +75,7 @@ func Load() (*Config, error) {
 		WakeIntervalSeconds: getEnvInt("WAKE_INTERVAL_SECONDS", 1800),
 
 		ContextAutoCompressionEnabled: getEnvBool("CONTEXT_AUTO_COMPRESSION_ENABLED", true),
-		ContextMaxTokens:              getEnvInt("CONTEXT_MAX_TOKENS", 32_000),
+		ContextMaxTokens:              getEnvInt64("CONTEXT_MAX_TOKENS", 32_000),
 		ContextCompressionThreshold:   getEnvFloat("CONTEXT_COMPRESSION_THRESHOLD", 0.7),
 
 		FeishuAppID:             getEnv("FEISHU_APP_ID", ""),
@@ -144,6 +144,15 @@ func getEnv(key, fallback string) string {
 func getEnvInt(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return fallback
+}
+
+func getEnvInt64(key string, fallback int64) int64 {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			return n
 		}
 	}

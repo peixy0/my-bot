@@ -316,7 +316,8 @@ func (r *nullRuntime) ReadRawBytes(_ context.Context, _ string) ([]byte, error) 
 func (r *nullRuntime) ReadFile(_ context.Context, _ string, _, _ int) (runtime.ReadFileResult, error) {
 	return runtime.ReadFileResult{}, nil
 }
-func (r *nullRuntime) WriteFile(_ context.Context, _, _ string) error { return nil }
+func (r *nullRuntime) WriteFile(_ context.Context, _, _ string) error           { return nil }
+func (r *nullRuntime) WriteTmpFile(_ context.Context, _ string) (string, error) { return "", nil }
 func (r *nullRuntime) Glob(_ context.Context, _ string) (runtime.GlobResult, error) {
 	return runtime.GlobResult{}, nil
 }
