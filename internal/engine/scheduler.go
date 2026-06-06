@@ -185,7 +185,7 @@ func (s *Scheduler) heartbeatInterval(ctx context.Context, args []string, sender
 
 func (s *Scheduler) handleCronCommand(ctx context.Context, args []string, e events.TextInputEvent) {
 	if len(args) == 0 {
-		e.Sender.Send(ctx, "usage: /cron load|unload|ls [job-name]")
+		e.Sender.Send(ctx, "usage: /cron load|unload|ls|trigger [job-name]")
 		return
 	}
 	sub := args[0]
@@ -216,6 +216,17 @@ func (s *Scheduler) handleCronCommand(ctx context.Context, args []string, e even
 			e.Sender.Send(ctx, fmt.Sprintf("unloaded %q", jobName))
 		} else {
 			e.Sender.Send(ctx, fmt.Sprintf("job %q not loaded", jobName))
+		}
+	case "trigger":
+		if jobName == "" {
+			e.Sender.Send(ctx, "usage: /cron trigger <job-name>")
+			return
+		}
+		err := cw.Trigger(jobName, e.Sender)
+		if err == nil {
+			e.Sender.Send(ctx, fmt.Sprintf("job %q triggered", jobName))
+		} else {
+			e.Sender.Send(ctx, fmt.Sprintf("failed to trigger job %q: %v", jobName, err))
 		}
 	case "ls":
 		available := s.cronLoader.ListJobs()

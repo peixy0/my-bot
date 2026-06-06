@@ -160,6 +160,26 @@ func (cw *CronWorker) LoadedJobs() []string {
 	return names
 }
 
+func (cw *CronWorker) Trigger(jobName string, sender events.Outbound) error {
+	defs, err := cw.loader.LoadJob(jobName)
+	if err != nil {
+		return err
+	}
+	for _, def := range defs {
+		ev := events.CronEvent{
+			ChatID:   cw.chatID,
+			TaskName: def.TaskName,
+			Prompt:   def.Prompt,
+			Sender:   sender,
+		}
+		if !cw.workerBox.TryPublish(workerEnvelope(cw.chatID, ev)) {
+			slog.Warn("cron event dropped: worker inbox full", "chat", cw.chatID, "task", def.TaskName)
+			return fmt.Errorf("worker inbox full")
+		}
+	}
+	return nil
+}
+
 func (cw *CronWorker) Stop() {
 	cw.scheduler.Stop()
 }
