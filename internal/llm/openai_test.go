@@ -36,6 +36,7 @@ func TestOpenAIProvider_CompleteStreamsContent(t *testing.T) {
 	resp, err := provider.Complete(context.Background(), CompletionRequest{
 		Model:       "test-model",
 		Messages:    []Message{userMessage("hi")},
+		MaxTokens:   123,
 		Temperature: 0.2,
 		TopP:        0.9,
 		TopK:        40,
@@ -55,12 +56,37 @@ func TestOpenAIProvider_CompleteStreamsContent(t *testing.T) {
 	if requestBody["stream"] != true {
 		t.Fatalf("expected stream=true in request, got %#v", requestBody["stream"])
 	}
+	if requestBody["max_tokens"] != float64(123) {
+		t.Fatalf("expected max_tokens=123, got %#v", requestBody["max_tokens"])
+	}
 	streamOptions, _ := requestBody["stream_options"].(map[string]any)
 	if streamOptions["include_usage"] != true {
 		t.Fatalf("expected include_usage=true, got %#v", requestBody["stream_options"])
 	}
 	if requestBody["temperature"] != 0.2 || requestBody["top_p"] != 0.9 || requestBody["top_k"] != float64(40) {
 		t.Fatalf("unexpected generation params: %#v", requestBody)
+	}
+}
+
+func TestOpenAIProvider_CompleteOmitsZeroMaxTokens(t *testing.T) {
+	var requestBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeSSE(t, w, map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "ok"}, "finish_reason": "stop"}}})
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewOpenAIProvider(server.URL, "", server.Client())
+	_, err := provider.Complete(context.Background(), CompletionRequest{Model: "test-model"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := requestBody["max_tokens"]; ok {
+		t.Fatalf("expected max_tokens to be omitted when unset, got %#v", requestBody["max_tokens"])
 	}
 }
 

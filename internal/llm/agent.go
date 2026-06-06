@@ -98,7 +98,8 @@ func (a *Agent) Compress(ctx context.Context, cfg *config.Config, systemPrompt s
 	resp, err := a.client.Complete(ctx, CompletionRequest{
 		Model:       cfg.OpenAIModel,
 		Messages:    compressMessages,
-		Temperature: cfg.Temperature,
+		MaxTokens:   cfg.ContextMaxTokens,
+		Temperature: compressionTemperature,
 		TopP:        cfg.TopP,
 		TopK:        cfg.TopK,
 	})
@@ -114,6 +115,8 @@ func (a *Agent) Compress(ctx context.Context, cfg *config.Config, systemPrompt s
 	conv.TotalTokens = resp.TotalTokens
 	return nil
 }
+
+const compressionTemperature = 0.2
 
 const compressionInstruction = "You are compressing context for an autonomous AI agent.\n" +
 	"Summarize and merge ALL prior messages in this request into one persistent anchor state.\n\n" +

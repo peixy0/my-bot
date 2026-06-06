@@ -15,16 +15,20 @@ type mockClient struct {
 }
 
 type mockCompletionCall struct {
-	model    string
-	messages []Message
-	tools    []map[string]any
+	model       string
+	messages    []Message
+	tools       []map[string]any
+	maxTokens   int64
+	temperature float64
 }
 
 func (m *mockClient) Complete(ctx context.Context, req CompletionRequest) (CompletionResponse, error) {
 	m.calls = append(m.calls, mockCompletionCall{
-		model:    req.Model,
-		messages: cloneMessages(req.Messages),
-		tools:    cloneTools(req.Tools),
+		model:       req.Model,
+		messages:    cloneMessages(req.Messages),
+		tools:       cloneTools(req.Tools),
+		maxTokens:   req.MaxTokens,
+		temperature: req.Temperature,
 	})
 	idx := m.callCount
 	m.callCount++
@@ -186,6 +190,7 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 
 	cfg := &config.Config{
 		OpenAIModel:                   "test-model",
+		Temperature:                   1.5,
 		ContextAutoCompressionEnabled: true,
 		ContextMaxTokens:              8000,
 		ContextCompressionThreshold:   1.0,
@@ -213,6 +218,12 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 	compressCall := client.calls[1]
 	if len(compressCall.tools) != 0 {
 		t.Fatalf("expected compression call to disable tools, got %d tools", len(compressCall.tools))
+	}
+	if compressCall.maxTokens != cfg.ContextMaxTokens {
+		t.Fatalf("expected compression max_tokens %d, got %d", cfg.ContextMaxTokens, compressCall.maxTokens)
+	}
+	if compressCall.temperature != compressionTemperature {
+		t.Fatalf("expected compression temperature %v, got %v", compressionTemperature, compressCall.temperature)
 	}
 	if len(compressCall.messages) != 3 {
 		t.Fatalf("expected system + evicted user + instruction, got %d messages", len(compressCall.messages))
