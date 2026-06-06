@@ -50,8 +50,12 @@ type NewSessionEvent struct {
 }
 
 const (
-	ConfigKeyModel  = "model"
-	ConfigKeyVision = "vision"
+	ConfigKeyModel       = "model"
+	ConfigKeyVision      = "vision"
+	ConfigKeyTemperature = "temperature"
+	ConfigKeyTopP        = "top_p"
+	ConfigKeyTopK        = "top_k"
+	ConfigKeyMaxTokens   = "max_tokens"
 )
 
 type ConfigQueryEvent struct {

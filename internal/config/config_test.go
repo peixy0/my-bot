@@ -5,6 +5,8 @@ import "testing"
 func validConfig() *Config {
 	return &Config{
 		OpenAIAPIKey:                "key",
+		Temperature:                 1,
+		TopP:                        1,
 		ContainerRuntime:            "",
 		MaxOutputChars:              1000,
 		WakeIntervalSeconds:         60,
@@ -29,6 +31,11 @@ func TestConfigValidateRejectsInvalidValues(t *testing.T) {
 		mutate func(*Config)
 	}{
 		{"openai key", func(c *Config) { c.OpenAIAPIKey = "" }},
+		{"temperature low", func(c *Config) { c.Temperature = -0.1 }},
+		{"temperature high", func(c *Config) { c.Temperature = 2.1 }},
+		{"top p low", func(c *Config) { c.TopP = -0.1 }},
+		{"top p high", func(c *Config) { c.TopP = 1.1 }},
+		{"top k", func(c *Config) { c.TopK = -1 }},
 		{"container runtime", func(c *Config) { c.ContainerRuntime = "runc" }},
 		{"max output", func(c *Config) { c.MaxOutputChars = 0 }},
 		{"wake interval", func(c *Config) { c.WakeIntervalSeconds = -1 }},

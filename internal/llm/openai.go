@@ -63,6 +63,8 @@ func (p *OpenAIProvider) doComplete(ctx context.Context, req CompletionRequest) 
 	body := map[string]any{
 		"model":          req.Model,
 		"messages":       req.Messages,
+		"max_tokens":     req.MaxTokens,
+		"temperature":    req.Temperature,
 		"stream":         true,
 		"stream_options": map[string]any{"include_usage": true},
 	}
@@ -70,10 +72,12 @@ func (p *OpenAIProvider) doComplete(ctx context.Context, req CompletionRequest) 
 		body["tools"] = req.Tools
 		body["parallel_tool_calls"] = true
 	}
-	if req.MaxTokens > 0 {
-		body["max_tokens"] = req.MaxTokens
+	if req.TopP > 0 {
+		body["top_p"] = req.TopP
 	}
-
+	if req.TopK > 0 {
+		body["top_k"] = req.TopK
+	}
 	payload, err := util.ToJSON(body)
 	if err != nil {
 		return CompletionResponse{}, fmt.Errorf("marshal request: %w", err)

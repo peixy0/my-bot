@@ -15,6 +15,9 @@ type Config struct {
 	OpenAIBaseURL string
 	OpenAIModel   string
 	OpenAIAPIKey  string
+	Temperature   float64
+	TopP          float64
+	TopK          int
 
 	ContainerName    string
 	ContainerRuntime string // "podman" | "docker" | "" (host)
@@ -58,6 +61,9 @@ func Load() (*Config, error) {
 		OpenAIBaseURL: getEnv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
 		OpenAIModel:   getEnv("OPENAI_MODEL", "gpt-4o"),
 		OpenAIAPIKey:  getEnv("OPENAI_API_KEY", ""),
+		Temperature:   getEnvFloat("OPENAI_TEMPERATURE", 1),
+		TopP:          getEnvFloat("OPENAI_TOP_P", 0.95),
+		TopK:          getEnvInt("OPENAI_TOP_K", 0),
 
 		ContainerName:    getEnv("CONTAINER_NAME", ""),
 		ContainerRuntime: getEnv("CONTAINER_RUNTIME", ""),
@@ -102,6 +108,15 @@ func Load() (*Config, error) {
 func (cfg *Config) Validate() error {
 	if cfg.OpenAIAPIKey == "" {
 		return fmt.Errorf("OPENAI_API_KEY is required")
+	}
+	if cfg.Temperature < 0 || cfg.Temperature > 2 {
+		return fmt.Errorf("OPENAI_TEMPERATURE must be between 0 and 2")
+	}
+	if cfg.TopP < 0 || cfg.TopP > 1 {
+		return fmt.Errorf("OPENAI_TOP_P must be between 0 and 1")
+	}
+	if cfg.TopK < 0 {
+		return fmt.Errorf("OPENAI_TOP_K must be non-negative")
 	}
 	switch cfg.ContainerRuntime {
 	case "", "podman", "docker":

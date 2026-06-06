@@ -134,6 +134,66 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 			Value:  parts[1],
 			Sender: e.Sender,
 		})
+	case "temperature":
+		if len(parts) < 2 {
+			s.dispatchToWorker(ctx, e.ChatID, events.ConfigQueryEvent{
+				ChatID: e.ChatID,
+				Key:    events.ConfigKeyTemperature,
+				Sender: e.Sender,
+			})
+			return
+		}
+		s.dispatchToWorker(ctx, e.ChatID, events.ConfigChangeEvent{
+			ChatID: e.ChatID,
+			Key:    events.ConfigKeyTemperature,
+			Value:  parts[1],
+			Sender: e.Sender,
+		})
+	case "top_p":
+		if len(parts) < 2 {
+			s.dispatchToWorker(ctx, e.ChatID, events.ConfigQueryEvent{
+				ChatID: e.ChatID,
+				Key:    events.ConfigKeyTopP,
+				Sender: e.Sender,
+			})
+			return
+		}
+		s.dispatchToWorker(ctx, e.ChatID, events.ConfigChangeEvent{
+			ChatID: e.ChatID,
+			Key:    events.ConfigKeyTopP,
+			Value:  parts[1],
+			Sender: e.Sender,
+		})
+	case "top_k":
+		if len(parts) < 2 {
+			s.dispatchToWorker(ctx, e.ChatID, events.ConfigQueryEvent{
+				ChatID: e.ChatID,
+				Key:    events.ConfigKeyTopK,
+				Sender: e.Sender,
+			})
+			return
+		}
+		s.dispatchToWorker(ctx, e.ChatID, events.ConfigChangeEvent{
+			ChatID: e.ChatID,
+			Key:    events.ConfigKeyTopK,
+			Value:  parts[1],
+			Sender: e.Sender,
+		})
+	case "max_tokens":
+		if len(parts) < 2 {
+			s.dispatchToWorker(ctx, e.ChatID, events.ConfigQueryEvent{
+				ChatID: e.ChatID,
+				Key:    events.ConfigKeyMaxTokens,
+				Sender: e.Sender,
+			})
+			return
+		}
+		s.dispatchToWorker(ctx, e.ChatID, events.ConfigChangeEvent{
+			ChatID: e.ChatID,
+			Key:    events.ConfigKeyMaxTokens,
+			Value:  parts[1],
+			Sender: e.Sender,
+		})
 	case "queue":
 		text := strings.TrimSpace(strings.TrimPrefix(cmd, "queue"))
 		if text == "" {

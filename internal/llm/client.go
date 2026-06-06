@@ -25,6 +25,9 @@ type CompletionRequest struct {
 	Messages       []Message
 	Tools          []map[string]any
 	MaxTokens      int64
+	Temperature    float64
+	TopP           float64
+	TopK           int
 	OnContentDelta func(ctx context.Context, delta string)
 }
 

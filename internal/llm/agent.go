@@ -43,6 +43,9 @@ func (a *Agent) Run(
 			Messages:       allMessages,
 			Tools:          reg.Schemas(),
 			MaxTokens:      cfg.ContextMaxTokens,
+			Temperature:    cfg.Temperature,
+			TopP:           cfg.TopP,
+			TopK:           cfg.TopK,
 			OnContentDelta: orch.OnContentDelta,
 		})
 		if err != nil {
@@ -93,8 +96,11 @@ func (a *Agent) Compress(ctx context.Context, cfg *config.Config, systemPrompt s
 
 	compressMessages := buildCompressionMessages(systemPrompt, toEvict)
 	resp, err := a.client.Complete(ctx, CompletionRequest{
-		Model:    cfg.OpenAIModel,
-		Messages: compressMessages,
+		Model:       cfg.OpenAIModel,
+		Messages:    compressMessages,
+		Temperature: cfg.Temperature,
+		TopP:        cfg.TopP,
+		TopK:        cfg.TopK,
 	})
 	if err != nil {
 		return err

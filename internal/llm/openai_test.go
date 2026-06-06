@@ -34,8 +34,11 @@ func TestOpenAIProvider_CompleteStreamsContent(t *testing.T) {
 	provider := NewOpenAIProvider(server.URL, "test-key", server.Client())
 	var deltas []string
 	resp, err := provider.Complete(context.Background(), CompletionRequest{
-		Model:    "test-model",
-		Messages: []Message{userMessage("hi")},
+		Model:       "test-model",
+		Messages:    []Message{userMessage("hi")},
+		Temperature: 0.2,
+		TopP:        0.9,
+		TopK:        40,
 		OnContentDelta: func(_ context.Context, delta string) {
 			deltas = append(deltas, delta)
 		},
@@ -55,6 +58,9 @@ func TestOpenAIProvider_CompleteStreamsContent(t *testing.T) {
 	streamOptions, _ := requestBody["stream_options"].(map[string]any)
 	if streamOptions["include_usage"] != true {
 		t.Fatalf("expected include_usage=true, got %#v", requestBody["stream_options"])
+	}
+	if requestBody["temperature"] != 0.2 || requestBody["top_p"] != 0.9 || requestBody["top_k"] != float64(40) {
+		t.Fatalf("unexpected generation params: %#v", requestBody)
 	}
 }
 

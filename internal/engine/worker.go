@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"my-bot/internal/config"
@@ -79,6 +80,41 @@ func (w *ConversationWorker) VisionSupported() bool {
 func (w *ConversationWorker) SetVisionSupported(enabled bool) {
 	w.cfg.VisionSupport = enabled
 	w.reg = w.newRegistry()
+}
+
+func (w *ConversationWorker) Temperature() string {
+	return formatFloat(w.cfg.Temperature)
+}
+
+func (w *ConversationWorker) SetTemperature(value float64) {
+	w.cfg.Temperature = value
+}
+
+func (w *ConversationWorker) TopP() string {
+	return formatFloat(w.cfg.TopP)
+}
+
+func (w *ConversationWorker) SetTopP(value float64) {
+	w.cfg.TopP = value
+}
+
+func (w *ConversationWorker) TopK() string {
+	if w.cfg.TopK <= 0 {
+		return "unset"
+	}
+	return strconv.Itoa(w.cfg.TopK)
+}
+
+func (w *ConversationWorker) SetTopK(value int) {
+	w.cfg.TopK = value
+}
+
+func (w *ConversationWorker) MaxTokens() string {
+	return strconv.FormatInt(w.cfg.ContextMaxTokens, 10)
+}
+
+func (w *ConversationWorker) SetMaxTokens(value int64) {
+	w.cfg.ContextMaxTokens = value
 }
 
 func (w *ConversationWorker) newRegistry() *tools.Registry {
@@ -209,6 +245,14 @@ func (w *ConversationWorker) processConfigQuery(ctx context.Context, ev events.C
 		ev.Sender.Send(ctx, fmt.Sprintf("current model: %s", w.Model()))
 	case events.ConfigKeyVision:
 		ev.Sender.Send(ctx, fmt.Sprintf("current vision: %s", onOff(w.VisionSupported())))
+	case events.ConfigKeyTemperature:
+		ev.Sender.Send(ctx, fmt.Sprintf("current temperature: %s", w.Temperature()))
+	case events.ConfigKeyTopP:
+		ev.Sender.Send(ctx, fmt.Sprintf("current top_p: %s", w.TopP()))
+	case events.ConfigKeyTopK:
+		ev.Sender.Send(ctx, fmt.Sprintf("current top_k: %s", w.TopK()))
+	case events.ConfigKeyMaxTokens:
+		ev.Sender.Send(ctx, fmt.Sprintf("current max_tokens: %s", w.MaxTokens()))
 	}
 	return nil
 }
@@ -229,6 +273,38 @@ func (w *ConversationWorker) processConfigChange(ctx context.Context, ev events.
 		default:
 			ev.Sender.Send(ctx, "usage: /vision on|off")
 		}
+	case events.ConfigKeyTemperature:
+		value, err := strconv.ParseFloat(ev.Value, 64)
+		if err != nil || value < 0 || value > 2 {
+			ev.Sender.Send(ctx, "usage: /temperature <0..2>")
+			return nil
+		}
+		w.SetTemperature(value)
+		ev.Sender.Send(ctx, fmt.Sprintf("temperature set to: %s", formatFloat(value)))
+	case events.ConfigKeyTopP:
+		value, err := strconv.ParseFloat(ev.Value, 64)
+		if err != nil || value < 0 || value > 1 {
+			ev.Sender.Send(ctx, "usage: /top_p <0..1>")
+			return nil
+		}
+		w.SetTopP(value)
+		ev.Sender.Send(ctx, fmt.Sprintf("top_p set to: %s", formatFloat(value)))
+	case events.ConfigKeyTopK:
+		value, err := strconv.Atoi(ev.Value)
+		if err != nil || value <= 0 {
+			ev.Sender.Send(ctx, "usage: /top_k <positive integer>")
+			return nil
+		}
+		w.SetTopK(value)
+		ev.Sender.Send(ctx, fmt.Sprintf("top_k set to: %d", value))
+	case events.ConfigKeyMaxTokens:
+		value, err := strconv.ParseInt(ev.Value, 10, 64)
+		if err != nil || value <= 0 {
+			ev.Sender.Send(ctx, "usage: /max_tokens <positive integer>")
+			return nil
+		}
+		w.SetMaxTokens(value)
+		ev.Sender.Send(ctx, fmt.Sprintf("max_tokens set to: %d", value))
 	}
 	return nil
 }
@@ -301,6 +377,10 @@ func wrapUserMessage(msg string) string {
 		now.Format("2006-01-02 15:04:05 MST-0700"),
 		now.Location(),
 		msg)
+}
+
+func formatFloat(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 func workerEnvelope(chatID string, ev events.WorkerEvent) inbox.Envelope[events.WorkerEvent] {

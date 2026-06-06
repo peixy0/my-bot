@@ -368,6 +368,47 @@ func TestWorkerVisionConfigChangeRejectsInvalidValue(t *testing.T) {
 	}
 }
 
+func TestWorkerGenerationConfigCommands(t *testing.T) {
+	worker := newConfigTestWorker(&config.Config{Temperature: 1, TopP: 1, MaxOutputChars: 1000, ContextMaxTokens: 32000})
+	out := &captureOutbound{}
+	s := &Scheduler{
+		workers: map[string]*workerEntry{
+			"chat-1": {worker: worker},
+		},
+	}
+
+	for _, cmd := range []string{"temperature 0.2", "top_p 0.9", "top_k 40", "max_tokens 16000"} {
+		s.handleSlashCommand(context.Background(), cmd, events.TextInputEvent{
+			ChatID: "chat-1",
+			Sender: out,
+		})
+		msg, err := worker.Events.Receive(context.Background())
+		if err != nil {
+			t.Fatalf("receive config event: %v", err)
+		}
+		ev, ok := msg.Payload.(events.ConfigChangeEvent)
+		if !ok {
+			t.Fatalf("unexpected payload type: %T", msg.Payload)
+		}
+		if err := worker.processConfigChange(context.Background(), ev); err != nil {
+			t.Fatalf("process config change: %v", err)
+		}
+	}
+
+	if worker.cfg.Temperature != 0.2 || worker.cfg.TopP != 0.9 || worker.cfg.TopK != 40 || worker.cfg.ContextMaxTokens != 16000 {
+		t.Fatalf("unexpected generation config: %+v", worker.cfg)
+	}
+	want := []string{"temperature set to: 0.2", "top_p set to: 0.9", "top_k set to: 40", "max_tokens set to: 16000"}
+	if len(out.messages) != len(want) {
+		t.Fatalf("unexpected responses: %v", out.messages)
+	}
+	for i := range want {
+		if out.messages[i] != want[i] {
+			t.Fatalf("response %d = %q, want %q", i, out.messages[i], want[i])
+		}
+	}
+}
+
 func TestSchedulerRemovedSteerCommandQueuesAsUnknownSlashCommand(t *testing.T) {
 	worker := &ConversationWorker{
 		Events:      inbox.NewMemory[events.WorkerEvent](1),
