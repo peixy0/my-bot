@@ -94,7 +94,7 @@ func main() {
 func buildRuntime(cfg *config.Config) runtime.Runtime {
 	if cfg.ContainerName != "" && cfg.ContainerRuntime != "" {
 		bin := cfg.ContainerRuntime
-		rt, err := runtime.NewContainerRuntime(cfg.ContainerName, bin, "/workspace", cfg.MaxOutputChars)
+		rt, err := runtime.NewContainerRuntime(cfg.ContainerName, bin, "/workspace", cfg.ToolMaxOutputChars)
 		if err != nil {
 			slog.Error("container runtime unavailable", "err", err)
 			os.Exit(1)
@@ -103,7 +103,7 @@ func buildRuntime(cfg *config.Config) runtime.Runtime {
 		return rt
 	}
 	slog.Info("using host runtime")
-	return runtime.NewHostRuntime(cfg.MaxOutputChars)
+	return runtime.NewHostRuntime(cfg.ToolMaxOutputChars)
 }
 
 func buildLLMClient(cfg *config.Config) llm.CompletionClient {

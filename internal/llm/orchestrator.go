@@ -307,7 +307,7 @@ func runSubagentTask(
 	result := subagentResultMessage{
 		AgentID: task.AgentID,
 	}
-	cmdTools := tools.NewCommandToolset(rt, cfg.MaxOutputChars)
+	cmdTools := tools.NewCommandToolset(rt, cfg.ToolMaxOutputChars)
 	defer func() {
 		ctx2, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()

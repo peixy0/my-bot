@@ -117,11 +117,15 @@ func TestAgent_ToolCallDispatch(t *testing.T) {
 	conv.Messages = append(conv.Messages, userMessage("do something"))
 	orch := newMockOrchestrator()
 
-	err := agent.Run(context.Background(), &config.Config{OpenAIModel: "test-model"}, "sys", conv, orch, tools.NewRegistry())
+	cfg := &config.Config{OpenAIModel: "test-model", MaxOutputTokens: 16384}
+	err := agent.Run(context.Background(), cfg, "sys", conv, orch, tools.NewRegistry())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	if client.calls[0].maxTokens != cfg.MaxOutputTokens {
+		t.Fatalf("expected request max_tokens %d, got %d", cfg.MaxOutputTokens, client.calls[0].maxTokens)
+	}
 	if orch.beforeToolCalls != 1 {
 		t.Errorf("expected 1 BeforeToolUse call, got %d", orch.beforeToolCalls)
 	}
@@ -155,7 +159,7 @@ func TestAgent_BeforeToolUseErrorNonFatal(t *testing.T) {
 	conv.Messages = append(conv.Messages, userMessage("hi"))
 	orch := newMockOrchestrator()
 
-	err := agent.Run(context.Background(), &config.Config{OpenAIModel: "test-model"}, "sys", conv, orch, tools.NewRegistry())
+	err := agent.Run(context.Background(), &config.Config{OpenAIModel: "test-model", MaxOutputTokens: 16384}, "sys", conv, orch, tools.NewRegistry())
 	if err != nil {
 		t.Fatalf("error should not propagate, got: %v", err)
 	}
@@ -192,7 +196,8 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 		OpenAIModel:                   "test-model",
 		Temperature:                   1.5,
 		ContextAutoCompressionEnabled: true,
-		ContextMaxTokens:              8000,
+		ContextWindowTokens:           8000,
+		MaxOutputTokens:               4096,
 		ContextCompressionThreshold:   1.0,
 	}
 	err := agent.Run(context.Background(), cfg, "sys", conv, orch, tools.NewRegistry())
@@ -219,8 +224,11 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 	if len(compressCall.tools) != 0 {
 		t.Fatalf("expected compression call to disable tools, got %d tools", len(compressCall.tools))
 	}
-	if compressCall.maxTokens != cfg.ContextMaxTokens {
-		t.Fatalf("expected compression max_tokens %d, got %d", cfg.ContextMaxTokens, compressCall.maxTokens)
+	if client.calls[0].maxTokens != cfg.MaxOutputTokens {
+		t.Fatalf("expected initial max_tokens %d, got %d", cfg.MaxOutputTokens, client.calls[0].maxTokens)
+	}
+	if compressCall.maxTokens != cfg.MaxOutputTokens {
+		t.Fatalf("expected compression max_tokens %d, got %d", cfg.MaxOutputTokens, compressCall.maxTokens)
 	}
 	if compressCall.temperature != compressionTemperature {
 		t.Fatalf("expected compression temperature %v, got %v", compressionTemperature, compressCall.temperature)

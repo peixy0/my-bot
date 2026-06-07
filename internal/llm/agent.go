@@ -42,7 +42,7 @@ func (a *Agent) Run(
 			Model:          model,
 			Messages:       allMessages,
 			Tools:          reg.Schemas(),
-			MaxTokens:      cfg.ContextMaxTokens,
+			MaxTokens:      cfg.MaxOutputTokens,
 			Temperature:    cfg.Temperature,
 			TopP:           cfg.TopP,
 			TopK:           cfg.TopK,
@@ -69,8 +69,8 @@ func (a *Agent) Run(
 			return nil
 		}
 
-		if cfg.ContextAutoCompressionEnabled && int(conv.TotalTokens) >= int(float64(cfg.ContextMaxTokens)*cfg.ContextCompressionThreshold) {
-			slog.Debug("context compression triggered", "tokens", conv.TotalTokens, "max", cfg.ContextMaxTokens)
+		if cfg.ContextAutoCompressionEnabled && int(conv.TotalTokens) >= int(float64(cfg.ContextWindowTokens)*cfg.ContextCompressionThreshold) {
+			slog.Debug("context compression triggered", "tokens", conv.TotalTokens, "context_window", cfg.ContextWindowTokens)
 			if err := a.Compress(ctx, cfg, systemPrompt, conv); err != nil {
 				return fmt.Errorf("compress: %w", err)
 			}
@@ -98,7 +98,7 @@ func (a *Agent) Compress(ctx context.Context, cfg *config.Config, systemPrompt s
 	resp, err := a.client.Complete(ctx, CompletionRequest{
 		Model:       cfg.OpenAIModel,
 		Messages:    compressMessages,
-		MaxTokens:   cfg.ContextMaxTokens,
+		MaxTokens:   cfg.MaxOutputTokens,
 		Temperature: compressionTemperature,
 		TopP:        cfg.TopP,
 		TopK:        cfg.TopK,

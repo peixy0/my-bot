@@ -49,7 +49,7 @@ func NewConversationWorker(
 ) *ConversationWorker {
 	workerCfg := *cfg
 	workerAgent := agent.Fork()
-	cmdTools := tools.NewCommandToolset(rt, workerCfg.MaxOutputChars)
+	cmdTools := tools.NewCommandToolset(rt, workerCfg.ToolMaxOutputChars)
 	w := &ConversationWorker{
 		chatID:      chatID,
 		cfg:         &workerCfg,
@@ -110,11 +110,19 @@ func (w *ConversationWorker) SetTopK(value int) {
 }
 
 func (w *ConversationWorker) MaxTokens() string {
-	return strconv.FormatInt(w.cfg.ContextMaxTokens, 10)
+	return strconv.FormatInt(w.cfg.MaxOutputTokens, 10)
 }
 
 func (w *ConversationWorker) SetMaxTokens(value int64) {
-	w.cfg.ContextMaxTokens = value
+	w.cfg.MaxOutputTokens = value
+}
+
+func (w *ConversationWorker) ContextWindow() string {
+	return strconv.FormatInt(w.cfg.ContextWindowTokens, 10)
+}
+
+func (w *ConversationWorker) SetContextWindow(value int64) {
+	w.cfg.ContextWindowTokens = value
 }
 
 func (w *ConversationWorker) newRegistry() *tools.Registry {
@@ -253,6 +261,8 @@ func (w *ConversationWorker) processConfigQuery(ctx context.Context, ev events.C
 		ev.Sender.Send(ctx, fmt.Sprintf("current top_k: %s", w.TopK()))
 	case events.ConfigKeyMaxTokens:
 		ev.Sender.Send(ctx, fmt.Sprintf("current max_tokens: %s", w.MaxTokens()))
+	case events.ConfigKeyContextWindow:
+		ev.Sender.Send(ctx, fmt.Sprintf("current context_window: %s", w.ContextWindow()))
 	}
 	return nil
 }
@@ -305,6 +315,14 @@ func (w *ConversationWorker) processConfigChange(ctx context.Context, ev events.
 		}
 		w.SetMaxTokens(value)
 		ev.Sender.Send(ctx, fmt.Sprintf("max_tokens set to: %d", value))
+	case events.ConfigKeyContextWindow:
+		value, err := strconv.ParseInt(ev.Value, 10, 64)
+		if err != nil || value <= 0 {
+			ev.Sender.Send(ctx, "usage: /context_window <positive integer>")
+			return nil
+		}
+		w.SetContextWindow(value)
+		ev.Sender.Send(ctx, fmt.Sprintf("context_window set to: %d", value))
 	}
 	return nil
 }
@@ -319,7 +337,7 @@ func (w *ConversationWorker) maybeCompress(ctx context.Context, prompt llm.Syste
 	if !w.cfg.ContextAutoCompressionEnabled {
 		return nil
 	}
-	threshold := int(float64(w.cfg.ContextMaxTokens) * w.cfg.ContextCompressionThreshold)
+	threshold := int(float64(w.cfg.ContextWindowTokens) * w.cfg.ContextCompressionThreshold)
 	if threshold <= 0 || int(w.loop.TotalTokens()) < threshold {
 		return nil
 	}

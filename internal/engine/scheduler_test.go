@@ -246,7 +246,7 @@ func TestSchedulerModelCommandQueuesConfigChange(t *testing.T) {
 }
 
 func TestSchedulerVisionCommandReportsCurrentSetting(t *testing.T) {
-	worker := newConfigTestWorker(&config.Config{VisionSupport: true, MaxOutputChars: 1000})
+	worker := newConfigTestWorker(&config.Config{VisionSupport: true, ToolMaxOutputChars: 1000})
 	out := &captureOutbound{}
 	s := &Scheduler{
 		workers: map[string]*workerEntry{
@@ -279,7 +279,7 @@ func TestSchedulerVisionCommandReportsCurrentSetting(t *testing.T) {
 }
 
 func TestSchedulerVisionCommandTogglesWorkerSetting(t *testing.T) {
-	worker := newConfigTestWorker(&config.Config{MaxOutputChars: 1000})
+	worker := newConfigTestWorker(&config.Config{ToolMaxOutputChars: 1000})
 	out := &captureOutbound{}
 	s := &Scheduler{
 		workers: map[string]*workerEntry{
@@ -336,7 +336,7 @@ func TestSchedulerVisionCommandTogglesWorkerSetting(t *testing.T) {
 }
 
 func TestWorkerVisionConfigChangeRejectsInvalidValue(t *testing.T) {
-	worker := newConfigTestWorker(&config.Config{MaxOutputChars: 1000})
+	worker := newConfigTestWorker(&config.Config{ToolMaxOutputChars: 1000})
 	out := &captureOutbound{}
 	s := &Scheduler{
 		workers: map[string]*workerEntry{
@@ -369,7 +369,7 @@ func TestWorkerVisionConfigChangeRejectsInvalidValue(t *testing.T) {
 }
 
 func TestWorkerGenerationConfigCommands(t *testing.T) {
-	worker := newConfigTestWorker(&config.Config{Temperature: 1, TopP: 1, MaxOutputChars: 1000, ContextMaxTokens: 32000})
+	worker := newConfigTestWorker(&config.Config{Temperature: 1, TopP: 1, ToolMaxOutputChars: 1000, ContextWindowTokens: 32000, MaxOutputTokens: 16384})
 	out := &captureOutbound{}
 	s := &Scheduler{
 		workers: map[string]*workerEntry{
@@ -377,7 +377,7 @@ func TestWorkerGenerationConfigCommands(t *testing.T) {
 		},
 	}
 
-	for _, cmd := range []string{"temperature 0.2", "top_p 0.9", "top_k 40", "max_tokens 16000"} {
+	for _, cmd := range []string{"temperature 0.2", "top_p 0.9", "top_k 40", "max_tokens 12000", "context_window 64000"} {
 		s.handleSlashCommand(context.Background(), cmd, events.TextInputEvent{
 			ChatID: "chat-1",
 			Sender: out,
@@ -395,10 +395,10 @@ func TestWorkerGenerationConfigCommands(t *testing.T) {
 		}
 	}
 
-	if worker.cfg.Temperature != 0.2 || worker.cfg.TopP != 0.9 || worker.cfg.TopK != 40 || worker.cfg.ContextMaxTokens != 16000 {
+	if worker.cfg.Temperature != 0.2 || worker.cfg.TopP != 0.9 || worker.cfg.TopK != 40 || worker.cfg.MaxOutputTokens != 12000 || worker.cfg.ContextWindowTokens != 64000 {
 		t.Fatalf("unexpected generation config: %+v", worker.cfg)
 	}
-	want := []string{"temperature set to: 0.2", "top_p set to: 0.9", "top_k set to: 40", "max_tokens set to: 16000"}
+	want := []string{"temperature set to: 0.2", "top_p set to: 0.9", "top_k set to: 40", "max_tokens set to: 12000", "context_window set to: 64000"}
 	if len(out.messages) != len(want) {
 		t.Fatalf("unexpected responses: %v", out.messages)
 	}

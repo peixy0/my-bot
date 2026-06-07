@@ -249,7 +249,7 @@ func TestFleetToolset_ReturnsResultsInTaskOrder(t *testing.T) {
 	agent := NewAgent(&echoTaskClient{})
 	skills := tools.NewSkillLoader("")
 	rt := &nullRuntime{}
-	cfg := &config.Config{MaxOutputChars: 1000}
+	cfg := &config.Config{ToolMaxOutputChars: 1000}
 	reg := tools.NewRegistry()
 
 	NewFleetToolset(agent, skills, cfg, rt).Register(reg)

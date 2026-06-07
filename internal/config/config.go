@@ -22,9 +22,9 @@ type Config struct {
 	ContainerName    string
 	ContainerRuntime string // "podman" | "docker" | "" (host)
 
-	MaxOutputChars int
-	WebSearchAPI   string
-	FetchProxy     string
+	ToolMaxOutputChars int
+	WebSearchAPI       string
+	FetchProxy         string
 
 	CWD        string
 	ProjectDir string
@@ -35,7 +35,8 @@ type Config struct {
 	WakeIntervalSeconds int
 
 	ContextAutoCompressionEnabled bool
-	ContextMaxTokens              int64
+	ContextWindowTokens           int64
+	MaxOutputTokens               int64
 	ContextCompressionThreshold   float64
 
 	FeishuAppID             string
@@ -68,9 +69,9 @@ func Load() (*Config, error) {
 		ContainerName:    getEnv("CONTAINER_NAME", ""),
 		ContainerRuntime: getEnv("CONTAINER_RUNTIME", ""),
 
-		MaxOutputChars: getEnvInt("MAX_OUTPUT_CHARS", 100_000),
-		WebSearchAPI:   getEnv("WEB_SEARCH_API", ""),
-		FetchProxy:     getEnv("FETCH_PROXY", ""),
+		ToolMaxOutputChars: getEnvInt("TOOL_MAX_OUTPUT_CHARS", 100_000),
+		WebSearchAPI:       getEnv("WEB_SEARCH_API", ""),
+		FetchProxy:         getEnv("FETCH_PROXY", ""),
 
 		CWD:        getEnv("CWD", "./workspace"),
 		ProjectDir: getEnv("PROJECT_DIR", "../"),
@@ -81,7 +82,8 @@ func Load() (*Config, error) {
 		WakeIntervalSeconds: getEnvInt("WAKE_INTERVAL_SECONDS", 1800),
 
 		ContextAutoCompressionEnabled: getEnvBool("CONTEXT_AUTO_COMPRESSION_ENABLED", true),
-		ContextMaxTokens:              getEnvInt64("CONTEXT_MAX_TOKENS", 32_000),
+		ContextWindowTokens:           getEnvInt64("CONTEXT_WINDOW_TOKENS", 128_000),
+		MaxOutputTokens:               getEnvInt64("MAX_OUTPUT_TOKENS", 16_384),
 		ContextCompressionThreshold:   getEnvFloat("CONTEXT_COMPRESSION_THRESHOLD", 0.7),
 
 		FeishuAppID:             getEnv("FEISHU_APP_ID", ""),
@@ -123,14 +125,17 @@ func (cfg *Config) Validate() error {
 	default:
 		return fmt.Errorf("unsupported CONTAINER_RUNTIME %q", cfg.ContainerRuntime)
 	}
-	if cfg.MaxOutputChars <= 0 {
-		return fmt.Errorf("MAX_OUTPUT_CHARS must be positive")
+	if cfg.ToolMaxOutputChars <= 0 {
+		return fmt.Errorf("TOOL_MAX_OUTPUT_CHARS must be positive")
 	}
 	if cfg.WakeIntervalSeconds <= 0 {
 		return fmt.Errorf("WAKE_INTERVAL_SECONDS must be positive")
 	}
-	if cfg.ContextMaxTokens <= 0 {
-		return fmt.Errorf("CONTEXT_MAX_TOKENS must be positive")
+	if cfg.ContextWindowTokens <= 0 {
+		return fmt.Errorf("CONTEXT_WINDOW_TOKENS must be positive")
+	}
+	if cfg.MaxOutputTokens <= 0 {
+		return fmt.Errorf("MAX_OUTPUT_TOKENS must be positive")
 	}
 	if cfg.ContextCompressionThreshold <= 0 || cfg.ContextCompressionThreshold > 1 {
 		return fmt.Errorf("CONTEXT_COMPRESSION_THRESHOLD must be greater than 0 and at most 1")

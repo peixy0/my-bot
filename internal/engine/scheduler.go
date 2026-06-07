@@ -194,6 +194,21 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 			Value:  parts[1],
 			Sender: e.Sender,
 		})
+	case "context_window":
+		if len(parts) < 2 {
+			s.dispatchToWorker(ctx, e.ChatID, events.ConfigQueryEvent{
+				ChatID: e.ChatID,
+				Key:    events.ConfigKeyContextWindow,
+				Sender: e.Sender,
+			})
+			return
+		}
+		s.dispatchToWorker(ctx, e.ChatID, events.ConfigChangeEvent{
+			ChatID: e.ChatID,
+			Key:    events.ConfigKeyContextWindow,
+			Value:  parts[1],
+			Sender: e.Sender,
+		})
 	case "queue":
 		text := strings.TrimSpace(strings.TrimPrefix(cmd, "queue"))
 		if text == "" {

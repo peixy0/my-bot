@@ -141,7 +141,7 @@ func (d *DefaultToolset) registerFetch(r *Registry) {
 			if err != nil {
 				return ToolResult{}, fmt.Errorf("failed to convert HTML to Markdown: %w", err)
 			}
-			truncated := d.rt.Truncate(ctx, string(markdown), d.cfg.MaxOutputChars)
+			truncated := d.rt.Truncate(ctx, string(markdown), d.cfg.ToolMaxOutputChars)
 			return TextResult(truncated), nil
 
 		case "text/markdown", "text/x-markdown", "text/plain", "application/json":
@@ -149,7 +149,7 @@ func (d *DefaultToolset) registerFetch(r *Registry) {
 			if err != nil {
 				return ToolResult{}, fmt.Errorf("failed to read raw content: %w", err)
 			}
-			truncated := d.rt.Truncate(ctx, string(rawBytes), d.cfg.MaxOutputChars)
+			truncated := d.rt.Truncate(ctx, string(rawBytes), d.cfg.ToolMaxOutputChars)
 			return TextResult(truncated), nil
 
 		default:
