@@ -156,42 +156,26 @@ func parseChatCompletionStream(
 ) (CompletionResponse, error) {
 	acc := &streamAccumulator{toolCalls: make(map[int]*toolCallAccumulator)}
 	reader := bufio.NewReader(r)
-	var eventData strings.Builder
 
 	for {
 		line, err := reader.ReadString('\n')
 		if len(line) > 0 {
 			line = strings.TrimRight(line, "\r\n")
-			if line == "" {
-				done, handleErr := handleStreamEvent(ctx, eventData.String(), acc, onContentDelta)
-				eventData.Reset()
-				if handleErr != nil {
-					return CompletionResponse{}, handleErr
-				}
+			if strings.HasPrefix(line, ":") {
+				// SSE comments are keepalives.
+			} else if data, ok := strings.CutPrefix(line, "data:"); ok {
+				done, err := handleStreamEvent(ctx, data, acc, onContentDelta)
 				if done {
 					return acc.response(), nil
 				}
-			} else if strings.HasPrefix(line, ":") {
-				// SSE comments are keepalives.
-			} else if data, ok := strings.CutPrefix(line, "data:"); ok {
-				if eventData.Len() > 0 {
-					eventData.WriteByte('\n')
+				if err != nil {
+					return CompletionResponse{}, err
 				}
-				eventData.WriteString(strings.TrimPrefix(data, " "))
 			}
 		}
 
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				if eventData.Len() > 0 {
-					done, handleErr := handleStreamEvent(ctx, eventData.String(), acc, onContentDelta)
-					if handleErr != nil {
-						return CompletionResponse{}, handleErr
-					}
-					if done {
-						return acc.response(), nil
-					}
-				}
 				return CompletionResponse{}, io.ErrUnexpectedEOF
 			}
 			return CompletionResponse{}, err
