@@ -49,7 +49,10 @@ func userMessage(content string) Message {
 }
 
 func assistantMessage(content, reasoningContent string, toolCalls []ToolCall) Message {
-	msg := Message{"role": "assistant", "content": content}
+	msg := Message{"role": "assistant"}
+	if content != "" {
+		msg["content"] = content
+	}
 	if reasoningContent != "" {
 		msg["reasoning_content"] = reasoningContent
 	}
