@@ -65,6 +65,10 @@ func (a *Agent) Run(
 		orch.OnContentFinal(ctx, resp.Content)
 
 		if len(resp.ToolCalls) == 0 {
+			if resp.Content == "" {
+				conv.Messages = append(conv.Messages, userMessage("continue"))
+				continue
+			}
 			orch.OnFinalResponse(ctx, resp.Content)
 			return nil
 		}

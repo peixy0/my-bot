@@ -329,7 +329,7 @@ func (w *ConversationWorker) processConfigChange(ctx context.Context, ev events.
 
 func (w *ConversationWorker) runBackground(ctx context.Context, sender events.Outbound, prompt llm.SystemPrompt, content any) error {
 	orch := llm.NewBackgroundOrchestrator(sender, w.agent, w.skills, w.cfg, w.rt)
-	w.loop.ResetConv()
+	// w.loop.ResetConv()
 	return w.loop.Run(ctx, w.reg, orch, prompt, content)
 }
 
