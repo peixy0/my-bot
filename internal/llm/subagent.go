@@ -197,13 +197,6 @@ func (c *agentTaskController) WriteInput(input string) error {
 	}
 }
 
-func (c *agentTaskController) Terminate() error {
-	if c.cancel != nil {
-		c.cancel()
-	}
-	return nil
-}
-
 func (c *agentTaskController) Kill() error {
 	if c.cancel != nil {
 		c.cancel()

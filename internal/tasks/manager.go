@@ -55,9 +55,8 @@ type writeInputReq struct {
 	resp   chan error
 }
 
-type terminateReq struct {
+type killReq struct {
 	taskID string
-	kill   bool
 	resp   chan terminateResp
 }
 
@@ -214,7 +213,7 @@ func (m *Manager) loop() {
 			}
 			req.resp <- task.controller.WriteInput(req.input)
 			close(req.resp)
-		case terminateReq:
+		case killReq:
 			task := tasks[req.taskID]
 			if task == nil {
 				req.resp <- terminateResp{err: fmt.Errorf("task %q not found", req.taskID)}
@@ -226,13 +225,7 @@ func (m *Manager) loop() {
 				close(req.resp)
 				continue
 			}
-			task.killRequested = req.kill
-			var err error
-			if req.kill {
-				err = task.controller.Kill()
-			} else {
-				err = task.controller.Terminate()
-			}
+			err := task.controller.Kill()
 			req.resp <- terminateResp{snap: snapshotOf(task, true), err: err}
 			close(req.resp)
 		case removeReq:
@@ -383,21 +376,10 @@ func (m *Manager) WriteInput(ctx context.Context, taskID, input string) error {
 	return <-resp
 }
 
-func (m *Manager) Terminate(ctx context.Context, taskID string) (Snapshot, error) {
-	resp := make(chan terminateResp, 1)
-	select {
-	case m.inbox <- terminateReq{taskID: taskID, resp: resp}:
-	case <-ctx.Done():
-		return Snapshot{}, ctx.Err()
-	}
-	got := <-resp
-	return got.snap, got.err
-}
-
 func (m *Manager) Kill(ctx context.Context, taskID string) (Snapshot, error) {
 	resp := make(chan terminateResp, 1)
 	select {
-	case m.inbox <- terminateReq{taskID: taskID, kill: true, resp: resp}:
+	case m.inbox <- killReq{taskID: taskID, resp: resp}:
 	case <-ctx.Done():
 		return Snapshot{}, ctx.Err()
 	}

@@ -35,7 +35,6 @@ type TaskResult struct {
 
 type Controller interface {
 	WriteInput(string) error
-	Terminate() error
 	Kill() error
 }
 

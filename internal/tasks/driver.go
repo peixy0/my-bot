@@ -62,13 +62,6 @@ func (c *processController) WriteInput(input string) error {
 	return err
 }
 
-func (c *processController) Terminate() error {
-	if c.proc == nil {
-		return nil
-	}
-	return c.proc.Terminate()
-}
-
 func (c *processController) Kill() error {
 	if c.proc == nil {
 		return nil
