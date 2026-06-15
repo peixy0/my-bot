@@ -195,7 +195,7 @@ func (w *ConversationWorker) processText(ctx context.Context, ev events.TextInpu
 		slog.Error("compress", "chat", w.chatID, "err", err)
 	}
 	reg := w.tools.Registry(ev.Sender)
-	orch := llm.NewHumanInputOrchestrator(reg, ev.Sender, w.InLoopInbox)
+	orch := llm.NewHumanInputOrchestrator(reg, ev.Sender, w.InLoopInbox).WithVision(w.VisionSupported())
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
 	return w.loop.Run(ctx, reg, orch, prompt, wrapUserMessage(ev.Message))
@@ -221,7 +221,7 @@ func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageIn
 		},
 	}
 	reg := w.tools.Registry(ev.Sender)
-	orch := llm.NewVisionHumanInputOrchestrator(reg, ev.Sender, w.InLoopInbox)
+	orch := llm.NewHumanInputOrchestrator(reg, ev.Sender, w.InLoopInbox).WithVision(true)
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
 	return w.loop.Run(ctx, reg, orch, prompt, content)

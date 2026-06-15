@@ -42,23 +42,19 @@ func sendBeforeToolUse(ctx context.Context, sender events.Outbound, content stri
 }
 
 type HumanInputOrchestrator struct {
-	registry    *tools.Registry
-	sender      events.Outbound
-	inLoopInbox inbox.Inbox[events.WorkerEvent]
-	appendImage func([]map[string]any, events.ImageInputEvent) []map[string]any
+	registry      *tools.Registry
+	sender        events.Outbound
+	inLoopInbox   inbox.Inbox[events.WorkerEvent]
+	visionSupport bool
 }
 
 func NewHumanInputOrchestrator(registry *tools.Registry, sender events.Outbound, inLoopInbox inbox.Inbox[events.WorkerEvent]) *HumanInputOrchestrator {
 	return &HumanInputOrchestrator{registry: registry, sender: sender, inLoopInbox: inLoopInbox}
 }
 
-func NewVisionHumanInputOrchestrator(registry *tools.Registry, sender events.Outbound, inLoopInbox inbox.Inbox[events.WorkerEvent]) *HumanInputOrchestrator {
-	return &HumanInputOrchestrator{
-		registry:    registry,
-		sender:      sender,
-		inLoopInbox: inLoopInbox,
-		appendImage: appendVisionImagePart,
-	}
+func (o *HumanInputOrchestrator) WithVision(visionSupport bool) *HumanInputOrchestrator {
+	o.visionSupport = visionSupport
+	return o
 }
 
 func (o *HumanInputOrchestrator) OnContentDelta(ctx context.Context, delta string) {
@@ -116,14 +112,14 @@ func (o *HumanInputOrchestrator) drainInLoopInput() *Message {
 			sb.WriteString(ev.Message)
 			sb.WriteString("\n\n")
 		case events.ImageInputEvent:
-			if o.appendImage == nil {
+			if o.visionSupport == false {
 				continue
 			}
 			if strings.TrimSpace(ev.Message) != "" {
 				sb.WriteString(ev.Message)
 				sb.WriteString("\n\n")
 			}
-			imageParts = o.appendImage(imageParts, ev)
+			imageParts = appendVisionImagePart(imageParts, ev)
 		}
 	}
 	text := strings.TrimSpace(sb.String())
