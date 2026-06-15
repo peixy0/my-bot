@@ -382,9 +382,8 @@ func (w *ConversationWorker) reportError(ctx context.Context, err error, e event
 
 func wrapUserMessage(msg string) string {
 	now := time.Now()
-	return fmt.Sprintf("Message Time: %s\nTimezone: %s\n\n%s",
+	return fmt.Sprintf("message time: %s\n\n%s",
 		now.Format("2006-01-02 15:04:05 MST-0700"),
-		now.Location(),
 		msg)
 }
 

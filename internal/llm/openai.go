@@ -61,12 +61,11 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (C
 
 func (p *OpenAIProvider) doComplete(ctx context.Context, req CompletionRequest) (CompletionResponse, error) {
 	body := map[string]any{
-		"model":                req.Model,
-		"messages":             req.Messages,
-		"temperature":          req.Temperature,
-		"stream":               true,
-		"stream_options":       map[string]any{"include_usage": true},
-		"chat_template_kwargs": map[string]any{"enable_thinking": true},
+		"model":          req.Model,
+		"messages":       req.Messages,
+		"temperature":    req.Temperature,
+		"stream":         true,
+		"stream_options": map[string]any{"include_usage": true},
 	}
 	if req.MaxTokens > 0 {
 		body["max_tokens"] = req.MaxTokens
