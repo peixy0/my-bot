@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	"my-bot/internal/runtime"
@@ -29,7 +28,6 @@ type Outbound struct {
 	rt        runtime.Runtime
 	chatID    string
 	messageID string
-	mu        sync.Mutex
 	partial   strings.Builder
 	stream    *streamingCard
 }
@@ -63,8 +61,6 @@ func (o *Outbound) Send(ctx context.Context, text string) {
 }
 
 func (o *Outbound) SendDelta(ctx context.Context, text string) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
 	o.partial.WriteString(text)
 
 	if strings.TrimSpace(o.partial.String()) == "" {
@@ -88,16 +84,15 @@ func (o *Outbound) SendDelta(ctx context.Context, text string) {
 	}
 	if err := o.updateStreamingCard(ctx, o.stream, o.partial.String()); err != nil {
 		slog.Warn("feishu streaming card update failed", "err", err, "chat_id", o.chatID, "card_id", o.stream.cardID)
+		o.stream.failed = true
 	}
 }
 
 func (o *Outbound) SendFinal(ctx context.Context) {
-	o.mu.Lock()
 	text := o.partial.String()
 	o.partial.Reset()
 	stream := o.stream
 	o.stream = nil
-	o.mu.Unlock()
 
 	if strings.TrimSpace(text) == "" {
 		if stream != nil && !stream.failed {
@@ -110,13 +105,15 @@ func (o *Outbound) SendFinal(ctx context.Context) {
 	if stream != nil && !stream.failed {
 		if err := o.updateStreamingCard(ctx, stream, text); err != nil {
 			slog.Warn("feishu streaming card final update failed", "err", err, "chat_id", o.chatID, "card_id", stream.cardID)
+			stream.failed = true
 		}
 		if err := o.closeStreamingCard(ctx, stream); err != nil {
 			slog.Warn("feishu streaming card close failed", "err", err, "chat_id", o.chatID, "card_id", stream.cardID)
 		}
-		return
 	}
-	o.Send(ctx, text)
+	if stream.failed {
+		o.Send(ctx, text)
+	}
 }
 
 func (o *Outbound) SendText(ctx context.Context, text string) error {
