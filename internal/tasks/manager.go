@@ -11,7 +11,6 @@ type Manager struct {
 	rootCtx        context.Context
 	rootCancel     context.CancelFunc
 	inbox          chan any
-	stopped        chan struct{}
 }
 
 type startReq struct {
@@ -102,14 +101,12 @@ func NewManager(maxOutputChars int) *Manager {
 		rootCtx:        rootCtx,
 		rootCancel:     rootCancel,
 		inbox:          make(chan any, 256),
-		stopped:        make(chan struct{}),
 	}
 	go m.loop()
 	return m
 }
 
 func (m *Manager) loop() {
-	defer close(m.stopped)
 	tasks := make(map[string]*taskState)
 	order := make([]string, 0, 16)
 	nextID := 0
@@ -463,10 +460,5 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	select {
-	case <-m.stopped:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return nil
 }

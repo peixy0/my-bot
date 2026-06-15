@@ -168,7 +168,6 @@ type SubagentOrchestrator struct {
 	registry *tools.Registry
 	emit     *tasks.Emitter
 	input    <-chan string
-	output   string
 }
 
 func NewSubagentOrchestrator(registry *tools.Registry, emit *tasks.Emitter, input <-chan string) *SubagentOrchestrator {
@@ -176,30 +175,16 @@ func NewSubagentOrchestrator(registry *tools.Registry, emit *tasks.Emitter, inpu
 }
 
 func (o *SubagentOrchestrator) OnContentDelta(_ context.Context, delta string) {
-	if delta == "" {
-		return
-	}
-	o.output += delta
-	if o.emit != nil {
+	if delta != "" && o.emit != nil {
 		o.emit.Output(delta)
 	}
 }
 
 func (o *SubagentOrchestrator) OnContentFinal(_ context.Context, _ string) {}
 
-func (o *SubagentOrchestrator) OnFinalResponse(_ context.Context, content string) {
-	if o.output != "" {
-		return
-	}
-	o.output = content
-	if content != "" && o.emit != nil {
-		o.emit.Output(content)
-	}
-}
+func (o *SubagentOrchestrator) OnFinalResponse(_ context.Context, content string) {}
 
 func (o *SubagentOrchestrator) BeforeToolUse(_ context.Context, _ string) {}
-
-func (o *SubagentOrchestrator) Output() string { return o.output }
 
 func (o *SubagentOrchestrator) DispatchTools(ctx context.Context, calls []ToolCall) ([]Message, error) {
 	toolMsgs, err := runDispatch(ctx, o.registry, calls)

@@ -170,20 +170,6 @@ func TestHumanInputOrchestrator_ContentFinalBeforeToolUse(t *testing.T) {
 	}
 }
 
-func TestSubagentOrchestrator_CapturesOutput(t *testing.T) {
-	orch := NewSubagentOrchestrator(tools.NewRegistry(), nil, nil)
-
-	orch.OnContentFinal(context.Background(), "intermediate")
-	if orch.Output() != "" {
-		t.Errorf("expected content final not to capture terminal output, got %q", orch.Output())
-	}
-
-	orch.OnFinalResponse(context.Background(), "subagent result")
-	if orch.Output() != "subagent result" {
-		t.Errorf("expected output 'subagent result', got %q", orch.Output())
-	}
-}
-
 func TestSubagentOrchestrator_DoesNotForwardToolContent(t *testing.T) {
 	sender := &mockSender{}
 	orch := NewSubagentOrchestrator(tools.NewRegistry(), nil, nil)
@@ -307,12 +293,14 @@ func TestFleetToolset_ReturnsAllChildTaskIDs(t *testing.T) {
 
 type echoTaskClient struct{}
 
-func (c *echoTaskClient) Complete(_ context.Context, req CompletionRequest) (CompletionResponse, error) {
+func (c *echoTaskClient) Complete(ctx context.Context, req CompletionRequest) (CompletionResponse, error) {
 	content := ""
 	if len(req.Messages) > 0 {
 		content, _ = req.Messages[len(req.Messages)-1]["content"].(string)
 	}
-	return CompletionResponse{Content: "result:" + content, FinishReason: "stop", TotalTokens: 10}, nil
+	result := "result:" + content
+	req.OnContentDelta(ctx, result)
+	return CompletionResponse{Content: result, FinishReason: "stop", TotalTokens: 10}, nil
 }
 
 func TestRunDispatch_UnknownTool(t *testing.T) {
