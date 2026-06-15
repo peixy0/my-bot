@@ -99,20 +99,6 @@ func (r *Registry) Schemas() []map[string]any {
 	return out
 }
 
-func (r *Registry) Fork() *Registry {
-	c := &Registry{
-		schemas:  make(map[string]ToolSchema, len(r.schemas)),
-		handlers: make(map[string]ToolHandler, len(r.handlers)),
-	}
-	for k, v := range r.schemas {
-		c.schemas[k] = v
-	}
-	for k, v := range r.handlers {
-		c.handlers[k] = v
-	}
-	return c
-}
-
 func (r *Registry) Names() []string {
 	names := make([]string, 0, len(r.schemas))
 	for k := range r.schemas {
