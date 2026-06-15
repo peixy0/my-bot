@@ -30,8 +30,7 @@ type ConversationWorker struct {
 	skills *tools.SkillLoader
 	loop   *llm.AgentLoop
 
-	cmdTools *tools.CommandToolset
-	reg      *tools.Registry
+	tools *sessionTools
 
 	Events      *inbox.Memory[events.WorkerEvent]
 	InLoopInbox *inbox.Memory[events.WorkerEvent]
@@ -47,21 +46,30 @@ func NewConversationWorker(
 	rt runtime.Runtime,
 	skills *tools.SkillLoader,
 ) *ConversationWorker {
+	return newConversationWorker(chatID, cfg, agent, rt, skills, newSessionTools(rt, skills, cfg, agent))
+}
+
+func newConversationWorker(
+	chatID string,
+	cfg *config.Config,
+	agent *llm.Agent,
+	rt runtime.Runtime,
+	skills *tools.SkillLoader,
+	tools *sessionTools,
+) *ConversationWorker {
 	workerCfg := *cfg
 	workerAgent := agent.Fork()
-	cmdTools := tools.NewCommandToolset(rt, workerCfg.ToolMaxOutputChars)
 	w := &ConversationWorker{
 		chatID:      chatID,
 		cfg:         &workerCfg,
 		agent:       workerAgent,
 		rt:          rt,
 		skills:      skills,
-		cmdTools:    cmdTools,
+		tools:       tools,
 		Events:      inbox.NewMemory[events.WorkerEvent](workerEventBuf),
 		InLoopInbox: inbox.NewMemory[events.WorkerEvent](inLoopInboxBuf),
 	}
-	w.reg = w.newRegistry()
-	w.loop = llm.NewAgentLoop(w.cfg, workerAgent, cmdTools)
+	w.loop = llm.NewAgentLoop(w.cfg, workerAgent)
 	return w
 }
 
@@ -79,7 +87,6 @@ func (w *ConversationWorker) VisionSupported() bool {
 
 func (w *ConversationWorker) SetVisionSupported(enabled bool) {
 	w.cfg.VisionSupport = enabled
-	w.reg = w.newRegistry()
 }
 
 func (w *ConversationWorker) Temperature() string {
@@ -125,16 +132,8 @@ func (w *ConversationWorker) SetContextWindow(value int64) {
 	w.cfg.ContextWindowTokens = value
 }
 
-func (w *ConversationWorker) newRegistry() *tools.Registry {
-	reg := tools.NewRegistry()
-	reg.RegisterToolset(tools.NewDefaultToolset(w.rt, w.skills, w.cfg))
-	reg.RegisterToolset(w.cmdTools)
-	return reg
-}
-
 func (w *ConversationWorker) Run(ctx context.Context) error {
 	slog.Debug("worker started", "chat", w.chatID)
-	defer w.shutdown(ctx)
 	for {
 		select {
 		case msg := <-w.Events.C():
@@ -195,10 +194,11 @@ func (w *ConversationWorker) processText(ctx context.Context, ev events.TextInpu
 	if err := w.maybeCompress(ctx, prompt); err != nil {
 		slog.Error("compress", "chat", w.chatID, "err", err)
 	}
-	orch := llm.NewHumanInputOrchestrator(ev.Sender, w.InLoopInbox, w.agent, w.skills, w.cfg, w.rt)
+	reg := w.tools.Registry(ev.Sender)
+	orch := llm.NewHumanInputOrchestrator(reg, ev.Sender, w.InLoopInbox)
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
-	return w.loop.Run(ctx, w.reg, orch, prompt, wrapUserMessage(ev.Message))
+	return w.loop.Run(ctx, reg, orch, prompt, wrapUserMessage(ev.Message))
 }
 
 func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageInputEvent) error {
@@ -220,10 +220,11 @@ func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageIn
 			},
 		},
 	}
-	orch := llm.NewHumanInputOrchestrator(ev.Sender, w.InLoopInbox, w.agent, w.skills, w.cfg, w.rt)
+	reg := w.tools.Registry(ev.Sender)
+	orch := llm.NewVisionHumanInputOrchestrator(reg, ev.Sender, w.InLoopInbox)
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
-	return w.loop.Run(ctx, w.reg, orch, prompt, content)
+	return w.loop.Run(ctx, reg, orch, prompt, content)
 }
 
 func (w *ConversationWorker) processHeartbeat(ctx context.Context, ev events.HeartbeatEvent) error {
@@ -328,9 +329,9 @@ func (w *ConversationWorker) processConfigChange(ctx context.Context, ev events.
 }
 
 func (w *ConversationWorker) runBackground(ctx context.Context, sender events.Outbound, prompt llm.SystemPrompt, content any) error {
-	orch := llm.NewBackgroundOrchestrator(sender, w.agent, w.skills, w.cfg, w.rt)
-	// w.loop.ResetConv()
-	return w.loop.Run(ctx, w.reg, orch, prompt, content)
+	reg := w.tools.Registry(sender)
+	orch := llm.NewBackgroundOrchestrator(reg, sender)
+	return w.loop.Run(ctx, reg, orch, prompt, content)
 }
 
 func (w *ConversationWorker) maybeCompress(ctx context.Context, prompt llm.SystemPrompt) error {
@@ -376,16 +377,6 @@ func (w *ConversationWorker) reportError(ctx context.Context, err error, e event
 		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
 	case events.ConfigChangeEvent:
 		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
-	}
-}
-
-func (w *ConversationWorker) shutdown(ctx context.Context) {
-	slog.Debug("worker shutting down", "chat", w.chatID)
-	w.stopHeartbeat()
-	ctx2, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := w.loop.Shutdown(ctx2); err != nil {
-		slog.Error("shutdown", "chat", w.chatID, "err", err)
 	}
 }
 

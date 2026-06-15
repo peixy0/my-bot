@@ -14,7 +14,7 @@ An event-driven AI agent framework in Go. It connects messaging platforms (Feish
 
 These are the core principles we hold the codebase to. They are load-bearing — please don't drift from them without good reason.
 
-- **Event-driven over shared state.** Components communicate via channels and events, not shared mutable state. The Scheduler's single-goroutine `dispatch()` is the canonical pattern: ownership of `workers` / `cronWorkers` belongs to one goroutine, no lock needed. Prefer this model when adding new components.
+- **Event-driven over shared state.** Components communicate via channels and events, not shared mutable state. The Scheduler's single-goroutine `dispatch()` is the canonical pattern: ownership of `sessions` belongs to one goroutine, no lock needed. Prefer this model when adding new components.
 - **Locks are a last resort.** A `sync.Mutex` is an admission that we couldn't structure the code as a single owner. Before adding one, ask: can this state live behind a channel, in a single goroutine, or be made immutable? Locks are acceptable only at boundaries where external libraries hand us callbacks on their own goroutines.
 - **Interface-driven boundaries for testability.** Every cross-package collaborator is an interface (`CompletionClient`, `Outbound`, `Runtime`, `Toolset`). Don't add concrete-to-concrete dependencies between sibling packages under `internal/`.
 - **Composable prompts and tools.** Prompts compose workspace `.md` files via `promptBase`; tools register into a `Registry`. Extending the system means adding implementations, not modifying the core.
@@ -28,14 +28,17 @@ internal/
   config/config.go       ← env-based configuration (30+ fields)
   events/events.go       ← event types & Outbound interface
   engine/
-    scheduler.go         ← event dispatcher, worker lifecycle, slash commands
-    worker.go            ← per-chat conversation worker
+    scheduler.go         ← event dispatcher, session lifecycle, slash commands
+    session.go           ← per-chat session owner for tools, cron, and shutdown
+    worker.go            ← per-chat conversation logic and event loop
     cron.go              ← cron job loading & scheduling
   llm/
     client.go            ← CompletionClient interface, Message types
     agent.go             ← LLM agent loop + context compression
-    loop.go              ← AgentLoop (owns Conversation + TaskMonitor)
-    orchestrator.go      ← tool dispatch, subagent/fleet meta-tools
+    loop.go              ← AgentLoop (owns Conversation only)
+    orchestrator.go      ← tool dispatch and response strategies
+    subagent.go          ← subagent/fleet task startup service
+    reg.go               ← registry builders for session and subagent execution
     prompt.go            ← composable system prompt builders
     openai.go            ← OpenAI-compatible provider (streaming raw net/http, no SDK)
   messaging/
@@ -53,10 +56,11 @@ internal/
   tools/
     registry.go          ← Registry, Toolset, ToolRegistrar interfaces
     toolbox.go           ← DefaultToolset (8+ core tools)
-    background.go        ← TaskMonitor, CommandToolset (run_command, etc.)
+    background.go        ← CommandToolset task APIs (run_command, await_task, etc.)
     skill.go             ← SkillLoader (frontmatter .md files)
     search.go            ← DuckDuckGo web search
     markdown.go          ← frontmatter parser
+  tasks/                 ← event-driven TaskManager, task drivers, retention
   api/
     server.go            ← HTTP + WebSocket server
 ```
@@ -76,12 +80,14 @@ Every long-lived goroutine and what it owns. This is the single source of truth 
 
 | Goroutine | Started by | Owns / Touches | Synchronization |
 |---|---|---|---|
-| `Scheduler.Run` | main | `workers`, `cronWorkers` maps; reads `queue` | none — single owner |
-| `ConversationWorker.Run` (per chat) | Scheduler | conversation state, `Events` chan, in-loop input chan | none within worker |
+| `Scheduler.Run` | main | `sessions` map; reads `queue` | none — single owner |
+| `chatSession.run` (per chat) | Scheduler | session shutdown path, worker lifetime | none within session |
+| `ConversationWorker.Run` (per chat) | chatSession | conversation state, `Events` chan, in-loop input chan | none within worker |
 | `cron.Cron` internal goroutines | CronWorker (via `cron.Cron.Start`) | invokes registered funcs that send on `workerCh` | callbacks only touch a channel; no shared map access |
 | Feishu image download | Feishu inbound | downloads bytes, enqueues an event, surfaces failures to user | fire-and-forget; logs every error path |
 | Heartbeat `time.AfterFunc` | ConversationWorker | non-blocking send to worker `Events` | timer is `Stop()`-ed on shutdown |
-| TaskMonitor watchers | TaskMonitor | per-task stdout/stderr capture, status reporting | per-task goroutine; channel-based reporting back |
+| `tasks.Manager` loop | chatSession or subagent runner | task table, state transitions, retention | single owner goroutine + request channel |
+| Process task pumps | `tasks.NewProcessDriver` | per-task stdin/stdout/stderr bridging and exit reporting | per-task goroutines reporting into `tasks.Manager` |
 | Feishu dedup | Feishu inbound | `expires` map + `order` slice | single-owner goroutine, channel-fed (see `messaging/feishu/feishu.go`) |
 
 ### Key Interfaces
@@ -106,16 +112,18 @@ Every long-lived goroutine and what it owns. This is the single source of truth 
 
 These are non-obvious decisions worth preserving. If you're tempted to "fix" one of these, read the rationale first.
 
-- **Single-goroutine Scheduler dispatch.** `Scheduler.workers` and `cronWorkers` are deliberately unprotected by mutex. The invariant: only `Run()` reads/writes them. If you ever need access from elsewhere, send an event into the queue rather than introducing a lock. The maps are documented in `scheduler.go`.
+- **Single-goroutine Scheduler dispatch.** `Scheduler.sessions` is deliberately unprotected by mutex. The invariant: only `Run()` reads/writes it. If you ever need access from elsewhere, send an event into the queue rather than introducing a lock. The map is documented in `scheduler.go`.
 - **Per-chat ConversationWorker isolation.** Each chat has its own goroutine, its own `Events` channel, and its own conversation state. No cross-chat sharing means no cross-chat synchronization.
+- **Session owns resources; worker borrows them.** `chatSession` owns `tasks.Manager`, `CommandToolset`, cron lifecycle, and shutdown. `ConversationWorker` uses these resources through `sessionTools` and should not become an owner again.
 - **Per-worker model and vision selection.** `Scheduler` keeps one base `Agent` for dependency wiring, but each `ConversationWorker` owns its config copy; `/model` and `/vision` change only that worker's config.
 - **Live user input uses a separate in-loop input inbox, not the worker queue.** While an agent loop is running, ordinary text/images are routed as non-blocking interrupts with a `default` fallthrough; `/queue` forces the worker queue for handling after the current loop finishes.
 - **Three orchestrator variants instead of mode flags.** Strategy pattern keeps each orchestrator's responsibility crisp; we'd rather grow a fourth variant than feature-flag an existing one.
 - **Raw `net/http` for LLM calls, no SDK.** The OpenAI-compatible provider serializes messages and tools as `map[string]any` and consumes streaming chat-completion events directly. Don't reintroduce `openai-go`.
 - **Composable system prompts.** Prompts compose workspace `.md` files; behavior is data-driven, not code-driven. New prompts should declare their section list, not duplicate file-reading logic.
 - **`Runtime` abstraction.** Lets the same tools execute on host bash or in a container with no caller changes.
-- **Fire-and-forget background tasks via TaskMonitor.** Long-running tools are launched, tracked, and reported back via events — the agent loop never blocks waiting for them.
-- **Tool dispatch is intentionally serial.** `runDispatch()` in `orchestrator.go` runs tool calls sequentially. Several tools (notably TaskMonitor and run_command-related state) are not safe under concurrent invocation. Parallelization is a separate, dedicated session — don't bolt it on here.
+- **Task-first asynchronous execution.** Commands, delegated agents, and fleets all create `Task` objects and return `task_id` immediately. Progress, output, and termination flow through `internal/tasks`.
+- **Event-driven task ownership.** `tasks.Manager` is the single owner of task state, using a request/event channel rather than mutexes. The public task model is flat: commands, agents, and fleets all surface as independent tasks identified by `task_id`.
+- **Tool dispatch is selectively parallel.** `runDispatch()` runs tools in parallel only when their schema marks them `Parallel`; non-parallel tools are still serialized through a mutex in the dispatcher.
 
 ## Conventions
 
@@ -141,11 +149,12 @@ If a function genuinely requires a comment to be understandable, that's a signal
 
 These are the load-bearing invariants that an earlier draft expressed via inline comments. They are listed here so the code stays clean and the canonical statement is in one place.
 
-- `Scheduler.workers` and `Scheduler.cronWorkers` are accessed only from the `Run()` goroutine (via `dispatch` / `handleSlashCommand` / `handleCronCommand`, all called inline). No mutex. If you ever need cross-goroutine access, route it through the event queue.
+- `Scheduler.sessions` is accessed only from the `Run()` goroutine (via `dispatch` / `handleSlashCommand` / `handleCronCommand`, all called inline). No mutex. If you ever need cross-goroutine access, route it through the event queue.
 - `CronWorker.jobs` is mutated only from the Scheduler goroutine. The `cron.Cron` library invokes registered funcs on its own goroutines, but those funcs only send on `workerCh` — they never touch the `jobs` map. No mutex.
 - `messaging.dedup` is the canonical example of the channel-as-single-owner pattern: one goroutine owns the `expires` map and `order` slice; all callers reach it via the request channel `dedup.in`. The goroutine dies cleanly when the inbound context is cancelled. If `dedup.check` cannot reach the goroutine within 1s, it fails open (returns true) — under shutdown we'd rather risk a duplicate than a deadlock.
-- `ConversationWorker.heartbeatTimer` is a `time.AfterFunc` that may outlive normal event processing. It is `Stop()`-ed at the top of every event-loop iteration and once more in `shutdown()`.
+- `ConversationWorker.heartbeatTimer` is a `time.AfterFunc` that may outlive normal event processing. It is `Stop()`-ed at the top of every event-loop iteration. Session teardown cancels the worker context, which ends the loop and triggers resource shutdown in `chatSession`.
 - `ConversationWorker.cfg` owns per-chat model and vision settings. `Scheduler.agent` is dependency wiring only and should not be mutated by slash commands.
+- `chatSession` owns `sessionTools`, `CronWorker`, and the only shutdown path for `tasks.Manager`. `ConversationWorker` must not call `tasks.Manager.Shutdown()` directly.
 - The Feishu image-download goroutine is fire-and-forget but every error path logs at `Warn` and surfaces a single user-visible failure message via `outbound.Send`. Don't add new fire-and-forget paths without the same discipline.
 
 ### Configuration
@@ -157,7 +166,7 @@ These are the load-bearing invariants that an earlier draft expressed via inline
 - Tool schemas use OpenAI function-calling format (JSON Schema).
 - Tool handlers: `func(ctx context.Context, args []byte) (ToolResult, error)`.
 - Platform-specific tools: implement `ToolRegistrar` on your `Outbound`.
-- New tools must be safe for the current serial-dispatch model. Document any state they share with TaskMonitor.
+- New tools must be safe for the current serial-dispatch model. Document any state they share with `tasks.Manager`.
 
 ### Event System
 - New event types: add struct in `events/events.go`, implement marker methods (`agentEvent()`, `workerEvent()` if routed to workers).
@@ -190,7 +199,7 @@ Continue propagating `io.ReadAll` and streaming parse errors at I/O boundaries. 
 3. Handler: always unmarshal args with `json.Unmarshal`, return `(ToolResult, error)`.
 4. Register in the appropriate toolset's `Register()` method.
 5. For platform-specific tools, implement `ToolRegistrar` on the `Outbound`.
-6. Confirm it's safe under serial dispatch; document any shared state with TaskMonitor.
+6. Confirm it's safe under serial dispatch; document any shared state with `tasks.Manager`.
 
 ### Adding a New Messaging Platform
 1. Create a subpackage under `internal/messaging/<platform>/`.
@@ -221,7 +230,7 @@ Continue propagating `io.ReadAll` and streaming parse errors at I/O boundaries. 
 - Highest-value untested seams:
   - `engine/scheduler.go` — dispatch routing, slash-command handling.
   - `internal/messaging/feishu/inbound.go` and `outbound.go` — parsing, enqueue failures, and send retry behavior.
-  - `tools/background.go` — TaskMonitor lifecycle (start, kill, grace period).
+  - `tools/background.go` + `internal/tasks/` — task lifecycle, retention, and session/subagent shutdown.
   - `engine/cron.go` — job loading, invalid-expr handling.
 - Mock `CompletionClient`, `Runtime`, and `Outbound` interfaces — they're the natural seams.
 - Always run `go test ./... -race -count=1` before merging changes that touch concurrency.
@@ -254,7 +263,7 @@ go build -o bot ./cmd/bot
 |---------------------|------------|
 | Add/change config | `internal/config/config.go` |
 | Add a tool | `internal/tools/toolbox.go` or new toolset file |
-| Add a background-task tool | `internal/tools/background.go` (TaskMonitor) |
+| Add a background-task tool | `internal/tools/background.go` + `internal/tasks/` |
 | Add an event type | `internal/events/events.go` |
 | Change LLM behavior | `internal/llm/agent.go` (loop), `openai.go` (provider) |
 | Change the agent loop / context compression | `internal/llm/loop.go`, `internal/llm/agent.go` |

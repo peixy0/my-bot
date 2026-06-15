@@ -3,7 +3,6 @@ package llm
 import (
 	"context"
 	"os"
-	"time"
 
 	"my-bot/internal/config"
 	"my-bot/internal/tools"
@@ -11,18 +10,16 @@ import (
 )
 
 type AgentLoop struct {
-	cfg      *config.Config
-	agent    *Agent
-	cmdTools *tools.CommandToolset
-	conv     *Conversation
+	cfg   *config.Config
+	agent *Agent
+	conv  *Conversation
 }
 
-func NewAgentLoop(cfg *config.Config, agent *Agent, cmdTools *tools.CommandToolset) *AgentLoop {
+func NewAgentLoop(cfg *config.Config, agent *Agent) *AgentLoop {
 	return &AgentLoop{
-		cfg:      cfg,
-		agent:    agent,
-		cmdTools: cmdTools,
-		conv:     NewConversation(),
+		cfg:   cfg,
+		agent: agent,
+		conv:  NewConversation(),
 	}
 }
 
@@ -32,17 +29,12 @@ func (l *AgentLoop) ResetConv() { l.conv = NewConversation() }
 
 func (l *AgentLoop) Run(ctx context.Context, reg *tools.Registry, orch Orchestrator, prompt SystemPrompt, content any) error {
 	r := reg.Fork()
-	orch.Wire(r)
 	l.conv.Messages = append(l.conv.Messages, Message{"role": "user", "content": content})
 	return l.agent.Run(ctx, l.cfg, prompt.Build(ctx), l.conv, orch, r)
 }
 
 func (l *AgentLoop) Compress(ctx context.Context, prompt SystemPrompt) error {
 	return l.agent.Compress(ctx, l.cfg, prompt.Build(ctx), l.conv)
-}
-
-func (l *AgentLoop) Shutdown(ctx context.Context) error {
-	return l.cmdTools.Shutdown(ctx)
 }
 
 func (l *AgentLoop) DumpConversation(path string) error {
@@ -52,5 +44,3 @@ func (l *AgentLoop) DumpConversation(path string) error {
 	}
 	return os.WriteFile(path, data, 0600)
 }
-
-const shutdownTimeout = 10 * time.Second

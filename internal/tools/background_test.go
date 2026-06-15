@@ -3,74 +3,152 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	"my-bot/internal/runtime"
+	"my-bot/internal/tasks"
 )
 
-func TestRunCommand_DefaultTimeout60(t *testing.T) {
-	type params struct {
-		Command        string `json:"command"`
-		TimeoutSeconds int    `json:"timeout_seconds"`
-	}
-	p := params{TimeoutSeconds: 60}
-	if err := json.Unmarshal([]byte(`{"command":"echo hi"}`), &p); err != nil {
-		t.Fatal(err)
-	}
-	if p.TimeoutSeconds != 60 {
-		t.Errorf("expected default timeout 60, got %d", p.TimeoutSeconds)
-	}
+func newCommandTestToolset() (*CommandToolset, *tasks.Manager, *Registry) {
+	rt := runtime.NewHostRuntime(4096)
+	manager := tasks.NewManager(4096)
+	toolset := NewCommandToolset(rt, manager)
+	reg := NewRegistry()
+	toolset.Register(reg)
+	return toolset, manager, reg
 }
 
-func TestOutputStream_TruncationBehavior(t *testing.T) {
-	s := newOutputStream(10)
-
-	s.Append([]byte("hello"))
-	if s.Render() != "hello" {
-		t.Errorf("expected 'hello', got %q", s.Render())
+func TestRunCommandReturnsTaskID(t *testing.T) {
+	_, manager, reg := newCommandTestToolset()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = manager.Shutdown(ctx)
+	}()
+	handler, ok := reg.Handler("run_command")
+	if !ok {
+		t.Fatal("expected run_command handler")
 	}
-
-	s.Append([]byte(" world!!!"))
-	rendered := s.Render()
-	if len(rendered) == 0 {
-		t.Fatal("expected non-empty output")
-	}
-	if rendered[:len("[output truncated; showing the last 10 bytes]")] != "[output truncated; showing the last 10 bytes]" {
-		t.Errorf("expected truncation prefix, got %q", rendered[:30])
-	}
-}
-
-func TestTaskMonitor_SpawnAndList(t *testing.T) {
-	m := &TaskMonitor{
-		tasks:          make(map[string]*BackgroundTask),
-		maxOutputChars: 1000,
-	}
-	id1 := m.nextTaskID()
-	id2 := m.nextTaskID()
-	if id1 == id2 {
-		t.Errorf("expected unique IDs, got %q and %q", id1, id2)
-	}
-	if id1 != "task-1" || id2 != "task-2" {
-		t.Errorf("expected task-1, task-2, got %q, %q", id1, id2)
-	}
-}
-
-func TestBackgroundTask_SetsExitCodeAfterExit(t *testing.T) {
-	rt := runtime.NewHostRuntime(1024)
-	proc, err := rt.Spawn(context.Background(), "exit 7")
+	result, err := handler(context.Background(), []byte(`{"command":"echo hi", "timeout": 0}`))
 	if err != nil {
-		t.Fatalf("spawn failed: %v", err)
+		t.Fatalf("run_command: %v", err)
 	}
-	task := newBackgroundTask("task-1", "exit 7", proc, 1024)
-	snap := task.Wait(context.Background(), 2*time.Second)
-	if snap.Status != taskExited {
-		t.Fatalf("expected task status exited, got %s", snap.Status.String())
+	var payload map[string]string
+	if err := json.Unmarshal([]byte(result.Text), &payload); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
 	}
-	if snap.ExitCode == nil {
-		t.Fatal("expected non-nil exit code")
+	if payload["task_id"] == "" {
+		t.Fatalf("expected task_id, got %s", result.Text)
 	}
-	if *snap.ExitCode != 7 {
-		t.Fatalf("expected exit code 7, got %d", *snap.ExitCode)
+}
+
+func TestRunCommandReturnsFinalResultWithinTimeout(t *testing.T) {
+	_, manager, reg := newCommandTestToolset()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = manager.Shutdown(ctx)
+	}()
+	handler, ok := reg.Handler("run_command")
+	if !ok {
+		t.Fatal("expected run_command handler")
+	}
+	result, err := handler(context.Background(), []byte(`{"command":"echo hi","timeout":2}`))
+	if err != nil {
+		t.Fatalf("run_command: %v", err)
+	}
+	if !strings.Contains(result.Text, "status: exited") {
+		t.Fatalf("expected final snapshot, got:\n%s", result.Text)
+	}
+	if !strings.Contains(result.Text, "output:\nhi") {
+		t.Fatalf("expected command output, got:\n%s", result.Text)
+	}
+}
+
+func TestRunCommandReturnsTaskIDAfterTimeout(t *testing.T) {
+	_, manager, reg := newCommandTestToolset()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = manager.Shutdown(ctx)
+	}()
+	handler, ok := reg.Handler("run_command")
+	if !ok {
+		t.Fatal("expected run_command handler")
+	}
+	result, err := handler(context.Background(), []byte(`{"command":"sleep 2; echo hi","timeout":1}`))
+	if err != nil {
+		t.Fatalf("run_command: %v", err)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal([]byte(result.Text), &payload); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if payload["task_id"] == "" {
+		t.Fatalf("expected task_id after timeout fallback, got %s", result.Text)
+	}
+}
+
+func TestAwaitTaskReportsExitCodeAndOutput(t *testing.T) {
+	_, manager, reg := newCommandTestToolset()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = manager.Shutdown(ctx)
+	}()
+	run, _ := reg.Handler("run_command")
+	await, _ := reg.Handler("await_task")
+	start, err := run(context.Background(), []byte(`{"command":"echo hello && exit 7", "timeout": 0}`))
+	if err != nil {
+		t.Fatalf("run_command: %v", err)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal([]byte(start.Text), &payload); err != nil {
+		t.Fatalf("unmarshal start: %v", err)
+	}
+	got, err := await(context.Background(), []byte(`{"task_id":"`+payload["task_id"]+`","timeout":2}`))
+	if err != nil {
+		t.Fatalf("await_task: %v", err)
+	}
+	if !strings.Contains(got.Text, "status: exited") {
+		t.Fatalf("expected exited status, got:\n%s", got.Text)
+	}
+	if !strings.Contains(got.Text, "output:\nhello") {
+		t.Fatalf("expected output, got:\n%s", got.Text)
+	}
+	if !strings.Contains(got.Text, "exit_code: 7") {
+		t.Fatalf("expected output, got:\n%s", got.Text)
+	}
+}
+
+func TestWriteTaskInputFeedsProcessStdin(t *testing.T) {
+	_, manager, reg := newCommandTestToolset()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = manager.Shutdown(ctx)
+	}()
+	run, _ := reg.Handler("run_command")
+	writeInput, _ := reg.Handler("write_to_task")
+	await, _ := reg.Handler("await_task")
+	start, err := run(context.Background(), []byte(`{"command":"sleep 0.2; read line; echo got:$line", "timeout": 0}`))
+	if err != nil {
+		t.Fatalf("run_command: %v", err)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal([]byte(start.Text), &payload); err != nil {
+		t.Fatalf("unmarshal start: %v", err)
+	}
+	if _, err := writeInput(context.Background(), []byte(`{"task_id":"`+payload["task_id"]+`","input":"hello\n"}`)); err != nil {
+		t.Fatalf("write_to_task: %v", err)
+	}
+	got, err := await(context.Background(), []byte(`{"task_id":"`+payload["task_id"]+`","timeout":2}`))
+	if err != nil {
+		t.Fatalf("await_task: %v", err)
+	}
+	if !strings.Contains(got.Text, "output:\ngot:hello") {
+		t.Fatalf("expected stdin to reach process, got:\n%s", got.Text)
 	}
 }

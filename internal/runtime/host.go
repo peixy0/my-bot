@@ -45,6 +45,11 @@ func (r *HostRuntime) Execute(ctx context.Context, command string) (ExecResult, 
 
 func (r *HostRuntime) Spawn(ctx context.Context, command string) (*ProcessHandle, error) {
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -59,14 +64,15 @@ func (r *HostRuntime) Spawn(ctx context.Context, command string) (*ProcessHandle
 
 	h := &ProcessHandle{
 		PID:    cmd.Process.Pid,
+		Stdin:  stdin,
 		Stdout: stdout,
 		Stderr: stderr,
 		fnWait: cmd.Wait,
 		fnTerminate: func() error {
-			return cmd.Process.Signal(syscall.SIGTERM)
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 		},
 		fnKill: func() error {
-			return cmd.Process.Kill()
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		},
 		fnExitCode: func() *int {
 			if cmd.ProcessState == nil {

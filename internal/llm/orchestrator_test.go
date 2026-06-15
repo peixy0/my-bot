@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"my-bot/internal/config"
 	"my-bot/internal/events"
 	"my-bot/internal/inbox"
 	"my-bot/internal/runtime"
+	"my-bot/internal/tasks"
 	"my-bot/internal/tools"
 )
 
@@ -35,9 +37,8 @@ func (s *mockSender) EndThinking(_ context.Context)   {}
 func TestHumanInputOrchestrator_DrainInLoopInputTextOnly(t *testing.T) {
 	sender := &mockSender{}
 	inLoopInbox := inbox.NewMemory[events.WorkerEvent](32)
-
-	orch := NewHumanInputOrchestrator(sender, inLoopInbox, nil, nil, &config.Config{}, nil)
-	orch.Wire(tools.NewRegistry())
+	reg := tools.NewRegistry()
+	orch := NewHumanInputOrchestrator(reg, sender, inLoopInbox)
 
 	inLoopInbox.TryPublish(inbox.NewEnvelope[events.WorkerEvent]("in-loop", inbox.Address{Kind: "worker", ID: "chat"}, events.TextInputEvent{ChatID: "chat", Message: "stop doing that"}))
 	inLoopInbox.TryPublish(inbox.NewEnvelope[events.WorkerEvent]("in-loop", inbox.Address{Kind: "worker", ID: "chat"}, events.TextInputEvent{ChatID: "chat", Message: "do this instead"}))
@@ -68,9 +69,8 @@ func TestHumanInputOrchestrator_DrainInLoopInputTextOnly(t *testing.T) {
 func TestHumanInputOrchestrator_DrainInLoopInputWithImageUsesMultipart(t *testing.T) {
 	sender := &mockSender{}
 	inLoopInbox := inbox.NewMemory[events.WorkerEvent](32)
-
-	orch := NewHumanInputOrchestrator(sender, inLoopInbox, nil, nil, &config.Config{VisionSupport: true}, nil)
-	orch.Wire(tools.NewRegistry())
+	reg := tools.NewRegistry()
+	orch := NewVisionHumanInputOrchestrator(reg, sender, inLoopInbox)
 
 	inLoopInbox.TryPublish(inbox.NewEnvelope[events.WorkerEvent]("in-loop", inbox.Address{Kind: "worker", ID: "chat"}, events.TextInputEvent{ChatID: "chat", Message: "stop doing that"}))
 	inLoopInbox.TryPublish(inbox.NewEnvelope[events.WorkerEvent]("in-loop", inbox.Address{Kind: "worker", ID: "chat"}, events.ImageInputEvent{ChatID: "chat", Message: "see image", MIMEType: "image/png", ImageData: []byte{1, 2, 3}}))
@@ -103,8 +103,7 @@ func TestHumanInputOrchestrator_DrainInLoopInputWithImageUsesMultipart(t *testin
 
 func TestBackgroundOrchestrator_NoReport(t *testing.T) {
 	sender := &mockSender{}
-	orch := NewBackgroundOrchestrator(sender, nil, nil, &config.Config{}, nil)
-	orch.Wire(tools.NewRegistry())
+	orch := NewBackgroundOrchestrator(tools.NewRegistry(), sender)
 
 	orch.OnContentFinal(context.Background(), "intermediate")
 	if len(sender.deltas) != 0 || sender.finals != 0 {
@@ -124,7 +123,7 @@ func TestBackgroundOrchestrator_NoReport(t *testing.T) {
 
 func TestHumanInputOrchestrator_StreamsDeltasAndFinal(t *testing.T) {
 	sender := &mockSender{}
-	orch := NewHumanInputOrchestrator(sender, nil, nil, nil, &config.Config{}, nil)
+	orch := NewHumanInputOrchestrator(tools.NewRegistry(), sender, nil)
 
 	orch.OnContentDelta(context.Background(), "hel")
 	orch.OnContentDelta(context.Background(), "lo")
@@ -143,7 +142,7 @@ func TestHumanInputOrchestrator_StreamsDeltasAndFinal(t *testing.T) {
 
 func TestHumanInputOrchestrator_ContentFinalClosesStream(t *testing.T) {
 	sender := &mockSender{}
-	orch := NewHumanInputOrchestrator(sender, nil, nil, nil, &config.Config{}, nil)
+	orch := NewHumanInputOrchestrator(tools.NewRegistry(), sender, nil)
 
 	orch.OnContentFinal(context.Background(), "hello")
 
@@ -157,7 +156,7 @@ func TestHumanInputOrchestrator_ContentFinalClosesStream(t *testing.T) {
 
 func TestHumanInputOrchestrator_ContentFinalBeforeToolUse(t *testing.T) {
 	sender := &mockSender{}
-	orch := NewHumanInputOrchestrator(sender, nil, nil, nil, &config.Config{}, nil)
+	orch := NewHumanInputOrchestrator(tools.NewRegistry(), sender, nil)
 
 	orch.OnContentDelta(context.Background(), "using tool")
 	orch.OnContentFinal(context.Background(), "using tool")
@@ -172,8 +171,7 @@ func TestHumanInputOrchestrator_ContentFinalBeforeToolUse(t *testing.T) {
 }
 
 func TestSubagentOrchestrator_CapturesOutput(t *testing.T) {
-	orch := NewSubagentOrchestrator()
-	orch.Wire(tools.NewRegistry())
+	orch := NewSubagentOrchestrator(tools.NewRegistry(), nil, nil)
 
 	orch.OnContentFinal(context.Background(), "intermediate")
 	if orch.Output() != "" {
@@ -188,7 +186,7 @@ func TestSubagentOrchestrator_CapturesOutput(t *testing.T) {
 
 func TestSubagentOrchestrator_DoesNotForwardToolContent(t *testing.T) {
 	sender := &mockSender{}
-	orch := NewSubagentOrchestrator()
+	orch := NewSubagentOrchestrator(tools.NewRegistry(), nil, nil)
 
 	orch.BeforeToolUse(context.Background(), "using tool")
 
@@ -212,11 +210,16 @@ func TestSubagentToolset_DoesNotForwardSubagentToolContent(t *testing.T) {
 	agent := NewAgent(client)
 	skills := tools.NewSkillLoader("")
 	rt := &nullRuntime{}
-	sender := &mockSender{}
 	cfg := &config.Config{}
 	reg := tools.NewRegistry()
 
-	NewSubagentToolset(agent, skills, cfg, rt).Register(reg)
+	manager := tasks.NewManager(1000)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = manager.Shutdown(ctx)
+	}()
+	NewSubagentToolset(agent, skills, cfg, rt, manager).Register(reg)
 	handler, ok := reg.Handler("agent")
 	if !ok {
 		t.Fatal("expected agent handler")
@@ -226,33 +229,36 @@ func TestSubagentToolset_DoesNotForwardSubagentToolContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Text != "subagent result" {
-		t.Fatalf("expected subagent result, got %q", result.Text)
+	var start map[string]string
+	if err := json.Unmarshal([]byte(result.Text), &start); err != nil {
+		t.Fatalf("unmarshal start: %v", err)
 	}
-
-	if len(sender.sent) != 0 {
-		t.Fatalf("expected no outbound sends from subagent, got %v", sender.sent)
+	if start["task_id"] == "" {
+		t.Fatalf("expected task_id, got %q", result.Text)
 	}
-}
-
-func TestSubagentTaskCarriesAgentID(t *testing.T) {
-	task := newSubagentTask("sys", "do work")
-	if task.AgentID == "" {
-		t.Fatalf("expected generated AgentID, got %+v", task)
+	snap, err := manager.Await(context.Background(), start["task_id"], 2*time.Second)
+	if err != nil {
+		t.Fatalf("await subagent task: %v", err)
 	}
-	if task.SystemPrompt != "sys" || task.Task != "do work" {
-		t.Fatalf("task fields were not preserved: %+v", task)
+	if !strings.Contains(snap.Output, "subagent result") {
+		t.Fatalf("expected subagent output, got %+v", snap)
 	}
 }
 
-func TestFleetToolset_ReturnsResultsInTaskOrder(t *testing.T) {
+func TestFleetToolset_ReturnsAllChildTaskIDs(t *testing.T) {
 	agent := NewAgent(&echoTaskClient{})
 	skills := tools.NewSkillLoader("")
 	rt := &nullRuntime{}
 	cfg := &config.Config{ToolMaxOutputChars: 1000}
 	reg := tools.NewRegistry()
+	manager := tasks.NewManager(1000)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = manager.Shutdown(ctx)
+	}()
 
-	NewFleetToolset(agent, skills, cfg, rt).Register(reg)
+	NewFleetToolset(agent, skills, cfg, rt, manager).Register(reg)
 	handler, ok := reg.Handler("fleet")
 	if !ok {
 		t.Fatal("expected fleet handler")
@@ -262,13 +268,40 @@ func TestFleetToolset_ReturnsResultsInTaskOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	var outputs []string
-	if err := json.Unmarshal([]byte(result.Text), &outputs); err != nil {
+	var start struct {
+		TaskIDs []string `json:"task_ids"`
+	}
+	if err := json.Unmarshal([]byte(result.Text), &start); err != nil {
 		t.Fatalf("unmarshal fleet result: %v\n%s", err, result.Text)
 	}
-	want := []string{"result:a", "result:b", "result:c"}
-	if fmt.Sprint(outputs) != fmt.Sprint(want) {
-		t.Fatalf("expected ordered outputs %v, got %v", want, outputs)
+	if len(start.TaskIDs) != 3 {
+		t.Fatalf("expected 3 child task ids, got %+v", start)
+	}
+	for _, taskID := range start.TaskIDs {
+		if taskID == "" {
+			t.Fatalf("expected non-empty child task ids, got %+v", start)
+		}
+	}
+	wantByTaskID := map[string]string{}
+	for _, id := range start.TaskIDs {
+		snap, err := manager.Await(context.Background(), id, 2*time.Second)
+		if err != nil {
+			t.Fatalf("await fleet child task %s: %v", id, err)
+		}
+		wantByTaskID[id] = snap.Output
+	}
+	wantParts := []string{"result:a", "result:b", "result:c"}
+	for _, part := range wantParts {
+		found := false
+		for _, output := range wantByTaskID {
+			if strings.Contains(output, part) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected some fleet child output to contain %q, got %+v", part, wantByTaskID)
+		}
 	}
 }
 
@@ -335,12 +368,16 @@ func TestForBackground_HasMetaTools(t *testing.T) {
 	agent := NewAgent(client)
 	skills := tools.NewSkillLoader("")
 	rt := &nullRuntime{}
-	sender := &mockSender{}
 	cfg := &config.Config{}
 
 	reg := tools.NewRegistry()
-	orch := NewBackgroundOrchestrator(sender, agent, skills, cfg, rt)
-	orch.Wire(reg)
+	manager := tasks.NewManager(1000)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = manager.Shutdown(ctx)
+	}()
+	RegisterMetaTools(reg, agent, skills, cfg, rt, manager)
 
 	schemas := reg.Schemas()
 	hasAgent := false

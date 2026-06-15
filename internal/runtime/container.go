@@ -78,8 +78,13 @@ func (r *ContainerRuntime) execute(ctx context.Context, stdin []byte, command ..
 }
 
 func (r *ContainerRuntime) Spawn(ctx context.Context, command string) (*ProcessHandle, error) {
-	args := r.buildExecArgs(false, "bash", "-l", "-c", command)
+	args := r.buildExecArgs(true, "bash", "-l", "-c", command)
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -93,14 +98,15 @@ func (r *ContainerRuntime) Spawn(ctx context.Context, command string) (*ProcessH
 	}
 	h := &ProcessHandle{
 		PID:    cmd.Process.Pid,
+		Stdin:  stdin,
 		Stdout: stdout,
 		Stderr: stderr,
 		fnWait: cmd.Wait,
 		fnTerminate: func() error {
-			return cmd.Process.Signal(syscall.SIGTERM)
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 		},
 		fnKill: func() error {
-			return cmd.Process.Kill()
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		},
 		fnExitCode: func() *int {
 			if cmd.ProcessState == nil {

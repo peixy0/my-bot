@@ -78,7 +78,6 @@ func newMockOrchestrator() *mockOrchestrator {
 	return &mockOrchestrator{registry: tools.NewRegistry()}
 }
 
-func (o *mockOrchestrator) Wire(_ *tools.Registry)                     {}
 func (o *mockOrchestrator) OnContentDelta(_ context.Context, _ string) {}
 func (o *mockOrchestrator) OnContentFinal(_ context.Context, content string) {
 	o.finalContent = append(o.finalContent, content)

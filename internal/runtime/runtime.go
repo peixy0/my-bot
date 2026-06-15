@@ -35,6 +35,7 @@ type GlobResult struct {
 
 type ProcessHandle struct {
 	PID         int
+	Stdin       io.WriteCloser
 	Stdout      io.ReadCloser
 	Stderr      io.ReadCloser
 	fnWait      func() error

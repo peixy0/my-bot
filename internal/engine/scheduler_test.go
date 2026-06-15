@@ -31,6 +31,10 @@ func newConfigTestWorker(cfg *config.Config) *ConversationWorker {
 	return NewConversationWorker("chat-1", cfg, llm.NewAgent(nil), nil, nil)
 }
 
+func newStubSession(worker *ConversationWorker) *chatSession {
+	return &chatSession{chatID: "chat-1", worker: worker}
+}
+
 func TestSchedulerHeartbeatInterval(t *testing.T) {
 	s := &Scheduler{cfg: &config.Config{WakeIntervalSeconds: 1800}}
 	out := &captureOutbound{}
@@ -88,8 +92,8 @@ func TestSchedulerDispatchTextInputPublishesToExistingWorkerInLoopInbox(t *testi
 		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
 	}
 	s := &Scheduler{
-		workers: map[string]*workerEntry{
-			"chat-1": {worker: worker},
+		sessions: map[string]*chatSession{
+			"chat-1": newStubSession(worker),
 		},
 	}
 
@@ -122,8 +126,8 @@ func TestSchedulerDispatchImageInputPublishesToExistingWorkerInLoopInbox(t *test
 		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
 	}
 	s := &Scheduler{
-		workers: map[string]*workerEntry{
-			"chat-1": {worker: worker},
+		sessions: map[string]*chatSession{
+			"chat-1": newStubSession(worker),
 		},
 	}
 
@@ -159,8 +163,8 @@ func TestSchedulerDispatchTextInputQueuesWhenInLoopInboxFull(t *testing.T) {
 	}
 	worker.InLoopInbox.TryPublish(workerEnvelope("chat-1", events.TextInputEvent{ChatID: "chat-1", Message: "already pending"}))
 	s := &Scheduler{
-		workers: map[string]*workerEntry{
-			"chat-1": {worker: worker},
+		sessions: map[string]*chatSession{
+			"chat-1": newStubSession(worker),
 		},
 	}
 
@@ -189,8 +193,8 @@ func TestSchedulerQueueCommandQueuesWithExistingWorker(t *testing.T) {
 		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
 	}
 	s := &Scheduler{
-		workers: map[string]*workerEntry{
-			"chat-1": {worker: worker},
+		sessions: map[string]*chatSession{
+			"chat-1": newStubSession(worker),
 		},
 	}
 
@@ -222,8 +226,8 @@ func TestSchedulerModelCommandQueuesConfigChange(t *testing.T) {
 		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
 	}
 	s := &Scheduler{
-		workers: map[string]*workerEntry{
-			"chat-1": {worker: worker},
+		sessions: map[string]*chatSession{
+			"chat-1": newStubSession(worker),
 		},
 	}
 
@@ -249,8 +253,8 @@ func TestSchedulerVisionCommandReportsCurrentSetting(t *testing.T) {
 	worker := newConfigTestWorker(&config.Config{VisionSupport: true, ToolMaxOutputChars: 1000})
 	out := &captureOutbound{}
 	s := &Scheduler{
-		workers: map[string]*workerEntry{
-			"chat-1": {worker: worker},
+		sessions: map[string]*chatSession{
+			"chat-1": newStubSession(worker),
 		},
 	}
 
@@ -282,8 +286,8 @@ func TestSchedulerVisionCommandTogglesWorkerSetting(t *testing.T) {
 	worker := newConfigTestWorker(&config.Config{ToolMaxOutputChars: 1000})
 	out := &captureOutbound{}
 	s := &Scheduler{
-		workers: map[string]*workerEntry{
-			"chat-1": {worker: worker},
+		sessions: map[string]*chatSession{
+			"chat-1": newStubSession(worker),
 		},
 	}
 
@@ -339,8 +343,8 @@ func TestWorkerVisionConfigChangeRejectsInvalidValue(t *testing.T) {
 	worker := newConfigTestWorker(&config.Config{ToolMaxOutputChars: 1000})
 	out := &captureOutbound{}
 	s := &Scheduler{
-		workers: map[string]*workerEntry{
-			"chat-1": {worker: worker},
+		sessions: map[string]*chatSession{
+			"chat-1": newStubSession(worker),
 		},
 	}
 
@@ -372,8 +376,8 @@ func TestWorkerGenerationConfigCommands(t *testing.T) {
 	worker := newConfigTestWorker(&config.Config{Temperature: 1, TopP: 1, ToolMaxOutputChars: 1000, ContextWindowTokens: 32000, MaxOutputTokens: 16384})
 	out := &captureOutbound{}
 	s := &Scheduler{
-		workers: map[string]*workerEntry{
-			"chat-1": {worker: worker},
+		sessions: map[string]*chatSession{
+			"chat-1": newStubSession(worker),
 		},
 	}
 
@@ -415,8 +419,8 @@ func TestSchedulerRemovedSteerCommandQueuesAsUnknownSlashCommand(t *testing.T) {
 		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
 	}
 	s := &Scheduler{
-		workers: map[string]*workerEntry{
-			"chat-1": {worker: worker},
+		sessions: map[string]*chatSession{
+			"chat-1": newStubSession(worker),
 		},
 	}
 

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"my-bot/internal/runtime"
+	"my-bot/internal/tasks"
 )
 
 func TestFormatReadFileResultUsesRawLineText(t *testing.T) {
@@ -34,45 +35,24 @@ func TestFormatReadFileResultUsesRawLineText(t *testing.T) {
 }
 
 func TestFormatTaskSnapshotUsesReadableOutputSections(t *testing.T) {
-	exitCode := 2
-	got := formatTaskSnapshot(TaskSnapshot{
-		TaskID:   "task-1",
-		Command:  "go test ./...",
-		Stdout:   "ok package\n",
-		Stderr:   "failed package\n",
-		Status:   taskExited,
-		ExitCode: &exitCode,
+	got := formatTaskSnapshot(tasks.Snapshot{
+		TaskID:      "task-1",
+		Description: "go test ./...",
+		Output:      "ok package\nfailed package\nexit_code: 2\n",
+		Status:      tasks.StatusExited,
 	})
 
 	wantParts := []string{
 		"task_id: task-1",
-		"command: go test ./...",
+		"description: go test ./...",
 		"status: exited",
+		"output:\nok package\nfailed package",
 		"exit_code: 2",
-		"stdout:\nok package",
-		"stderr:\nfailed package",
 	}
 	for _, part := range wantParts {
 		if !strings.Contains(got, part) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", part, got)
 		}
-	}
-}
-
-func TestFormatRunCommandResultRunning(t *testing.T) {
-	got := formatRunCommandResult(TaskSnapshot{
-		TaskID: "task-2",
-		Status: taskRunning,
-	})
-
-	if !strings.Contains(got, "status: running") {
-		t.Fatalf("expected running status, got:\n%s", got)
-	}
-	if !strings.Contains(got, "task_id: task-2") {
-		t.Fatalf("expected task id, got:\n%s", got)
-	}
-	if strings.Contains(got, "{") {
-		t.Fatalf("expected readable text, got JSON-like output:\n%s", got)
 	}
 }
 
