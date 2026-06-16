@@ -220,6 +220,9 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 		if session.dump() {
 			e.Sender.Send(ctx, fmt.Sprintf("session dumped to: session-%s.jsonl", e.ChatID))
 		}
+	case "session":
+		e.Sender.Send(ctx, fmt.Sprintf("current session: %s", e.ChatID))
+		return
 	case "cron":
 		s.handleCronCommand(ctx, parts[1:], e)
 	default:
@@ -238,7 +241,7 @@ func (s *Scheduler) dispatchUserInput(ctx context.Context, chatID string, e even
 
 func (s *Scheduler) heartbeatInterval(ctx context.Context, args []string, sender events.Outbound) (int, bool) {
 	if len(args) == 0 {
-		return s.cfg.WakeIntervalSeconds, true
+		return s.cfg.Heartbeat.IntervalSeconds, true
 	}
 	if len(args) > 1 {
 		sender.Send(ctx, "usage: /heartbeat [interval-seconds]")
@@ -334,7 +337,8 @@ func (s *Scheduler) getOrCreateSession(ctx context.Context, chatID string) *chat
 	if session, ok := s.sessions[chatID]; ok {
 		return session
 	}
-	session := newChatSession(ctx, chatID, s.cfg, s.agent, s.rt, s.skills, s.cronLoader)
+	sessionCfg := s.cfg.ForSession(chatID)
+	session := newChatSession(ctx, chatID, sessionCfg, s.agent, s.rt, s.skills, s.cronLoader)
 	s.sessions[chatID] = session
 	return session
 }

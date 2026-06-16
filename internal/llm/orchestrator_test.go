@@ -235,7 +235,7 @@ func TestFleetToolset_ReturnsAllChildTaskIDs(t *testing.T) {
 	agent := NewAgent(&echoTaskClient{})
 	skills := tools.NewSkillLoader("")
 	rt := &nullRuntime{}
-	cfg := &config.Config{ToolMaxOutputChars: 1000}
+	cfg := &config.Config{Tool: config.ToolConfig{MaxOutputChars: 1000}}
 	reg := tools.NewRegistry()
 	manager := tasks.NewManager(1000)
 	defer func() {

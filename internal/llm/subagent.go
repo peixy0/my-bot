@@ -62,7 +62,7 @@ func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task 
 		innerCtx, cancel := context.WithCancel(taskCtx)
 		ctrl := newAgentTaskController(input, cancel)
 		go func() {
-			taskManager := tasks.NewManager(r.cfg.ToolMaxOutputChars)
+			taskManager := tasks.NewManager(r.cfg.Tool.MaxOutputChars)
 			cmdTools := tools.NewCommandToolset(r.rt, taskManager)
 			defer func() {
 				ctx2, cancel := context.WithTimeout(context.Background(), shutdownTimeout)

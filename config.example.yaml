@@ -1,0 +1,61 @@
+log_level: debug
+
+llm:
+  base_url: "https://api.openai.com/v1"
+  model: "gpt-4o"
+  api_key: ""
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 0
+
+container:
+  enabled: false
+  name: ""
+  runtime: ""
+
+tool:
+  max_output_chars: 100000
+  web_search_api: ""
+  fetch_proxy: ""
+
+workspace:
+  cwd: "./workspace"
+  project_dir: "../"
+  skills_dir: "./.skills"
+  crons_dir: "./.cron"
+  session_dir: "./.session"
+
+context:
+  auto_compression: true
+  window_tokens: 128000
+  max_output_tokens: 16384
+  compression_threshold: 0.7
+
+feishu:
+  app_id: ""
+  app_secret: ""
+  encrypt_key: ""
+  verification_token: ""
+
+vision:
+  enabled: false
+  max_image_bytes: 5242880
+
+webui:
+  enabled: true
+  host: "127.0.0.1"
+  port: 8017
+  token: ""
+
+heartbeat:
+  interval_seconds: 1800
+
+sessions:
+  "oc_abc123def456":
+    llm:
+      model: "gpt-4o-mini"
+      temperature: 0.3
+
+    context:
+      max_output_tokens: 8192
+

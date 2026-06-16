@@ -5,11 +5,9 @@
 # Workspace data
 workspace/
 
-# Environment / secrets
-.env
-*.env
-.env.*
-!.env.example
+# Config / secrets
+config.yaml
+!.config.example.yaml
 
 # Go test cache and coverage
 *.test

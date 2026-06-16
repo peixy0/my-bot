@@ -57,11 +57,10 @@ func newConversationWorker(
 	skills *tools.SkillLoader,
 	tools *sessionTools,
 ) *ConversationWorker {
-	workerCfg := *cfg
 	workerAgent := agent.Fork()
 	w := &ConversationWorker{
 		chatID:      chatID,
-		cfg:         &workerCfg,
+		cfg:         cfg,
 		agent:       workerAgent,
 		rt:          rt,
 		skills:      skills,
@@ -74,62 +73,62 @@ func newConversationWorker(
 }
 
 func (w *ConversationWorker) Model() string {
-	return w.cfg.OpenAIModel
+	return w.cfg.LLM.Model
 }
 
 func (w *ConversationWorker) SetModel(model string) {
-	w.cfg.OpenAIModel = model
+	w.cfg.LLM.Model = model
 }
 
 func (w *ConversationWorker) VisionSupported() bool {
-	return w.cfg.VisionSupport
+	return w.cfg.Vision.Enabled
 }
 
 func (w *ConversationWorker) SetVisionSupported(enabled bool) {
-	w.cfg.VisionSupport = enabled
+	w.cfg.Vision.Enabled = enabled
 }
 
 func (w *ConversationWorker) Temperature() string {
-	return formatFloat(w.cfg.Temperature)
+	return formatFloat(w.cfg.LLM.Temperature)
 }
 
 func (w *ConversationWorker) SetTemperature(value float64) {
-	w.cfg.Temperature = value
+	w.cfg.LLM.Temperature = value
 }
 
 func (w *ConversationWorker) TopP() string {
-	return formatFloat(w.cfg.TopP)
+	return formatFloat(w.cfg.LLM.TopP)
 }
 
 func (w *ConversationWorker) SetTopP(value float64) {
-	w.cfg.TopP = value
+	w.cfg.LLM.TopP = value
 }
 
 func (w *ConversationWorker) TopK() string {
-	if w.cfg.TopK <= 0 {
+	if w.cfg.LLM.TopK <= 0 {
 		return "unset"
 	}
-	return strconv.Itoa(w.cfg.TopK)
+	return strconv.Itoa(w.cfg.LLM.TopK)
 }
 
 func (w *ConversationWorker) SetTopK(value int) {
-	w.cfg.TopK = value
+	w.cfg.LLM.TopK = value
 }
 
 func (w *ConversationWorker) MaxTokens() string {
-	return strconv.FormatInt(w.cfg.MaxOutputTokens, 10)
+	return strconv.FormatInt(w.cfg.Context.MaxOutputTokens, 10)
 }
 
 func (w *ConversationWorker) SetMaxTokens(value int64) {
-	w.cfg.MaxOutputTokens = value
+	w.cfg.Context.MaxOutputTokens = value
 }
 
 func (w *ConversationWorker) ContextWindow() string {
-	return strconv.FormatInt(w.cfg.ContextWindowTokens, 10)
+	return strconv.FormatInt(w.cfg.Context.WindowTokens, 10)
 }
 
 func (w *ConversationWorker) SetContextWindow(value int64) {
-	w.cfg.ContextWindowTokens = value
+	w.cfg.Context.WindowTokens = value
 }
 
 func (w *ConversationWorker) Run(ctx context.Context) error {
@@ -140,7 +139,7 @@ func (w *ConversationWorker) Run(ctx context.Context) error {
 			e := msg.Payload
 			if _, ok := e.(events.DumpCommand); ok {
 				path := fmt.Sprintf("session-%s.jsonl", w.chatID)
-				w.loop.DumpConversation(filepath.Join(w.cfg.SessionDir, path))
+				w.loop.DumpConversation(filepath.Join(w.cfg.Workspace.SessionDir, path))
 				continue
 			}
 			w.stopHeartbeat()
@@ -335,10 +334,10 @@ func (w *ConversationWorker) runBackground(ctx context.Context, sender events.Ou
 }
 
 func (w *ConversationWorker) maybeCompress(ctx context.Context, prompt llm.SystemPrompt) error {
-	if !w.cfg.ContextAutoCompressionEnabled {
+	if !w.cfg.Context.AutoCompression {
 		return nil
 	}
-	threshold := int(float64(w.cfg.ContextWindowTokens) * w.cfg.ContextCompressionThreshold)
+	threshold := int(float64(w.cfg.Context.WindowTokens) * w.cfg.Context.CompressionThreshold)
 	if threshold <= 0 || int(w.loop.TotalTokens()) < threshold {
 		return nil
 	}

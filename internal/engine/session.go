@@ -23,7 +23,7 @@ type sessionTools struct {
 }
 
 func newSessionTools(rt runtime.Runtime, skills *tools.SkillLoader, cfg *config.Config, agent *llm.Agent) *sessionTools {
-	taskManager := tasks.NewManager(cfg.ToolMaxOutputChars)
+	taskManager := tasks.NewManager(cfg.Tool.MaxOutputChars)
 	return &sessionTools{
 		rt:          rt,
 		skills:      skills,

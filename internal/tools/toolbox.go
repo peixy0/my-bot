@@ -29,7 +29,7 @@ func NewDefaultToolset(rt runtime.Runtime, skills *SkillLoader, cfg *config.Conf
 }
 
 func (d *DefaultToolset) Register(r *Registry) {
-	if d.cfg.WebSearchAPI != "" {
+	if d.cfg.Tool.WebSearchAPI != "" {
 		d.registerWebSearch(r)
 	}
 	d.registerFetch(r)
@@ -39,7 +39,7 @@ func (d *DefaultToolset) Register(r *Registry) {
 	d.registerApplyPatch(r)
 	d.registerGrep(r)
 	d.registerGlob(r)
-	if d.cfg.VisionSupport {
+	if d.cfg.Vision.Enabled {
 		d.registerReadImage(r)
 	}
 	registerSkillTool(r, d.skills)
@@ -74,7 +74,7 @@ func (d *DefaultToolset) registerWebSearch(r *Registry) {
 		if err := json.Unmarshal(args, &p); err != nil {
 			return ToolResult{}, err
 		}
-		results, err := WebSearch(ctx, d.cfg.WebSearchAPI, p.Query, p.Page)
+		results, err := WebSearch(ctx, d.cfg.Tool.WebSearchAPI, p.Query, p.Page)
 		if err != nil {
 			return ToolResult{}, err
 		}
@@ -104,7 +104,7 @@ func (d *DefaultToolset) registerFetch(r *Registry) {
 		if err := json.Unmarshal(args, &p); err != nil {
 			return ToolResult{}, err
 		}
-		proxyURL := d.cfg.FetchProxy
+		proxyURL := d.cfg.Tool.FetchProxy
 		transport := &http.Transport{}
 		if proxyURL != "" {
 			u, err := url.Parse(proxyURL)
@@ -141,7 +141,7 @@ func (d *DefaultToolset) registerFetch(r *Registry) {
 			if err != nil {
 				return ToolResult{}, fmt.Errorf("failed to convert HTML to Markdown: %w", err)
 			}
-			truncated := d.rt.Truncate(ctx, string(markdown), d.cfg.ToolMaxOutputChars)
+			truncated := d.rt.Truncate(ctx, string(markdown), d.cfg.Tool.MaxOutputChars)
 			return TextResult(truncated), nil
 
 		case "text/markdown", "text/x-markdown", "text/plain", "application/json":
@@ -149,7 +149,7 @@ func (d *DefaultToolset) registerFetch(r *Registry) {
 			if err != nil {
 				return ToolResult{}, fmt.Errorf("failed to read raw content: %w", err)
 			}
-			truncated := d.rt.Truncate(ctx, string(rawBytes), d.cfg.ToolMaxOutputChars)
+			truncated := d.rt.Truncate(ctx, string(rawBytes), d.cfg.Tool.MaxOutputChars)
 			return TextResult(truncated), nil
 
 		default:
@@ -459,7 +459,7 @@ func (d *DefaultToolset) registerReadImage(r *Registry) {
 		if err != nil {
 			return ToolResult{}, err
 		}
-		if len(data) > d.cfg.MaxImageSizeBytes {
+		if len(data) > d.cfg.Vision.MaxImageBytes {
 			return ToolResult{}, fmt.Errorf("image too large: %d bytes", len(data))
 		}
 		mimeType := detectImageMIME(data)

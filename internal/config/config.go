@@ -3,196 +3,279 @@ package config
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
-	"github.com/joho/godotenv"
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	LogLevel string // "debug" | "info" | "warn" | "error"
-
-	OpenAIBaseURL string
-	OpenAIModel   string
-	OpenAIAPIKey  string
-	Temperature   float64
-	TopP          float64
-	TopK          int
-
-	ContainerName    string
-	ContainerRuntime string // "podman" | "docker" | "" (host)
-
-	ToolMaxOutputChars int
-	WebSearchAPI       string
-	FetchProxy         string
-
-	CWD        string
-	ProjectDir string
-	SkillsDir  string
-	CronsDir   string
-	SessionDir string
-
-	WakeIntervalSeconds int
-
-	ContextAutoCompressionEnabled bool
-	ContextWindowTokens           int64
-	MaxOutputTokens               int64
-	ContextCompressionThreshold   float64
-
-	FeishuAppID             string
-	FeishuAppSecret         string
-	FeishuEncryptKey        string
-	FeishuVerificationToken string
-
-	VisionSupport     bool
-	MaxImageSizeBytes int
-
-	WebUIEnabled bool
-	WebUIHost    string
-	WebUIPort    int
-	WebUIToken   string
+	LogLevel  string                     `yaml:"log_level"`
+	LLM       LLMConfig                  `yaml:"llm"`
+	Container ContainerConfig            `yaml:"container"`
+	Tool      ToolConfig                 `yaml:"tool"`
+	Workspace WorkspaceConfig            `yaml:"workspace"`
+	Context   ContextConfig              `yaml:"context"`
+	Feishu    FeishuConfig               `yaml:"feishu"`
+	Vision    VisionConfig               `yaml:"vision"`
+	WebUI     WebUIConfig                `yaml:"webui"`
+	Heartbeat HeartbeatConfig            `yaml:"heartbeat"`
+	Sessions  map[string]SessionOverride `yaml:"sessions"`
 }
 
-func Load() (*Config, error) {
-	_ = godotenv.Load(".env")
+type LLMConfig struct {
+	BaseURL     string  `yaml:"base_url"`
+	Model       string  `yaml:"model"`
+	APIKey      string  `yaml:"api_key"`
+	Temperature float64 `yaml:"temperature"`
+	TopP        float64 `yaml:"top_p"`
+	TopK        int     `yaml:"top_k"`
+}
 
-	cfg := &Config{
-		LogLevel: getEnv("LOG_LEVEL", "debug"),
+type ContainerConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Name    string `yaml:"name"`
+	Runtime string `yaml:"runtime"`
+}
 
-		OpenAIBaseURL: getEnv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-		OpenAIModel:   getEnv("OPENAI_MODEL", "gpt-4o"),
-		OpenAIAPIKey:  getEnv("OPENAI_API_KEY", ""),
-		Temperature:   getEnvFloat("OPENAI_TEMPERATURE", 1),
-		TopP:          getEnvFloat("OPENAI_TOP_P", 0.95),
-		TopK:          getEnvInt("OPENAI_TOP_K", 0),
+type ToolConfig struct {
+	MaxOutputChars int    `yaml:"max_output_chars"`
+	WebSearchAPI   string `yaml:"web_search_api"`
+	FetchProxy     string `yaml:"fetch_proxy"`
+}
 
-		ContainerName:    getEnv("CONTAINER_NAME", ""),
-		ContainerRuntime: getEnv("CONTAINER_RUNTIME", ""),
+type WorkspaceConfig struct {
+	CWD        string `yaml:"cwd"`
+	ProjectDir string `yaml:"project_dir"`
+	SkillsDir  string `yaml:"skills_dir"`
+	CronsDir   string `yaml:"crons_dir"`
+	SessionDir string `yaml:"session_dir"`
+}
 
-		ToolMaxOutputChars: getEnvInt("TOOL_MAX_OUTPUT_CHARS", 100_000),
-		WebSearchAPI:       getEnv("WEB_SEARCH_API", ""),
-		FetchProxy:         getEnv("FETCH_PROXY", ""),
+type ContextConfig struct {
+	AutoCompression      bool    `yaml:"auto_compression"`
+	WindowTokens         int64   `yaml:"window_tokens"`
+	MaxOutputTokens      int64   `yaml:"max_output_tokens"`
+	CompressionThreshold float64 `yaml:"compression_threshold"`
+}
 
-		CWD:        getEnv("CWD", "./workspace"),
-		ProjectDir: getEnv("PROJECT_DIR", "../"),
-		SkillsDir:  getEnv("SKILLS_DIR", "./.skills"),
-		CronsDir:   getEnv("CRONS_DIR", "./.cron"),
-		SessionDir: getEnv("SESSION_DIR", "./.session"),
+type FeishuConfig struct {
+	AppID             string `yaml:"app_id"`
+	AppSecret         string `yaml:"app_secret"`
+	EncryptKey        string `yaml:"encrypt_key"`
+	VerificationToken string `yaml:"verification_token"`
+}
 
-		WakeIntervalSeconds: getEnvInt("WAKE_INTERVAL_SECONDS", 1800),
+type VisionConfig struct {
+	Enabled       bool `yaml:"enabled"`
+	MaxImageBytes int  `yaml:"max_image_bytes"`
+}
 
-		ContextAutoCompressionEnabled: getEnvBool("CONTEXT_AUTO_COMPRESSION_ENABLED", true),
-		ContextWindowTokens:           getEnvInt64("CONTEXT_WINDOW_TOKENS", 128_000),
-		MaxOutputTokens:               getEnvInt64("MAX_OUTPUT_TOKENS", 16_384),
-		ContextCompressionThreshold:   getEnvFloat("CONTEXT_COMPRESSION_THRESHOLD", 0.7),
+type WebUIConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Host    string `yaml:"host"`
+	Port    int    `yaml:"port"`
+	Token   string `yaml:"token"`
+}
 
-		FeishuAppID:             getEnv("FEISHU_APP_ID", ""),
-		FeishuAppSecret:         getEnv("FEISHU_APP_SECRET", ""),
-		FeishuEncryptKey:        getEnv("FEISHU_ENCRYPT_KEY", ""),
-		FeishuVerificationToken: getEnv("FEISHU_VERIFICATION_TOKEN", ""),
+type HeartbeatConfig struct {
+	IntervalSeconds int `yaml:"interval_seconds"`
+}
 
-		VisionSupport:     getEnvBool("VISION_SUPPORT", false),
-		MaxImageSizeBytes: getEnvInt("MAX_IMAGE_SIZE_BYTES", 5*1024*1024),
+type SessionOverride struct {
+	LLM     *LLMOverride     `yaml:"llm,omitempty"`
+	Context *ContextOverride `yaml:"context,omitempty"`
+	Vision  *VisionOverride  `yaml:"vision,omitempty"`
+}
 
-		WebUIEnabled: getEnvBool("WEBUI_ENABLED", true),
-		WebUIHost:    getEnv("WEBUI_HOST", "127.0.0.1"),
-		WebUIPort:    getEnvInt("WEBUI_PORT", 8017),
-		WebUIToken:   getEnv("WEBUI_TOKEN", ""),
+type LLMOverride struct {
+	BaseURL     *string  `yaml:"base_url,omitempty"`
+	Model       *string  `yaml:"model,omitempty"`
+	APIKey      *string  `yaml:"api_key,omitempty"`
+	Temperature *float64 `yaml:"temperature,omitempty"`
+	TopP        *float64 `yaml:"top_p,omitempty"`
+	TopK        *int     `yaml:"top_k,omitempty"`
+}
+
+type ContextOverride struct {
+	AutoCompression      *bool    `yaml:"auto_compression,omitempty"`
+	WindowTokens         *int64   `yaml:"window_tokens,omitempty"`
+	MaxOutputTokens      *int64   `yaml:"max_output_tokens,omitempty"`
+	CompressionThreshold *float64 `yaml:"compression_threshold,omitempty"`
+}
+
+type VisionOverride struct {
+	Enabled       *bool `yaml:"enabled,omitempty"`
+	MaxImageBytes *int  `yaml:"max_image_bytes,omitempty"`
+}
+
+func (o *LLMOverride) ApplyTo(target *LLMConfig) {
+	if o.BaseURL != nil {
+		target.BaseURL = *o.BaseURL
+	}
+	if o.Model != nil {
+		target.Model = *o.Model
+	}
+	if o.APIKey != nil {
+		target.APIKey = *o.APIKey
+	}
+	if o.Temperature != nil {
+		target.Temperature = *o.Temperature
+	}
+	if o.TopP != nil {
+		target.TopP = *o.TopP
+	}
+	if o.TopK != nil {
+		target.TopK = *o.TopK
+	}
+}
+
+func (o *ContextOverride) ApplyTo(target *ContextConfig) {
+	if o.AutoCompression != nil {
+		target.AutoCompression = *o.AutoCompression
+	}
+	if o.WindowTokens != nil {
+		target.WindowTokens = *o.WindowTokens
+	}
+	if o.MaxOutputTokens != nil {
+		target.MaxOutputTokens = *o.MaxOutputTokens
+	}
+	if o.CompressionThreshold != nil {
+		target.CompressionThreshold = *o.CompressionThreshold
+	}
+}
+
+func (o *VisionOverride) ApplyTo(target *VisionConfig) {
+	if o.Enabled != nil {
+		target.Enabled = *o.Enabled
+	}
+	if o.MaxImageBytes != nil {
+		target.MaxImageBytes = *o.MaxImageBytes
+	}
+}
+
+func Load(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+
+	cfg := defaultConfig()
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-
 	return cfg, nil
 }
 
-func (cfg *Config) Validate() error {
-	if cfg.OpenAIAPIKey == "" {
-		return fmt.Errorf("OPENAI_API_KEY is required")
-	}
-	if cfg.Temperature < 0 || cfg.Temperature > 2 {
-		return fmt.Errorf("OPENAI_TEMPERATURE must be between 0 and 2")
-	}
-	if cfg.TopP < 0 || cfg.TopP > 1 {
-		return fmt.Errorf("OPENAI_TOP_P must be between 0 and 1")
-	}
-	if cfg.TopK < 0 {
-		return fmt.Errorf("OPENAI_TOP_K must be non-negative")
-	}
-	switch cfg.ContainerRuntime {
-	case "", "podman", "docker":
-	default:
-		return fmt.Errorf("unsupported CONTAINER_RUNTIME %q", cfg.ContainerRuntime)
-	}
-	if cfg.ToolMaxOutputChars <= 0 {
-		return fmt.Errorf("TOOL_MAX_OUTPUT_CHARS must be positive")
-	}
-	if cfg.WakeIntervalSeconds <= 0 {
-		return fmt.Errorf("WAKE_INTERVAL_SECONDS must be positive")
-	}
-	if cfg.ContextWindowTokens <= 0 {
-		return fmt.Errorf("CONTEXT_WINDOW_TOKENS must be positive")
-	}
-	if cfg.MaxOutputTokens <= 0 {
-		return fmt.Errorf("MAX_OUTPUT_TOKENS must be positive")
-	}
-	if cfg.ContextCompressionThreshold <= 0 || cfg.ContextCompressionThreshold > 1 {
-		return fmt.Errorf("CONTEXT_COMPRESSION_THRESHOLD must be greater than 0 and at most 1")
-	}
-	if cfg.MaxImageSizeBytes <= 0 {
-		return fmt.Errorf("MAX_IMAGE_SIZE_BYTES must be positive")
-	}
-	if cfg.WebUIEnabled {
-		if strings.TrimSpace(cfg.WebUIHost) == "" {
-			return fmt.Errorf("WEBUI_HOST is required when WEBUI_ENABLED=true")
+func (c *Config) ForSession(chatID string) *Config {
+	merged := *c
+	merged.Sessions = nil
+
+	if override, ok := c.Sessions[chatID]; ok {
+		if override.LLM != nil {
+			override.LLM.ApplyTo(&merged.LLM)
 		}
-		if cfg.WebUIPort < 1 || cfg.WebUIPort > 65535 {
-			return fmt.Errorf("WEBUI_PORT must be between 1 and 65535")
+		if override.Context != nil {
+			override.Context.ApplyTo(&merged.Context)
+		}
+		if override.Vision != nil {
+			override.Vision.ApplyTo(&merged.Vision)
+		}
+	}
+
+	return &merged
+}
+
+func defaultConfig() *Config {
+	return &Config{
+		LogLevel: "debug",
+		LLM: LLMConfig{
+			BaseURL:     "https://api.openai.com/v1",
+			Model:       "gpt-4o",
+			Temperature: 1,
+			TopP:        0.95,
+		},
+		Tool: ToolConfig{
+			MaxOutputChars: 100_000,
+		},
+		Workspace: WorkspaceConfig{
+			CWD:        "./workspace",
+			ProjectDir: "../",
+			SkillsDir:  "./.skills",
+			CronsDir:   "./.cron",
+			SessionDir: "./.session",
+		},
+		Heartbeat: HeartbeatConfig{
+			IntervalSeconds: 1800,
+		},
+		Context: ContextConfig{
+			AutoCompression:      true,
+			WindowTokens:         128_000,
+			MaxOutputTokens:      16_384,
+			CompressionThreshold: 0.7,
+		},
+		Vision: VisionConfig{
+			MaxImageBytes: 5 * 1024 * 1024,
+		},
+		WebUI: WebUIConfig{
+			Enabled: true,
+			Host:    "127.0.0.1",
+			Port:    8017,
+		},
+	}
+}
+
+func (cfg *Config) Validate() error {
+	if cfg.LLM.APIKey == "" {
+		return fmt.Errorf("llm.api_key is required")
+	}
+	if cfg.LLM.Temperature < 0 || cfg.LLM.Temperature > 2 {
+		return fmt.Errorf("llm.temperature must be between 0 and 2")
+	}
+	if cfg.LLM.TopP < 0 || cfg.LLM.TopP > 1 {
+		return fmt.Errorf("llm.top_p must be between 0 and 1")
+	}
+	if cfg.LLM.TopK < 0 {
+		return fmt.Errorf("llm.top_k must be non-negative")
+	}
+	if cfg.Container.Enabled {
+		switch cfg.Container.Runtime {
+		case "podman", "docker":
+		default:
+			return fmt.Errorf("unsupported container.runtime %q", cfg.Container.Runtime)
+		}
+		if strings.TrimSpace(cfg.Container.Name) == "" {
+			return fmt.Errorf("container.name is required when container.enabled=true")
+		}
+	}
+	if cfg.Tool.MaxOutputChars <= 0 {
+		return fmt.Errorf("tool.max_output_chars must be positive")
+	}
+	if cfg.Heartbeat.IntervalSeconds <= 0 {
+		return fmt.Errorf("heartbeat.interval_seconds must be positive")
+	}
+	if cfg.Context.WindowTokens <= 0 {
+		return fmt.Errorf("context.window_tokens must be positive")
+	}
+	if cfg.Context.MaxOutputTokens <= 0 {
+		return fmt.Errorf("context.max_output_tokens must be positive")
+	}
+	if cfg.Context.CompressionThreshold <= 0 || cfg.Context.CompressionThreshold > 1 {
+		return fmt.Errorf("context.compression_threshold must be greater than 0 and at most 1")
+	}
+	if cfg.Vision.MaxImageBytes <= 0 {
+		return fmt.Errorf("vision.max_image_bytes must be positive")
+	}
+	if cfg.WebUI.Enabled {
+		if strings.TrimSpace(cfg.WebUI.Host) == "" {
+			return fmt.Errorf("webui.host is required when webui.enabled=true")
+		}
+		if cfg.WebUI.Port < 1 || cfg.WebUI.Port > 65535 {
+			return fmt.Errorf("webui.port must be between 1 and 65535")
 		}
 	}
 	return nil
-}
-
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
-func getEnvInt(key string, fallback int) int {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
-	}
-	return fallback
-}
-
-func getEnvInt64(key string, fallback int64) int64 {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			return n
-		}
-	}
-	return fallback
-}
-
-func getEnvFloat(key string, fallback float64) float64 {
-	if v := os.Getenv(key); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			return f
-		}
-	}
-	return fallback
-}
-
-func getEnvBool(key string, fallback bool) bool {
-	if v := os.Getenv(key); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			return b
-		}
-	}
-	return fallback
 }

@@ -15,7 +15,7 @@ func TestNewChatSessionOwnsWorkerResources(t *testing.T) {
 	session := newChatSession(
 		ctx,
 		"chat-1",
-		&config.Config{ToolMaxOutputChars: 1000},
+		&config.Config{Tool: config.ToolConfig{MaxOutputChars: 1000}},
 		llm.NewAgent(nil),
 		nil,
 		nil,

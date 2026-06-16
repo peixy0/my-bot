@@ -36,7 +36,7 @@ func newStubSession(worker *ConversationWorker) *chatSession {
 }
 
 func TestSchedulerHeartbeatInterval(t *testing.T) {
-	s := &Scheduler{cfg: &config.Config{WakeIntervalSeconds: 1800}}
+	s := &Scheduler{cfg: &config.Config{Heartbeat: config.HeartbeatConfig{IntervalSeconds: 1800}}}
 	out := &captureOutbound{}
 
 	interval, ok := s.heartbeatInterval(context.Background(), nil, out)
@@ -250,7 +250,7 @@ func TestSchedulerModelCommandQueuesConfigChange(t *testing.T) {
 }
 
 func TestSchedulerVisionCommandReportsCurrentSetting(t *testing.T) {
-	worker := newConfigTestWorker(&config.Config{VisionSupport: true, ToolMaxOutputChars: 1000})
+	worker := newConfigTestWorker(&config.Config{Vision: config.VisionConfig{Enabled: true}, Tool: config.ToolConfig{MaxOutputChars: 1000}})
 	out := &captureOutbound{}
 	s := &Scheduler{
 		sessions: map[string]*chatSession{
@@ -283,7 +283,7 @@ func TestSchedulerVisionCommandReportsCurrentSetting(t *testing.T) {
 }
 
 func TestSchedulerVisionCommandTogglesWorkerSetting(t *testing.T) {
-	worker := newConfigTestWorker(&config.Config{ToolMaxOutputChars: 1000})
+	worker := newConfigTestWorker(&config.Config{Tool: config.ToolConfig{MaxOutputChars: 1000}})
 	out := &captureOutbound{}
 	s := &Scheduler{
 		sessions: map[string]*chatSession{
@@ -340,7 +340,7 @@ func TestSchedulerVisionCommandTogglesWorkerSetting(t *testing.T) {
 }
 
 func TestWorkerVisionConfigChangeRejectsInvalidValue(t *testing.T) {
-	worker := newConfigTestWorker(&config.Config{ToolMaxOutputChars: 1000})
+	worker := newConfigTestWorker(&config.Config{Tool: config.ToolConfig{MaxOutputChars: 1000}})
 	out := &captureOutbound{}
 	s := &Scheduler{
 		sessions: map[string]*chatSession{
@@ -373,7 +373,7 @@ func TestWorkerVisionConfigChangeRejectsInvalidValue(t *testing.T) {
 }
 
 func TestWorkerGenerationConfigCommands(t *testing.T) {
-	worker := newConfigTestWorker(&config.Config{Temperature: 1, TopP: 1, ToolMaxOutputChars: 1000, ContextWindowTokens: 32000, MaxOutputTokens: 16384})
+	worker := newConfigTestWorker(&config.Config{LLM: config.LLMConfig{Temperature: 1, TopP: 1}, Tool: config.ToolConfig{MaxOutputChars: 1000}, Context: config.ContextConfig{WindowTokens: 32000, MaxOutputTokens: 16384}})
 	out := &captureOutbound{}
 	s := &Scheduler{
 		sessions: map[string]*chatSession{
@@ -399,7 +399,7 @@ func TestWorkerGenerationConfigCommands(t *testing.T) {
 		}
 	}
 
-	if worker.cfg.Temperature != 0.2 || worker.cfg.TopP != 0.9 || worker.cfg.TopK != 40 || worker.cfg.MaxOutputTokens != 12000 || worker.cfg.ContextWindowTokens != 64000 {
+	if worker.cfg.LLM.Temperature != 0.2 || worker.cfg.LLM.TopP != 0.9 || worker.cfg.LLM.TopK != 40 || worker.cfg.Context.MaxOutputTokens != 12000 || worker.cfg.Context.WindowTokens != 64000 {
 		t.Fatalf("unexpected generation config: %+v", worker.cfg)
 	}
 	want := []string{"temperature set to: 0.2", "top_p set to: 0.9", "top_k set to: 40", "max_tokens set to: 12000", "context_window set to: 64000"}

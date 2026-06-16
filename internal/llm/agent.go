@@ -36,16 +36,16 @@ func (a *Agent) Run(
 
 	for {
 		allMessages := append(systemMessages, conv.Messages...)
-		model := cfg.OpenAIModel
+		model := cfg.LLM.Model
 		slog.Debug("llm request", "model", model, "messages", len(allMessages), "tools", len(reg.Schemas()))
 		resp, err := a.client.Complete(ctx, CompletionRequest{
 			Model:          model,
 			Messages:       allMessages,
 			Tools:          reg.Schemas(),
-			MaxTokens:      cfg.MaxOutputTokens,
-			Temperature:    cfg.Temperature,
-			TopP:           cfg.TopP,
-			TopK:           cfg.TopK,
+			MaxTokens:      cfg.Context.MaxOutputTokens,
+			Temperature:    cfg.LLM.Temperature,
+			TopP:           cfg.LLM.TopP,
+			TopK:           cfg.LLM.TopK,
 			OnContentDelta: orch.OnContentDelta,
 		})
 		if err != nil {
@@ -73,8 +73,8 @@ func (a *Agent) Run(
 			return nil
 		}
 
-		if cfg.ContextAutoCompressionEnabled && int(conv.TotalTokens) >= int(float64(cfg.ContextWindowTokens)*cfg.ContextCompressionThreshold) {
-			slog.Debug("context compression triggered", "tokens", conv.TotalTokens, "context_window", cfg.ContextWindowTokens)
+		if cfg.Context.AutoCompression && int(conv.TotalTokens) >= int(float64(cfg.Context.WindowTokens)*cfg.Context.CompressionThreshold) {
+			slog.Debug("context compression triggered", "tokens", conv.TotalTokens, "context_window", cfg.Context.WindowTokens)
 			if err := a.Compress(ctx, cfg, systemPrompt, conv); err != nil {
 				return fmt.Errorf("compress: %w", err)
 			}
@@ -100,12 +100,12 @@ func (a *Agent) Compress(ctx context.Context, cfg *config.Config, systemPrompt s
 
 	compressMessages := buildCompressionMessages(systemPrompt, toEvict)
 	resp, err := a.client.Complete(ctx, CompletionRequest{
-		Model:       cfg.OpenAIModel,
+		Model:       cfg.LLM.Model,
 		Messages:    compressMessages,
-		MaxTokens:   cfg.MaxOutputTokens,
+		MaxTokens:   cfg.Context.MaxOutputTokens,
 		Temperature: compressionTemperature,
-		TopP:        cfg.TopP,
-		TopK:        cfg.TopK,
+		TopP:        cfg.LLM.TopP,
+		TopK:        cfg.LLM.TopK,
 	})
 	if err != nil {
 		return err
