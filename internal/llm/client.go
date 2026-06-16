@@ -28,6 +28,7 @@ type CompletionRequest struct {
 	Temperature    float64
 	TopP           float64
 	TopK           int
+	ExtraBody      map[string]any
 	OnContentDelta func(ctx context.Context, delta string)
 }
 

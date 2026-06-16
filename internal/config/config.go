@@ -8,9 +8,32 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type ModelConfig struct {
+	Temperature *float64       `yaml:"temperature,omitempty"`
+	TopP        *float64       `yaml:"top_p,omitempty"`
+	TopK        *int           `yaml:"top_k,omitempty"`
+	ExtraBody   map[string]any `yaml:"extra_body,omitempty"`
+}
+
+func (m *ModelConfig) ApplyTo(target *LLMConfig) {
+	if m.Temperature != nil {
+		target.Temperature = *m.Temperature
+	}
+	if m.TopP != nil {
+		target.TopP = *m.TopP
+	}
+	if m.TopK != nil {
+		target.TopK = *m.TopK
+	}
+	if m.ExtraBody != nil {
+		target.ExtraBody = m.ExtraBody
+	}
+}
+
 type Config struct {
 	LogLevel  string                     `yaml:"log_level"`
 	LLM       LLMConfig                  `yaml:"llm"`
+	Models    map[string]ModelConfig     `yaml:"models,omitempty"`
 	Container ContainerConfig            `yaml:"container"`
 	Tool      ToolConfig                 `yaml:"tool"`
 	Workspace WorkspaceConfig            `yaml:"workspace"`
@@ -23,12 +46,13 @@ type Config struct {
 }
 
 type LLMConfig struct {
-	BaseURL     string  `yaml:"base_url"`
-	Model       string  `yaml:"model"`
-	APIKey      string  `yaml:"api_key"`
-	Temperature float64 `yaml:"temperature"`
-	TopP        float64 `yaml:"top_p"`
-	TopK        int     `yaml:"top_k"`
+	BaseURL     string         `yaml:"base_url"`
+	Model       string         `yaml:"model"`
+	APIKey      string         `yaml:"api_key"`
+	Temperature float64        `yaml:"temperature"`
+	TopP        float64        `yaml:"top_p"`
+	TopK        int            `yaml:"top_k"`
+	ExtraBody   map[string]any `yaml:"extra_body"`
 }
 
 type ContainerConfig struct {
@@ -88,12 +112,13 @@ type SessionOverride struct {
 }
 
 type LLMOverride struct {
-	BaseURL     *string  `yaml:"base_url,omitempty"`
-	Model       *string  `yaml:"model,omitempty"`
-	APIKey      *string  `yaml:"api_key,omitempty"`
-	Temperature *float64 `yaml:"temperature,omitempty"`
-	TopP        *float64 `yaml:"top_p,omitempty"`
-	TopK        *int     `yaml:"top_k,omitempty"`
+	BaseURL     *string        `yaml:"base_url,omitempty"`
+	Model       *string        `yaml:"model,omitempty"`
+	APIKey      *string        `yaml:"api_key,omitempty"`
+	Temperature *float64       `yaml:"temperature,omitempty"`
+	TopP        *float64       `yaml:"top_p,omitempty"`
+	TopK        *int           `yaml:"top_k,omitempty"`
+	ExtraBody   map[string]any `yaml:"extra_body,omitempty"`
 }
 
 type ContextOverride struct {
@@ -126,6 +151,9 @@ func (o *LLMOverride) ApplyTo(target *LLMConfig) {
 	}
 	if o.TopK != nil {
 		target.TopK = *o.TopK
+	}
+	if o.ExtraBody != nil {
+		target.ExtraBody = o.ExtraBody
 	}
 }
 
@@ -184,6 +212,10 @@ func (c *Config) ForSession(chatID string) *Config {
 		if override.Vision != nil {
 			override.Vision.ApplyTo(&merged.Vision)
 		}
+	}
+
+	if preset, ok := merged.Models[merged.LLM.Model]; ok {
+		preset.ApplyTo(&merged.LLM)
 	}
 
 	return &merged

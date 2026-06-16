@@ -362,3 +362,70 @@ func TestIsRetryable(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenAIProvider_ExtraBodyMergedIntoRequest(t *testing.T) {
+	var requestBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeSSE(t, w, map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "ok"}, "finish_reason": "stop"}}})
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewOpenAIProvider(server.URL, "", server.Client())
+	_, err := provider.Complete(context.Background(), CompletionRequest{
+		Model: "m",
+		ExtraBody: map[string]any{
+			"chat_template_kwargs": map[string]any{"enable_thinking": true},
+			"presence_penalty":     0.5,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ctk, ok := requestBody["chat_template_kwargs"].(map[string]any)
+	if !ok || ctk["enable_thinking"] != true {
+		t.Fatalf("expected chat_template_kwargs.enable_thinking=true, got %#v", requestBody["chat_template_kwargs"])
+	}
+	if requestBody["presence_penalty"] != 0.5 {
+		t.Fatalf("expected presence_penalty=0.5, got %#v", requestBody["presence_penalty"])
+	}
+}
+
+func TestOpenAIProvider_ExtraBodySkipsDuplicateKeys(t *testing.T) {
+	var requestBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeSSE(t, w, map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "ok"}, "finish_reason": "stop"}}})
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewOpenAIProvider(server.URL, "", server.Client())
+	_, err := provider.Complete(context.Background(), CompletionRequest{
+		Model:       "m",
+		Temperature: 0.7,
+		ExtraBody: map[string]any{
+			"temperature":      0.1, // should be skipped – body already has this key
+			"presence_penalty": 0.3,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// temperature must stay at 0.7, not overwritten by extra_body
+	if requestBody["temperature"] != 0.7 {
+		t.Fatalf("expected temperature=0.7 (not overwritten), got %v", requestBody["temperature"])
+	}
+	if requestBody["presence_penalty"] != 0.3 {
+		t.Fatalf("expected presence_penalty=0.3, got %v", requestBody["presence_penalty"])
+	}
+}

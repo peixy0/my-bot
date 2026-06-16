@@ -78,6 +78,9 @@ func (w *ConversationWorker) Model() string {
 
 func (w *ConversationWorker) SetModel(model string) {
 	w.cfg.LLM.Model = model
+	if preset, ok := w.cfg.Models[model]; ok {
+		preset.ApplyTo(&w.cfg.LLM)
+	}
 }
 
 func (w *ConversationWorker) VisionSupported() bool {
@@ -271,7 +274,11 @@ func (w *ConversationWorker) processConfigChange(ctx context.Context, ev events.
 	switch ev.Key {
 	case events.ConfigKeyModel:
 		w.SetModel(ev.Value)
-		ev.Sender.Send(ctx, fmt.Sprintf("model set to: %s", ev.Value))
+		msg := fmt.Sprintf("model set to: %s", ev.Value)
+		if _, ok := w.cfg.Models[ev.Value]; ok {
+			msg += " (model preset applied)"
+		}
+		ev.Sender.Send(ctx, msg)
 	case events.ConfigKeyVision:
 		switch ev.Value {
 		case "on":

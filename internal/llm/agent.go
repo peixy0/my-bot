@@ -46,6 +46,7 @@ func (a *Agent) Run(
 			Temperature:    cfg.LLM.Temperature,
 			TopP:           cfg.LLM.TopP,
 			TopK:           cfg.LLM.TopK,
+			ExtraBody:      cfg.LLM.ExtraBody,
 			OnContentDelta: orch.OnContentDelta,
 		})
 		if err != nil {
@@ -106,6 +107,7 @@ func (a *Agent) Compress(ctx context.Context, cfg *config.Config, systemPrompt s
 		Temperature: compressionTemperature,
 		TopP:        cfg.LLM.TopP,
 		TopK:        cfg.LLM.TopK,
+		ExtraBody:   cfg.LLM.ExtraBody,
 	})
 	if err != nil {
 		return err

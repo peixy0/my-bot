@@ -181,3 +181,144 @@ func TestForSessionDoesNotMutateBase(t *testing.T) {
 		t.Fatal("override should not mutate base config")
 	}
 }
+
+func TestLoadYAMLExtraBody(t *testing.T) {
+	path := writeTestConfig(t, `
+llm:
+  api_key: key
+  extra_body:
+    chat_template_kwargs:
+      enable_thinking: true
+    presence_penalty: 0.5
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.LLM.ExtraBody == nil {
+		t.Fatal("expected extra_body to be parsed")
+	}
+	ctk, ok := cfg.LLM.ExtraBody["chat_template_kwargs"].(map[string]any)
+	if !ok || ctk["enable_thinking"] != true {
+		t.Fatalf("expected chat_template_kwargs.enable_thinking=true, got %v", cfg.LLM.ExtraBody["chat_template_kwargs"])
+	}
+	if cfg.LLM.ExtraBody["presence_penalty"] != 0.5 {
+		t.Fatalf("expected presence_penalty=0.5, got %v", cfg.LLM.ExtraBody["presence_penalty"])
+	}
+}
+
+func TestModelConfigApplyTo(t *testing.T) {
+	target := LLMConfig{
+		Temperature: 1.0,
+		TopP:        0.95,
+		TopK:        0,
+		ExtraBody:   map[string]any{"old": true},
+	}
+
+	t.Run("all fields set", func(t *testing.T) {
+		tgt := target
+		temp := 0.6
+		topP := 0.8
+		topK := 50
+		preset := ModelConfig{
+			Temperature: &temp,
+			TopP:        &topP,
+			TopK:        &topK,
+			ExtraBody:   map[string]any{"new": true},
+		}
+		preset.ApplyTo(&tgt)
+		if tgt.Temperature != 0.6 {
+			t.Fatalf("expected temperature 0.6, got %f", tgt.Temperature)
+		}
+		if tgt.TopP != 0.8 {
+			t.Fatalf("expected top_p 0.8, got %f", tgt.TopP)
+		}
+		if tgt.TopK != 50 {
+			t.Fatalf("expected top_k 50, got %d", tgt.TopK)
+		}
+		if tgt.ExtraBody["new"] == nil {
+			t.Fatal("expected extra_body to be replaced")
+		}
+		if _, ok := tgt.ExtraBody["old"]; ok {
+			t.Fatal("expected extra_body to be fully replaced, not merged")
+		}
+	})
+
+	t.Run("nil fields do not override", func(t *testing.T) {
+		tgt := target
+		preset := ModelConfig{}
+		preset.ApplyTo(&tgt)
+		if tgt.Temperature != 1.0 {
+			t.Fatalf("expected temperature unchanged 1.0, got %f", tgt.Temperature)
+		}
+		if tgt.TopP != 0.95 {
+			t.Fatalf("expected top_p unchanged 0.95, got %f", tgt.TopP)
+		}
+		if tgt.TopK != 0 {
+			t.Fatalf("expected top_k unchanged 0, got %d", tgt.TopK)
+		}
+		if tgt.ExtraBody["old"] == nil {
+			t.Fatal("expected extra_body unchanged")
+		}
+	})
+}
+
+func TestForSessionAppliesModelPreset(t *testing.T) {
+	base := validConfig()
+	base.LLM.Model = "Qwen3-32B"
+	temp := 0.6
+	base.Models = map[string]ModelConfig{
+		"Qwen3-32B": {
+			Temperature: &temp,
+		},
+	}
+
+	session := base.ForSession("oc_no_override")
+	if session.LLM.Temperature != 0.6 {
+		t.Fatalf("expected temperature 0.6 from preset, got %f", session.LLM.Temperature)
+	}
+	if base.LLM.Temperature == 0.6 {
+		t.Fatal("preset should not mutate base config")
+	}
+}
+
+func TestForSessionAppliesModelPresetAfterSessionOverride(t *testing.T) {
+	base := validConfig()
+	base.LLM.Model = "gpt-4o"
+	model := "Qwen3-32B"
+	temp := 0.6
+	base.Models = map[string]ModelConfig{
+		"Qwen3-32B": {
+			Temperature: &temp,
+		},
+	}
+	base.Sessions = map[string]SessionOverride{
+		"oc_test": {
+			LLM: &LLMOverride{Model: &model},
+		},
+	}
+
+	session := base.ForSession("oc_test")
+	if session.LLM.Model != "Qwen3-32B" {
+		t.Fatalf("expected model Qwen3-32B, got %s", session.LLM.Model)
+	}
+	if session.LLM.Temperature != 0.6 {
+		t.Fatalf("expected temperature 0.6 from preset after session override, got %f", session.LLM.Temperature)
+	}
+}
+
+func TestForSessionExtraBodyOverride(t *testing.T) {
+	base := validConfig()
+	base.LLM.ExtraBody = map[string]any{"presence_penalty": 0.5}
+	sessionExtra := map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": true}}
+	base.Sessions = map[string]SessionOverride{
+		"oc_test": {LLM: &LLMOverride{ExtraBody: sessionExtra}},
+	}
+	session := base.ForSession("oc_test")
+	if session.LLM.ExtraBody["chat_template_kwargs"] == nil {
+		t.Fatal("expected session extra_body to have chat_template_kwargs")
+	}
+	if _, ok := session.LLM.ExtraBody["presence_penalty"]; ok {
+		t.Fatal("expected session extra_body to fully replace, not merge")
+	}
+}

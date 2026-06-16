@@ -80,6 +80,11 @@ func (p *OpenAIProvider) doComplete(ctx context.Context, req CompletionRequest) 
 	if req.TopK > 0 {
 		body["top_k"] = req.TopK
 	}
+	for k, v := range req.ExtraBody {
+		if _, exists := body[k]; !exists {
+			body[k] = v
+		}
+	}
 	payload, err := util.ToJSON(body)
 	if err != nil {
 		return CompletionResponse{}, fmt.Errorf("marshal request: %w", err)
