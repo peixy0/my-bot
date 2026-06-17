@@ -39,6 +39,7 @@ type Config struct {
 	Workspace WorkspaceConfig            `yaml:"workspace"`
 	Context   ContextConfig              `yaml:"context"`
 	Feishu    FeishuConfig               `yaml:"feishu"`
+	WeChat    WeChatConfig               `yaml:"wechat"`
 	Vision    VisionConfig               `yaml:"vision"`
 	WebUI     WebUIConfig                `yaml:"webui"`
 	Heartbeat HeartbeatConfig            `yaml:"heartbeat"`
@@ -87,6 +88,12 @@ type FeishuConfig struct {
 	AppSecret         string `yaml:"app_secret"`
 	EncryptKey        string `yaml:"encrypt_key"`
 	VerificationToken string `yaml:"verification_token"`
+}
+
+type WeChatConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	BotToken string `yaml:"bot_token"`
+	BaseURL  string `yaml:"base_url"`
 }
 
 type VisionConfig struct {

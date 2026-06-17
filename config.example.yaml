@@ -57,6 +57,11 @@ feishu:
   encrypt_key: ""
   verification_token: ""
 
+wechat:
+  enabled: false
+  # bot_token: ""   # optional: if set, skip QR login on startup
+  # base_url: ""    # optional: override https://ilinkai.weixin.qq.com
+
 vision:
   enabled: false
   max_image_bytes: 5242880

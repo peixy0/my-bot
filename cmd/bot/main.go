@@ -15,6 +15,7 @@ import (
 	"my-bot/internal/inbox"
 	"my-bot/internal/llm"
 	"my-bot/internal/messaging/feishu"
+	"my-bot/internal/messaging/wechat"
 	"my-bot/internal/runtime"
 	"my-bot/internal/tools"
 )
@@ -69,6 +70,19 @@ func main() {
 		go func() {
 			if err := inbound.Run(ctx); err != nil && err != context.Canceled {
 				slog.Error("feishu inbound", "err", err)
+			}
+		}()
+	}
+
+	if cfg.WeChat.Enabled {
+		wcCfg := wechat.Config{
+			BotToken: cfg.WeChat.BotToken,
+			BaseURL:  cfg.WeChat.BaseURL,
+		}
+		wcInbound := wechat.NewInbound(wcCfg, mainInbox)
+		go func() {
+			if err := wcInbound.Run(ctx); err != nil && err != context.Canceled {
+				slog.Error("wechat inbound", "err", err)
 			}
 		}()
 	}
