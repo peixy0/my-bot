@@ -82,10 +82,11 @@ func toolResultMessage(callID, content string) Message {
 	}
 }
 
-func toolResultBlocksMessage(callID string, blocks []map[string]any) Message {
-	return Message{
-		"role":         "tool",
-		"tool_call_id": callID,
-		"content":      blocks,
+func userBlocksMessage(text string, blocks []map[string]any) Message {
+	parts := make([]map[string]any, 0, len(blocks)+1)
+	if text != "" {
+		parts = append(parts, map[string]any{"type": "text", "text": text})
 	}
+	parts = append(parts, blocks...)
+	return Message{"role": "user", "content": parts}
 }

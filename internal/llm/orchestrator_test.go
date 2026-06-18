@@ -320,6 +320,84 @@ func TestRunDispatch_UnknownTool(t *testing.T) {
 	}
 }
 
+func TestRunDispatch_ImageToolInjectsMultimodalUserMessage(t *testing.T) {
+	reg := tools.NewRegistry()
+	reg.Register(tools.ToolSchema{Name: "read_image"}, func(_ context.Context, _ []byte) (tools.ToolResult, error) {
+		return tools.ImageResult([]map[string]any{
+			{
+				"type": "image_url",
+				"image_url": map[string]any{
+					"url":    "data:image/png;base64,AAAA",
+					"detail": "auto",
+				},
+			},
+		}), nil
+	})
+
+	msgs, err := runDispatch(context.Background(), reg, []ToolCall{{ID: "c1", Name: "read_image", Args: []byte(`{}`)}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected tool reply plus injected user multimodal message, got %d", len(msgs))
+	}
+	if msgs[0]["role"] != "tool" {
+		t.Fatalf("expected first message role=tool, got %#v", msgs[0])
+	}
+	toolContent, _ := msgs[0]["content"].(string)
+	if !strings.Contains(toolContent, "non-text content") {
+		t.Fatalf("expected tool placeholder text, got %q", toolContent)
+	}
+	if msgs[1]["role"] != "user" {
+		t.Fatalf("expected second message role=user, got %#v", msgs[1])
+	}
+	content, ok := msgs[1]["content"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected multimodal content, got %T", msgs[1]["content"])
+	}
+	if len(content) != 2 {
+		t.Fatalf("expected text preface plus image block, got %d parts", len(content))
+	}
+	if content[0]["type"] != "text" || content[1]["type"] != "image_url" {
+		t.Fatalf("expected text then image blocks, got %+v", content)
+	}
+}
+
+func TestRunDispatch_MultipleToolsAppendFollowupsAfterAllToolReplies(t *testing.T) {
+	reg := tools.NewRegistry()
+	reg.Register(tools.ToolSchema{Name: "read_image", Parallel: true}, func(_ context.Context, _ []byte) (tools.ToolResult, error) {
+		return tools.ImageResult([]map[string]any{
+			{
+				"type": "image_url",
+				"image_url": map[string]any{
+					"url":    "data:image/png;base64,AAAA",
+					"detail": "auto",
+				},
+			},
+		}), nil
+	})
+	reg.Register(tools.ToolSchema{Name: "read_file", Parallel: true}, func(_ context.Context, _ []byte) (tools.ToolResult, error) {
+		return tools.TextResult("file contents"), nil
+	})
+
+	msgs, err := runDispatch(context.Background(), reg, []ToolCall{
+		{ID: "c1", Name: "read_image", Args: []byte(`{}`)},
+		{ID: "c2", Name: "read_file", Args: []byte(`{}`)},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("expected two tool replies and one follow-up user message, got %d", len(msgs))
+	}
+	if msgs[0]["role"] != "tool" || msgs[1]["role"] != "tool" {
+		t.Fatalf("expected tool replies first, got %#v %#v", msgs[0], msgs[1])
+	}
+	if msgs[2]["role"] != "user" {
+		t.Fatalf("expected user follow-up after all tool replies, got %#v", msgs[2])
+	}
+}
+
 type nullRuntime struct{}
 
 func (r *nullRuntime) Truncate(_ context.Context, text string, _ int) string {

@@ -127,9 +127,7 @@ func (o *HumanInputOrchestrator) drainInLoopInput() *Message {
 		msg := userMessage(text)
 		return &msg
 	}
-	parts := []map[string]any{{"type": "text", "text": text}}
-	parts = append(parts, imageParts...)
-	msg := Message{"role": "user", "content": parts}
+	msg := userBlocksMessage(text, imageParts)
 	return &msg
 }
 
@@ -224,29 +222,49 @@ func appendVisionImagePart(parts []map[string]any, ev events.ImageInputEvent) []
 	})
 }
 
-func execOne(ctx context.Context, r *tools.Registry, tc ToolCall) Message {
+type dispatchResult struct {
+	toolMsg  Message
+	followup *Message
+}
+
+func execOne(ctx context.Context, r *tools.Registry, tc ToolCall) dispatchResult {
 	handler, ok := r.Handler(tc.Name)
 	if !ok {
-		return toolResultMessage(tc.ID, fmt.Sprintf("unknown tool %q", tc.Name))
+		return dispatchResult{toolMsg: toolResultMessage(tc.ID, fmt.Sprintf("unknown tool %q", tc.Name))}
 	}
 	slog.Debug("tool call start", "tool", tc.Name, "id", tc.ID, "args", string(tc.Args))
 	result, err := handler(ctx, tc.Args)
 	if err != nil {
 		slog.Debug("tool call error", "tool", tc.Name, "id", tc.ID, "err", err)
-		return toolResultMessage(tc.ID, fmt.Sprintf("error: %v", err))
+		return dispatchResult{toolMsg: toolResultMessage(tc.ID, fmt.Sprintf("error: %v", err))}
 	}
 	slog.Debug("tool call done", "tool", tc.Name, "id", tc.ID, "result", result.Text)
 	if result.Blocks != nil {
-		return toolResultBlocksMessage(tc.ID, result.Blocks)
+		toolText := result.Text
+		if strings.TrimSpace(toolText) == "" {
+			toolText = fmt.Sprintf("%s returned non-text content. A follow-up user message contains the multimodal payload.", tc.Name)
+		}
+		followup := userBlocksMessage(
+			fmt.Sprintf("[TOOL OUTPUT FROM %s]\nInspect the attached content and continue with the task.", tc.ID),
+			result.Blocks,
+		)
+		return dispatchResult{
+			toolMsg:  toolResultMessage(tc.ID, toolText),
+			followup: &followup,
+		}
 	}
-	return toolResultMessage(tc.ID, result.Text)
+	return dispatchResult{toolMsg: toolResultMessage(tc.ID, result.Text)}
 }
 
 func runDispatch(ctx context.Context, r *tools.Registry, calls []ToolCall) ([]Message, error) {
-	msgs := make([]Message, len(calls))
+	results := make([]dispatchResult, len(calls))
 
 	if len(calls) == 1 {
-		msgs[0] = execOne(ctx, r, calls[0])
+		res := execOne(ctx, r, calls[0])
+		msgs := []Message{res.toolMsg}
+		if res.followup != nil {
+			msgs = append(msgs, *res.followup)
+		}
 		return msgs, nil
 	}
 
@@ -256,14 +274,26 @@ func runDispatch(ctx context.Context, r *tools.Registry, calls []ToolCall) ([]Me
 		i, tc := i, tc
 		g.Go(func() error {
 			if r.IsParallel(tc.Name) {
-				msgs[i] = execOne(gctx, r, tc)
+				results[i] = execOne(gctx, r, tc)
 			} else {
 				seqMu.Lock()
-				msgs[i] = execOne(gctx, r, tc)
+				results[i] = execOne(gctx, r, tc)
 				seqMu.Unlock()
 			}
 			return nil
 		})
 	}
-	return msgs, g.Wait()
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	msgs := make([]Message, 0, len(calls)*2)
+	for _, res := range results {
+		msgs = append(msgs, res.toolMsg)
+	}
+	for _, res := range results {
+		if res.followup != nil {
+			msgs = append(msgs, *res.followup)
+		}
+	}
+	return msgs, nil
 }
