@@ -148,7 +148,7 @@ func TestWriteTaskInputFeedsProcessStdin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("await_task: %v", err)
 	}
-	if !strings.Contains(got.Text, "output:\ngot:hello") {
+	if !strings.Contains(got.Text, "output:\nhello\ngot:hello") {
 		t.Fatalf("expected stdin to reach process, got:\n%s", got.Text)
 	}
 }

@@ -211,7 +211,11 @@ func (m *Manager) loop() {
 				close(req.resp)
 				continue
 			}
-			req.resp <- task.controller.WriteInput(req.input)
+			err := task.controller.WriteInput(req.input)
+			if err == nil {
+				task.output.Append(req.input)
+			}
+			req.resp <- err
 			close(req.resp)
 		case killReq:
 			task := tasks[req.taskID]

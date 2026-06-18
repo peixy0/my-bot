@@ -43,8 +43,7 @@ func formatTaskSnapshot(snap tasks.Snapshot) string {
 	}
 	if snap.Output != "" {
 		fmt.Fprintf(&sb, "output:\n%s\n", snap.Output)
-	}
-	if snap.Output == "" {
+	} else {
 		fmt.Fprintf(&sb, "output: (no output)\n")
 	}
 	return sb.String()

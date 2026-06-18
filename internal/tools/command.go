@@ -62,7 +62,9 @@ func (s *CommandToolset) Register(r *Registry) {
 				return ToolResult{}, err
 			}
 			if got.Status != tasks.StatusRunning {
-				return TextResult(formatTaskSnapshot(got)), nil
+				result := TextResult(formatTaskSnapshot(got))
+				s.tasks.Remove(ctx, snap.TaskID)
+				return result, nil
 			}
 		}
 		return TextResult(MarshalResult(map[string]any{"task_id": snap.TaskID})), nil
@@ -129,34 +131,11 @@ func (s *CommandToolset) Register(r *Registry) {
 		if err != nil {
 			return ToolResult{}, err
 		}
-		return TextResult(formatTaskSnapshot(snap)), nil
-	})
-
-	r.Register(ToolSchema{
-		Name:        "kill_task",
-		Description: "Kill a running task immediately.",
-		ParameterDesc: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"task_id": map[string]any{
-					"type":        "string",
-					"description": "Task identifier from list_tasks.",
-				},
-			},
-			"required": []string{"task_id"},
-		},
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
-		var p struct {
-			TaskID string `json:"task_id"`
+		result := TextResult(formatTaskSnapshot(snap))
+		if snap.Status != tasks.StatusRunning {
+			s.tasks.Remove(ctx, snap.TaskID)
 		}
-		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
-		}
-		snap, err := s.tasks.Kill(ctx, p.TaskID)
-		if err != nil {
-			return ToolResult{}, err
-		}
-		return TextResult(formatTaskSnapshot(snap)), nil
+		return result, nil
 	})
 
 	r.Register(ToolSchema{
@@ -172,6 +151,38 @@ func (s *CommandToolset) Register(r *Registry) {
 			return ToolResult{}, err
 		}
 		return TextResult(MarshalResult(snaps)), nil
+	})
+
+	r.Register(ToolSchema{
+		Name:        "kill_task",
+		Description: "Kill the task immediately and remove it from memory.",
+		ParameterDesc: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"task_id": map[string]any{
+					"type":        "string",
+					"description": "Task identifier to remove.",
+				},
+			},
+			"required": []string{"task_id"},
+		},
+	}, func(ctx context.Context, args []byte) (ToolResult, error) {
+		var p struct {
+			TaskID string `json:"task_id"`
+		}
+		if err := json.Unmarshal(args, &p); err != nil {
+			return ToolResult{}, err
+		}
+		if _, err := s.tasks.Kill(ctx, p.TaskID); err != nil {
+			var snapErr error
+			if _, _, snapErr = s.tasks.Get(ctx, p.TaskID, false); snapErr != nil {
+				return ToolResult{}, err
+			}
+		}
+		if err := s.tasks.Remove(ctx, p.TaskID); err != nil {
+			return ToolResult{}, err
+		}
+		return TextResult(MarshalResult(map[string]any{"task_id": p.TaskID, "status": "killed"})), nil
 	})
 
 	r.Register(ToolSchema{
@@ -203,37 +214,5 @@ func (s *CommandToolset) Register(r *Registry) {
 			return ToolResult{}, err
 		}
 		return TextResult(MarshalResult(map[string]any{"task_id": p.TaskID, "written": len(p.Input)})), nil
-	})
-
-	r.Register(ToolSchema{
-		Name:        "remove_task",
-		Description: "Remove a task from memory. Running tasks are killed first.",
-		ParameterDesc: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"task_id": map[string]any{
-					"type":        "string",
-					"description": "Task identifier to remove.",
-				},
-			},
-			"required": []string{"task_id"},
-		},
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
-		var p struct {
-			TaskID string `json:"task_id"`
-		}
-		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
-		}
-		if _, err := s.tasks.Kill(ctx, p.TaskID); err != nil {
-			var snapErr error
-			if _, _, snapErr = s.tasks.Get(ctx, p.TaskID, false); snapErr != nil {
-				return ToolResult{}, err
-			}
-		}
-		if err := s.tasks.Remove(ctx, p.TaskID); err != nil {
-			return ToolResult{}, err
-		}
-		return TextResult(MarshalResult(map[string]any{"removed": p.TaskID})), nil
 	})
 }
