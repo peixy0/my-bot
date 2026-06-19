@@ -57,6 +57,7 @@ type Runtime interface {
 	ReadFile(ctx context.Context, filename string, startLine, limit int) (ReadFileResult, error)
 	WriteFile(ctx context.Context, filename, content string) error
 	WriteTmpFile(ctx context.Context, content string) (string, error)
+	AppendFile(ctx context.Context, filename, content string) error
 	Glob(ctx context.Context, pattern string) (GlobResult, error)
 	EditFile(ctx context.Context, filename string, edits []Edit) error
 	OSInfo(ctx context.Context) (string, error)

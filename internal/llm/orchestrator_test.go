@@ -417,6 +417,7 @@ func (r *nullRuntime) ReadFile(_ context.Context, _ string, _, _ int) (runtime.R
 }
 func (r *nullRuntime) WriteFile(_ context.Context, _, _ string) error           { return nil }
 func (r *nullRuntime) WriteTmpFile(_ context.Context, _ string) (string, error) { return "", nil }
+func (r *nullRuntime) AppendFile(_ context.Context, _, _ string) error          { return nil }
 func (r *nullRuntime) Glob(_ context.Context, _ string) (runtime.GlobResult, error) {
 	return runtime.GlobResult{}, nil
 }

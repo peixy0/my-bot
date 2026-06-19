@@ -35,6 +35,7 @@ func (d *DefaultToolset) Register(r *Registry) {
 	d.registerFetch(r)
 	d.registerReadFile(r)
 	d.registerWriteFile(r)
+	d.registerAppendFile(r)
 	d.registerEditFile(r)
 	d.registerApplyPatch(r)
 	d.registerGrep(r)
@@ -240,6 +241,39 @@ func (d *DefaultToolset) registerWriteFile(r *Registry) {
 			return ToolResult{}, err
 		}
 		return TextResult(fmt.Sprintf("wrote %s", p.Filename)), nil
+	})
+}
+
+func (d *DefaultToolset) registerAppendFile(r *Registry) {
+	r.Register(ToolSchema{
+		Name:        "append_file",
+		Description: "Append given content to the end of a file.\n\nFile will be created if it doesn't exist.\n\nUse this to add new content while preserving the original content of a file.",
+		ParameterDesc: (map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"filename": map[string]any{
+					"type":        "string",
+					"description": "Path to the file, relative to the cwd or use absolute path. Parent directories are created automatically.",
+				},
+				"content": map[string]any{
+					"type":        "string",
+					"description": "The content to be appended.",
+				},
+			},
+			"required": []string{"filename", "content"},
+		}),
+	}, func(ctx context.Context, args []byte) (ToolResult, error) {
+		var p struct {
+			Filename string `json:"filename"`
+			Content  string `json:"content"`
+		}
+		if err := json.Unmarshal(args, &p); err != nil {
+			return ToolResult{}, err
+		}
+		if err := d.rt.AppendFile(ctx, p.Filename, p.Content); err != nil {
+			return ToolResult{}, err
+		}
+		return TextResult(fmt.Sprintf("append %s", p.Filename)), nil
 	})
 }
 

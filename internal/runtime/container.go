@@ -172,6 +172,24 @@ func (r *ContainerRuntime) WriteTmpFile(ctx context.Context, content string) (st
 	return writeTmpFile(ctx, r, content)
 }
 
+func (r *ContainerRuntime) AppendFile(ctx context.Context, filename, content string) error {
+	_, stderr, rc, err := r.execute(ctx, nil, "mkdir", "-p", "--", path.Dir(filename))
+	if err != nil {
+		return err
+	}
+	if rc != 0 {
+		return fmt.Errorf("mkdir failed: %s", strings.TrimSpace(string(stderr)))
+	}
+	_, stderr, rc, err = r.execute(ctx, []byte(content), "tee", "-a", "--", filename)
+	if err != nil {
+		return err
+	}
+	if rc != 0 {
+		return fmt.Errorf("append failed: %s", strings.TrimSpace(string(stderr)))
+	}
+	return nil
+}
+
 func (r *ContainerRuntime) Glob(ctx context.Context, pattern string) (GlobResult, error) {
 	return runPythonGlob(ctx, r, pattern)
 }

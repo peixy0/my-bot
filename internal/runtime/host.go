@@ -120,6 +120,23 @@ func (r *HostRuntime) WriteTmpFile(ctx context.Context, content string) (string,
 	return writeTmpFile(ctx, r, content)
 }
 
+func (r *HostRuntime) AppendFile(ctx context.Context, filename, content string) error {
+	if err := os.MkdirAll(filepath.Dir(filename), 0755); err != nil {
+		return err
+	}
+
+	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(content); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (r *HostRuntime) Glob(ctx context.Context, pattern string) (GlobResult, error) {
 	return runPythonGlob(ctx, r, pattern)
 }

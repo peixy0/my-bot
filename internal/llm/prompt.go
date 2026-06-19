@@ -112,7 +112,6 @@ func (p *SubagentPrompt) Build(ctx context.Context) string {
 		sb.WriteString(p.extra)
 		sb.WriteString("\n\n")
 	}
-	p.writeFile(&sb, "PERSONA.md")
 	p.writeFile(&sb, "TOOLS.md")
 	p.writeOSInfo(ctx, &sb)
 	return sb.String()
