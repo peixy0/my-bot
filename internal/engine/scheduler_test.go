@@ -65,16 +65,13 @@ func TestSchedulerHeartbeatInterval(t *testing.T) {
 
 func TestSendWorkerEventPublishesEnvelope(t *testing.T) {
 	workerInbox := inbox.NewMemory[events.WorkerEvent](1)
-	if !sendWorkerEvent("chat-1", workerInbox, events.TextInputEvent{ChatID: "chat-1", Message: "hi"}) {
+	if !workerInbox.TryPublish(workerEnvelope(events.TextInputEvent{ChatID: "chat-1", Message: "hi"})) {
 		t.Fatal("expected worker event publish to succeed")
 	}
 
 	msg, err := workerInbox.Receive(context.Background())
 	if err != nil {
 		t.Fatalf("receive worker event: %v", err)
-	}
-	if msg.Target.Kind != "worker" || msg.Target.ID != "chat-1" {
-		t.Fatalf("unexpected target: %+v", msg.Target)
 	}
 	if _, ok := msg.Payload.(events.TextInputEvent); !ok {
 		t.Fatalf("unexpected payload type: %T", msg.Payload)
@@ -83,18 +80,18 @@ func TestSendWorkerEventPublishesEnvelope(t *testing.T) {
 
 func TestSendWorkerEventDropsWhenInboxFull(t *testing.T) {
 	workerInbox := inbox.NewMemory[events.WorkerEvent](1)
-	if !sendWorkerEvent("chat-1", workerInbox, events.TextInputEvent{ChatID: "chat-1"}) {
+	if !workerInbox.TryPublish(workerEnvelope(events.TextInputEvent{ChatID: "chat-1", Message: "hi"})) {
 		t.Fatal("expected first publish to succeed")
 	}
-	if sendWorkerEvent("chat-1", workerInbox, events.TextInputEvent{ChatID: "chat-1"}) {
+	if workerInbox.TryPublish(workerEnvelope(events.TextInputEvent{ChatID: "chat-1", Message: "hi"})) {
 		t.Fatal("expected second publish to fail when inbox is full")
 	}
 }
 
-func TestSchedulerDispatchTextInputPublishesToExistingWorkerInLoopInbox(t *testing.T) {
+func TestSchedulerDispatchTextInputPublishesToExistingWorkerMessageInbox(t *testing.T) {
 	worker := &ConversationWorker{
-		Events:      inbox.NewMemory[events.WorkerEvent](1),
-		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
+		Events:       inbox.NewMemory[events.WorkerEvent](1),
+		MessageInbox: inbox.NewMemory[events.MessageEvent](1),
 	}
 	s := &Scheduler{
 		sessions: map[string]*chatSession{
@@ -109,7 +106,7 @@ func TestSchedulerDispatchTextInputPublishesToExistingWorkerInLoopInbox(t *testi
 		Sender:    &captureOutbound{},
 	})
 
-	msg, err := worker.InLoopInbox.Receive(context.Background())
+	msg, err := worker.MessageInbox.Receive(context.Background())
 	if err != nil {
 		t.Fatalf("receive in-loop input: %v", err)
 	}
@@ -125,10 +122,10 @@ func TestSchedulerDispatchTextInputPublishesToExistingWorkerInLoopInbox(t *testi
 	}
 }
 
-func TestSchedulerDispatchImageInputPublishesToExistingWorkerInLoopInbox(t *testing.T) {
+func TestSchedulerDispatchImageInputPublishesToExistingWorkerMessageInbox(t *testing.T) {
 	worker := &ConversationWorker{
-		Events:      inbox.NewMemory[events.WorkerEvent](1),
-		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
+		Events:       inbox.NewMemory[events.WorkerEvent](1),
+		MessageInbox: inbox.NewMemory[events.MessageEvent](1),
 	}
 	s := &Scheduler{
 		sessions: map[string]*chatSession{
@@ -145,7 +142,7 @@ func TestSchedulerDispatchImageInputPublishesToExistingWorkerInLoopInbox(t *test
 		Sender:    &captureOutbound{},
 	})
 
-	msg, err := worker.InLoopInbox.Receive(context.Background())
+	msg, err := worker.MessageInbox.Receive(context.Background())
 	if err != nil {
 		t.Fatalf("receive in-loop input: %v", err)
 	}
@@ -161,19 +158,19 @@ func TestSchedulerDispatchImageInputPublishesToExistingWorkerInLoopInbox(t *test
 	}
 }
 
-func TestSchedulerDispatchTextInputQueuesWhenInLoopInboxFull(t *testing.T) {
+func TestSchedulerDispatchTextInputQueuesWhenMessageInboxFull(t *testing.T) {
 	worker := &ConversationWorker{
-		Events:      inbox.NewMemory[events.WorkerEvent](1),
-		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
+		Events:       inbox.NewMemory[events.WorkerEvent](1),
+		MessageInbox: inbox.NewMemory[events.MessageEvent](1),
 	}
-	worker.InLoopInbox.TryPublish(workerEnvelope("chat-1", events.TextInputEvent{ChatID: "chat-1", Message: "already pending"}))
+	worker.MessageInbox.TryPublish(messageEnvelope(events.TextInputEvent{ChatID: "chat-1", Message: "already pending"}))
 	s := &Scheduler{
 		sessions: map[string]*chatSession{
 			"chat-1": newStubSession(worker),
 		},
 	}
 
-	s.dispatchUserInput(context.Background(), "chat-1", events.TextInputEvent{
+	s.dispatchToSession(context.Background(), "chat-1", events.TextInputEvent{
 		ChatID:  "chat-1",
 		Message: "fallback task",
 		Sender:  &captureOutbound{},
@@ -194,8 +191,8 @@ func TestSchedulerDispatchTextInputQueuesWhenInLoopInboxFull(t *testing.T) {
 
 func TestSchedulerQueueCommandQueuesWithExistingWorker(t *testing.T) {
 	worker := &ConversationWorker{
-		Events:      inbox.NewMemory[events.WorkerEvent](1),
-		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
+		Events:       inbox.NewMemory[events.WorkerEvent](1),
+		MessageInbox: inbox.NewMemory[events.MessageEvent](1),
 	}
 	s := &Scheduler{
 		sessions: map[string]*chatSession{
@@ -220,15 +217,15 @@ func TestSchedulerQueueCommandQueuesWithExistingWorker(t *testing.T) {
 	if ev.Message != "handle this later" {
 		t.Fatalf("unexpected queued text: %q", ev.Message)
 	}
-	if worker.InLoopInbox.Len() != 0 {
-		t.Fatalf("expected in-loop inbox to stay empty, got %d", worker.InLoopInbox.Len())
+	if worker.MessageInbox.Len() != 0 {
+		t.Fatalf("expected in-loop inbox to stay empty, got %d", worker.MessageInbox.Len())
 	}
 }
 
 func TestSchedulerDumpCommandQueuesUUIDDump(t *testing.T) {
 	worker := &ConversationWorker{
-		Events:      inbox.NewMemory[events.WorkerEvent](1),
-		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
+		Events:       inbox.NewMemory[events.WorkerEvent](1),
+		MessageInbox: inbox.NewMemory[events.MessageEvent](1),
 	}
 	out := &captureOutbound{}
 	s := &Scheduler{
@@ -277,8 +274,8 @@ func TestSchedulerDumpCommandRequiresActiveSession(t *testing.T) {
 
 func TestSchedulerResumeCommandQueuesResume(t *testing.T) {
 	worker := &ConversationWorker{
-		Events:      inbox.NewMemory[events.WorkerEvent](1),
-		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
+		Events:       inbox.NewMemory[events.WorkerEvent](1),
+		MessageInbox: inbox.NewMemory[events.MessageEvent](1),
 	}
 	out := &captureOutbound{}
 	id := uuid.NewString()
@@ -332,8 +329,8 @@ func TestSchedulerResumeCommandValidatesUsageAndUUID(t *testing.T) {
 
 func TestSchedulerModelCommandQueuesConfigChange(t *testing.T) {
 	worker := &ConversationWorker{
-		Events:      inbox.NewMemory[events.WorkerEvent](1),
-		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
+		Events:       inbox.NewMemory[events.WorkerEvent](1),
+		MessageInbox: inbox.NewMemory[events.MessageEvent](1),
 	}
 	s := &Scheduler{
 		sessions: map[string]*chatSession{
@@ -584,38 +581,5 @@ func TestWorkerGenerationConfigCommands(t *testing.T) {
 		if out.messages[i] != want[i] {
 			t.Fatalf("response %d = %q, want %q", i, out.messages[i], want[i])
 		}
-	}
-}
-
-func TestSchedulerRemovedSteerCommandQueuesAsUnknownSlashCommand(t *testing.T) {
-	worker := &ConversationWorker{
-		Events:      inbox.NewMemory[events.WorkerEvent](1),
-		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
-	}
-	s := &Scheduler{
-		sessions: map[string]*chatSession{
-			"chat-1": newStubSession(worker),
-		},
-	}
-
-	s.handleSlashCommand(context.Background(), "steer old command", events.TextInputEvent{
-		ChatID:  "chat-1",
-		Message: "/steer old command",
-		Sender:  &captureOutbound{},
-	})
-
-	if worker.InLoopInbox.Len() != 0 {
-		t.Fatalf("expected removed /steer command not to publish in-loop input, got %d", worker.InLoopInbox.Len())
-	}
-	msg, err := worker.Events.Receive(context.Background())
-	if err != nil {
-		t.Fatalf("receive worker event: %v", err)
-	}
-	ev, ok := msg.Payload.(events.TextInputEvent)
-	if !ok {
-		t.Fatalf("unexpected payload type: %T", msg.Payload)
-	}
-	if ev.Message != "/steer old command" {
-		t.Fatalf("unexpected queued text: %q", ev.Message)
 	}
 }

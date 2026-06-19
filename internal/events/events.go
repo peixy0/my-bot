@@ -11,6 +11,9 @@ type Outbound interface {
 }
 
 type AgentEvent interface{ agentEvent() }
+type MessageEvent interface {
+	messageEvent()
+}
 type WorkerEvent interface {
 	workerEvent()
 }
@@ -90,8 +93,9 @@ func (TextInputEvent) agentEvent()   {}
 func (ImageInputEvent) agentEvent()  {}
 func (DropSessionEvent) agentEvent() {}
 
+func (TextInputEvent) messageEvent()   {}
+func (ImageInputEvent) messageEvent()  {}
 func (TextInputEvent) workerEvent()    {}
-func (ImageInputEvent) workerEvent()   {}
 func (HeartbeatEvent) workerEvent()    {}
 func (CronEvent) workerEvent()         {}
 func (NewSessionEvent) workerEvent()   {}

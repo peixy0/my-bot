@@ -36,12 +36,12 @@ func (s *mockSender) EndThinking(_ context.Context)   {}
 
 func TestHumanInputOrchestrator_DrainInLoopInputTextOnly(t *testing.T) {
 	sender := &mockSender{}
-	inLoopInbox := inbox.NewMemory[events.WorkerEvent](32)
+	inLoopInbox := inbox.NewMemory[events.MessageEvent](32)
 	reg := tools.NewRegistry()
 	orch := NewHumanInputOrchestrator(reg, sender, inLoopInbox)
 
-	inLoopInbox.TryPublish(inbox.NewEnvelope[events.WorkerEvent]("in-loop", inbox.Address{Kind: "worker", ID: "chat"}, events.TextInputEvent{ChatID: "chat", Message: "stop doing that"}))
-	inLoopInbox.TryPublish(inbox.NewEnvelope[events.WorkerEvent]("in-loop", inbox.Address{Kind: "worker", ID: "chat"}, events.TextInputEvent{ChatID: "chat", Message: "do this instead"}))
+	inLoopInbox.TryPublish(inbox.NewEnvelope[events.MessageEvent](events.TextInputEvent{ChatID: "chat", Message: "stop doing that"}))
+	inLoopInbox.TryPublish(inbox.NewEnvelope[events.MessageEvent](events.TextInputEvent{ChatID: "chat", Message: "do this instead"}))
 
 	calls := []ToolCall{{ID: "c1", Name: "unknown_tool", Args: []byte(`{}`)}}
 	msgs, err := orch.DispatchTools(context.Background(), calls)
@@ -68,12 +68,12 @@ func TestHumanInputOrchestrator_DrainInLoopInputTextOnly(t *testing.T) {
 
 func TestHumanInputOrchestrator_DrainInLoopInputWithImageUsesMultipart(t *testing.T) {
 	sender := &mockSender{}
-	inLoopInbox := inbox.NewMemory[events.WorkerEvent](32)
+	inLoopInbox := inbox.NewMemory[events.MessageEvent](32)
 	reg := tools.NewRegistry()
 	orch := NewHumanInputOrchestrator(reg, sender, inLoopInbox).WithVision(true)
 
-	inLoopInbox.TryPublish(inbox.NewEnvelope[events.WorkerEvent]("in-loop", inbox.Address{Kind: "worker", ID: "chat"}, events.TextInputEvent{ChatID: "chat", Message: "stop doing that"}))
-	inLoopInbox.TryPublish(inbox.NewEnvelope[events.WorkerEvent]("in-loop", inbox.Address{Kind: "worker", ID: "chat"}, events.ImageInputEvent{ChatID: "chat", Message: "see image", MIMEType: "image/png", ImageData: []byte{1, 2, 3}}))
+	inLoopInbox.TryPublish(inbox.NewEnvelope[events.MessageEvent](events.TextInputEvent{ChatID: "chat", Message: "stop doing that"}))
+	inLoopInbox.TryPublish(inbox.NewEnvelope[events.MessageEvent](events.ImageInputEvent{ChatID: "chat", Message: "see image", MIMEType: "image/png", ImageData: []byte{1, 2, 3}}))
 
 	calls := []ToolCall{{ID: "c1", Name: "unknown_tool", Args: []byte(`{}`)}}
 	msgs, err := orch.DispatchTools(context.Background(), calls)

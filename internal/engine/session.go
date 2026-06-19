@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -88,20 +89,20 @@ func (s *chatSession) close() {
 	}
 }
 
-func (s *chatSession) publish(ev events.WorkerEvent) bool {
-	return sendWorkerEvent(s.chatID, s.worker.Events, ev)
+func (s *chatSession) publishEvent(ev events.WorkerEvent) bool {
+	if s.worker.Events.TryPublish(workerEnvelope(ev)) {
+		return true
+	}
+	slog.Error("worker event dropped: channel full", "chat", s.chatID, "event", fmt.Sprintf("%T", ev))
+	return false
 }
 
-func (s *chatSession) publishInLoop(ev events.WorkerEvent) bool {
-	return s.worker.InLoopInbox.TryPublish(workerEnvelope(s.chatID, ev))
-}
-
-func (s *chatSession) dump(id string, sender events.Outbound) bool {
-	return s.publish(events.DumpCommand{ID: id, Sender: sender})
-}
-
-func (s *chatSession) resume(id string, sender events.Outbound) bool {
-	return s.publish(events.ResumeCommand{ID: id, Sender: sender})
+func (s *chatSession) publishMessage(ev events.MessageEvent) bool {
+	if s.worker.MessageInbox.TryPublish(messageEnvelope(ev)) {
+		return true
+	}
+	slog.Error("message event dropped: channel full", "chat", s.chatID, "event", fmt.Sprintf("%T", ev))
+	return false
 }
 
 func (s *chatSession) cronWorker() *CronWorker {

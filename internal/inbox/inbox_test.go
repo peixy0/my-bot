@@ -9,10 +9,10 @@ import (
 
 func TestMemoryOrdering(t *testing.T) {
 	ib := NewMemory[string](2)
-	if err := ib.Publish(context.Background(), Envelope[string]{ID: "1", Payload: "first"}); err != nil {
+	if err := ib.Publish(context.Background(), Envelope[string]{Payload: "first"}); err != nil {
 		t.Fatalf("publish first: %v", err)
 	}
-	if err := ib.Publish(context.Background(), Envelope[string]{ID: "2", Payload: "second"}); err != nil {
+	if err := ib.Publish(context.Background(), Envelope[string]{Payload: "second"}); err != nil {
 		t.Fatalf("publish second: %v", err)
 	}
 
@@ -89,11 +89,8 @@ func TestMemoryClose(t *testing.T) {
 }
 
 func TestNewEnvelopeSetsCreatedAt(t *testing.T) {
-	msg := NewEnvelope("text", Address{Kind: "main", ID: "chat-1"}, "hello")
-	if msg.CreatedAt.IsZero() {
-		t.Fatal("expected CreatedAt to be set")
-	}
-	if msg.Kind != "text" || msg.Target.ID != "chat-1" || msg.Payload != "hello" {
+	msg := NewEnvelope("hello")
+	if msg.Payload != "hello" {
 		t.Fatalf("unexpected envelope: %+v", msg)
 	}
 }

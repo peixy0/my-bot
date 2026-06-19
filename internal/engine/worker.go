@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	workerEventBuf = 64
-	inLoopInboxBuf = 32
+	workerEventBuf  = 64
+	messageInboxBuf = 32
 )
 
 type ConversationWorker struct {
@@ -32,8 +32,8 @@ type ConversationWorker struct {
 
 	tools *sessionTools
 
-	Events      *inbox.Memory[events.WorkerEvent]
-	InLoopInbox *inbox.Memory[events.WorkerEvent]
+	Events       *inbox.Memory[events.WorkerEvent]
+	MessageInbox *inbox.Memory[events.MessageEvent]
 
 	heartbeatTimer *time.Timer
 	lastHeartbeat  *events.HeartbeatEvent
@@ -59,14 +59,14 @@ func newConversationWorker(
 ) *ConversationWorker {
 	workerAgent := agent.Fork()
 	w := &ConversationWorker{
-		chatID:      chatID,
-		cfg:         cfg,
-		agent:       workerAgent,
-		rt:          rt,
-		skills:      skills,
-		tools:       tools,
-		Events:      inbox.NewMemory[events.WorkerEvent](workerEventBuf),
-		InLoopInbox: inbox.NewMemory[events.WorkerEvent](inLoopInboxBuf),
+		chatID:       chatID,
+		cfg:          cfg,
+		agent:        workerAgent,
+		rt:           rt,
+		skills:       skills,
+		tools:        tools,
+		Events:       inbox.NewMemory[events.WorkerEvent](workerEventBuf),
+		MessageInbox: inbox.NewMemory[events.MessageEvent](messageInboxBuf),
 	}
 	w.loop = llm.NewAgentLoop(w.cfg, workerAgent)
 	return w
@@ -148,12 +148,12 @@ func (w *ConversationWorker) Run(ctx context.Context) error {
 				w.reportError(ctx, err, e)
 			}
 			w.scheduleHeartbeat()
-		case msg := <-w.InLoopInbox.C():
+		case msg := <-w.MessageInbox.C():
 			e := msg.Payload
-			slog.Debug("in-loop input", "chat", w.chatID, "event", fmt.Sprintf("%T", e))
+			slog.Debug("message input", "chat", w.chatID, "event", fmt.Sprintf("%T", e))
 			w.stopHeartbeat()
-			if err := w.handleEvent(ctx, e); err != nil {
-				slog.Error("in-loop input", "chat", w.chatID, "err", err)
+			if err := w.handleMessage(ctx, e); err != nil {
+				slog.Error("message input", "chat", w.chatID, "err", err)
 				w.reportError(ctx, err, e)
 			}
 			w.scheduleHeartbeat()
@@ -168,8 +168,6 @@ func (w *ConversationWorker) handleEvent(ctx context.Context, e events.WorkerEve
 	switch ev := e.(type) {
 	case events.TextInputEvent:
 		return w.processText(ctx, ev)
-	case events.ImageInputEvent:
-		return w.processImage(ctx, ev)
 	case events.HeartbeatEvent:
 		return w.processHeartbeat(ctx, ev)
 	case events.CronEvent:
@@ -189,6 +187,17 @@ func (w *ConversationWorker) handleEvent(ctx context.Context, e events.WorkerEve
 	}
 }
 
+func (w *ConversationWorker) handleMessage(ctx context.Context, e events.MessageEvent) error {
+	switch ev := e.(type) {
+	case events.TextInputEvent:
+		return w.processText(ctx, ev)
+	case events.ImageInputEvent:
+		return w.processImage(ctx, ev)
+	default:
+		return fmt.Errorf("unexpected event type %T", e)
+	}
+}
+
 func (w *ConversationWorker) processText(ctx context.Context, ev events.TextInputEvent) error {
 	slog.Debug("text input", "chat", w.chatID, "msg_id", ev.MessageID, "len", len(ev.Message), "content", ev.Message)
 	prompt := llm.NewMainPrompt(w.skills, w.rt)
@@ -196,7 +205,7 @@ func (w *ConversationWorker) processText(ctx context.Context, ev events.TextInpu
 		slog.Error("compress", "chat", w.chatID, "err", err)
 	}
 	reg := w.tools.Registry(ev.Sender)
-	orch := llm.NewHumanInputOrchestrator(reg, ev.Sender, w.InLoopInbox).WithVision(w.VisionSupported())
+	orch := llm.NewHumanInputOrchestrator(reg, ev.Sender, w.MessageInbox).WithVision(w.VisionSupported())
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
 	return w.loop.Run(ctx, reg, orch, prompt, wrapUserMessage(ev.Message))
@@ -222,7 +231,7 @@ func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageIn
 		},
 	}
 	reg := w.tools.Registry(ev.Sender)
-	orch := llm.NewHumanInputOrchestrator(reg, ev.Sender, w.InLoopInbox).WithVision(true)
+	orch := llm.NewHumanInputOrchestrator(reg, ev.Sender, w.MessageInbox).WithVision(true)
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
 	return w.loop.Run(ctx, reg, orch, prompt, content)
@@ -376,7 +385,7 @@ func (w *ConversationWorker) scheduleHeartbeat() {
 	hb := *w.lastHeartbeat
 	interval := time.Duration(hb.IntervalSeconds) * time.Second
 	w.heartbeatTimer = time.AfterFunc(interval, func() {
-		if !w.Events.TryPublish(workerEnvelope(w.chatID, hb)) {
+		if !w.Events.TryPublish(workerEnvelope(hb)) {
 			slog.Warn("heartbeat dropped: events channel full", "chat", w.chatID)
 		}
 	})
@@ -389,7 +398,7 @@ func (w *ConversationWorker) stopHeartbeat() {
 	}
 }
 
-func (w *ConversationWorker) reportError(ctx context.Context, err error, e events.WorkerEvent) {
+func (w *ConversationWorker) reportError(ctx context.Context, err error, e any) {
 	slog.Error("event handler", "chat", w.chatID, "event", fmt.Sprintf("%T", e), "err", err)
 	switch ev := e.(type) {
 	case events.TextInputEvent:
@@ -422,6 +431,10 @@ func formatFloat(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
-func workerEnvelope(chatID string, ev events.WorkerEvent) inbox.Envelope[events.WorkerEvent] {
-	return inbox.NewEnvelope(fmt.Sprintf("%T", ev), inbox.Address{Kind: "worker", ID: chatID}, ev)
+func workerEnvelope(ev events.WorkerEvent) inbox.Envelope[events.WorkerEvent] {
+	return inbox.NewEnvelope(ev)
+}
+
+func messageEnvelope(ev events.MessageEvent) inbox.Envelope[events.MessageEvent] {
+	return inbox.NewEnvelope(ev)
 }

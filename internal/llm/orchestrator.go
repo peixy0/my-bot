@@ -44,11 +44,11 @@ func sendBeforeToolUse(ctx context.Context, sender events.Outbound, content stri
 type HumanInputOrchestrator struct {
 	registry      *tools.Registry
 	sender        events.Outbound
-	inLoopInbox   inbox.Inbox[events.WorkerEvent]
+	inLoopInbox   inbox.Inbox[events.MessageEvent]
 	visionSupport bool
 }
 
-func NewHumanInputOrchestrator(registry *tools.Registry, sender events.Outbound, inLoopInbox inbox.Inbox[events.WorkerEvent]) *HumanInputOrchestrator {
+func NewHumanInputOrchestrator(registry *tools.Registry, sender events.Outbound, inLoopInbox inbox.Inbox[events.MessageEvent]) *HumanInputOrchestrator {
 	return &HumanInputOrchestrator{registry: registry, sender: sender, inLoopInbox: inLoopInbox}
 }
 
@@ -88,10 +88,7 @@ func (o *HumanInputOrchestrator) DispatchTools(ctx context.Context, calls []Tool
 }
 
 func (o *HumanInputOrchestrator) drainInLoopInput() *Message {
-	if o.inLoopInbox == nil {
-		return nil
-	}
-	var items []events.WorkerEvent
+	var items []events.MessageEvent
 	for {
 		msg, ok := o.inLoopInbox.TryReceive()
 		if !ok {

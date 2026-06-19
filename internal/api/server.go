@@ -171,7 +171,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 func (s *Server) enqueue(ctx context.Context, ev events.AgentEvent) bool {
 	ctx, cancel := context.WithTimeout(ctx, enqueueTimeout)
 	defer cancel()
-	err := s.inbox.Publish(ctx, inbox.NewEnvelope(eventKind(ev), inbox.Address{Kind: "main", ID: chatIDOf(ev)}, ev))
+	err := s.inbox.Publish(ctx, inbox.NewEnvelope(ev))
 	if err == nil {
 		return true
 	}

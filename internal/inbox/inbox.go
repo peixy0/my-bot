@@ -3,7 +3,6 @@ package inbox
 import (
 	"context"
 	"errors"
-	"time"
 )
 
 var (
@@ -11,20 +10,8 @@ var (
 	ErrClosed = errors.New("inbox closed")
 )
 
-type Address struct {
-	Kind string
-	ID   string
-}
-
 type Envelope[T any] struct {
-	ID            string
-	Kind          string
-	Target        Address
-	Sender        Address
-	CorrelationID string
-	ParentID      string
-	Payload       T
-	CreatedAt     time.Time
+	Payload T
 }
 
 type Inbox[T any] interface {
@@ -48,19 +35,13 @@ func NewMemory[T any](capacity int) *Memory[T] {
 	return &Memory[T]{ch: make(chan Envelope[T], capacity)}
 }
 
-func NewEnvelope[T any](kind string, target Address, payload T) Envelope[T] {
+func NewEnvelope[T any](payload T) Envelope[T] {
 	return Envelope[T]{
-		Kind:      kind,
-		Target:    target,
-		Payload:   payload,
-		CreatedAt: time.Now(),
+		Payload: payload,
 	}
 }
 
 func (m *Memory[T]) Publish(ctx context.Context, msg Envelope[T]) (err error) {
-	if msg.CreatedAt.IsZero() {
-		msg.CreatedAt = time.Now()
-	}
 	defer func() {
 		if recover() != nil {
 			err = ErrClosed
@@ -99,9 +80,6 @@ func (m *Memory[T]) TryReceive() (Envelope[T], bool) {
 }
 
 func (m *Memory[T]) TryPublish(msg Envelope[T]) (ok bool) {
-	if msg.CreatedAt.IsZero() {
-		msg.CreatedAt = time.Now()
-	}
 	defer func() {
 		if recover() != nil {
 			ok = false

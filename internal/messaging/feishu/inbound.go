@@ -186,7 +186,7 @@ func (i *Inbound) processImageMessage(
 func (i *Inbound) enqueue(ctx context.Context, ev events.AgentEvent) bool {
 	ctx, cancel := context.WithTimeout(ctx, enqueueTimeout)
 	defer cancel()
-	err := i.inbox.Publish(ctx, inbox.NewEnvelope(eventKind(ev), inbox.Address{Kind: "main", ID: chatIDOf(ev)}, ev))
+	err := i.inbox.Publish(ctx, inbox.NewEnvelope(ev))
 	if err == nil {
 		return true
 	}

@@ -215,7 +215,7 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 			e.Sender.Send(ctx, "no active session")
 			return
 		}
-		session.dump(uuid.NewString(), e.Sender)
+		session.publishEvent(events.DumpCommand{ID: uuid.NewString(), Sender: e.Sender})
 	case "resume":
 		if len(parts) != 2 {
 			e.Sender.Send(ctx, "usage: /resume <id>")
@@ -226,24 +226,20 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 			e.Sender.Send(ctx, "resume id must be a UUID")
 			return
 		}
-		s.getOrCreateSession(ctx, e.ChatID).resume(id, e.Sender)
+		s.getOrCreateSession(ctx, e.ChatID).publishEvent(events.ResumeCommand{ID: id, Sender: e.Sender})
 	case "session":
 		e.Sender.Send(ctx, fmt.Sprintf("current session: %s", e.ChatID))
 		return
 	case "cron":
 		s.handleCronCommand(ctx, parts[1:], e)
 	default:
-		s.dispatchToSession(ctx, e.ChatID, e)
+		s.dispatchUserInput(ctx, e.ChatID, e)
 	}
 }
 
-func (s *Scheduler) dispatchUserInput(ctx context.Context, chatID string, e events.WorkerEvent) {
-	if session, ok := s.sessions[chatID]; ok {
-		if session.publishInLoop(e) {
-			return
-		}
-	}
-	s.dispatchToSession(ctx, chatID, e)
+func (s *Scheduler) dispatchUserInput(ctx context.Context, chatID string, e events.MessageEvent) {
+	session := s.getOrCreateSession(ctx, chatID)
+	session.publishMessage(e)
 }
 
 func (s *Scheduler) heartbeatInterval(ctx context.Context, args []string, sender events.Outbound) (int, bool) {
@@ -355,15 +351,7 @@ func (s *Scheduler) dispatchToSession(ctx context.Context, chatID string, ev eve
 		slog.Error("worker event dropped: missing chat id", "event", fmt.Sprintf("%T", ev))
 		return false
 	}
-	return s.getOrCreateSession(ctx, chatID).publish(ev)
-}
-
-func sendWorkerEvent(chatID string, workerInbox inbox.Inbox[events.WorkerEvent], ev events.WorkerEvent) bool {
-	if workerInbox.TryPublish(workerEnvelope(chatID, ev)) {
-		return true
-	}
-	slog.Error("worker event dropped: events channel full", "chat", chatID, "event", fmt.Sprintf("%T", ev))
-	return false
+	return s.getOrCreateSession(ctx, chatID).publishEvent(ev)
 }
 
 func (s *Scheduler) closeSession(chatID string) {
