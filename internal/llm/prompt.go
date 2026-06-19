@@ -65,7 +65,7 @@ func (b *promptBase) compose(ctx context.Context, sections ...string) string {
 	return sb.String()
 }
 
-var baseSections = []string{"PERSONA.md", "RULES.md", "CONTEXT.md", "TOOLS.md"}
+var baseSections = []string{"PERSONA.md", "RULES.md", "CONTEXT.md", "TOOLS.md", "USER.md"}
 
 type MainPrompt struct{ promptBase }
 
