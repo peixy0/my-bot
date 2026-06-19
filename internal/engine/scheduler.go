@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"my-bot/internal/config"
 	"my-bot/internal/events"
 	"my-bot/internal/inbox"
@@ -58,8 +60,6 @@ func (s *Scheduler) Run(ctx context.Context) error {
 
 func (s *Scheduler) dispatch(ctx context.Context, ev events.AgentEvent) {
 	switch e := ev.(type) {
-	case events.DropSessionEvent:
-		s.closeSession(e.ChatID)
 	case events.TextInputEvent:
 		if cmd, ok := isSlashCommand(e.Message); ok {
 			s.handleSlashCommand(ctx, cmd, e)
@@ -68,10 +68,8 @@ func (s *Scheduler) dispatch(ctx context.Context, ev events.AgentEvent) {
 		s.dispatchUserInput(ctx, e.ChatID, e)
 	case events.ImageInputEvent:
 		s.dispatchUserInput(ctx, e.ChatID, e)
-	default:
-		if we, ok := ev.(events.WorkerEvent); ok {
-			s.dispatchToSession(ctx, chatIDOf(we), we)
-		}
+	case events.DropSessionEvent:
+		s.closeSession(e.ChatID)
 	}
 }
 
@@ -217,9 +215,18 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 			e.Sender.Send(ctx, "no active session")
 			return
 		}
-		if session.dump() {
-			e.Sender.Send(ctx, fmt.Sprintf("session dumped to: session-%s.jsonl", e.ChatID))
+		session.dump(uuid.NewString(), e.Sender)
+	case "resume":
+		if len(parts) != 2 {
+			e.Sender.Send(ctx, "usage: /resume <id>")
+			return
 		}
+		id := parts[1]
+		if _, err := uuid.Parse(id); err != nil {
+			e.Sender.Send(ctx, "resume id must be a UUID")
+			return
+		}
+		s.getOrCreateSession(ctx, e.ChatID).resume(id, e.Sender)
 	case "session":
 		e.Sender.Send(ctx, fmt.Sprintf("current session: %s", e.ChatID))
 		return
@@ -389,24 +396,4 @@ func onOff(enabled bool) string {
 		return "on"
 	}
 	return "off"
-}
-
-func chatIDOf(e events.WorkerEvent) string {
-	switch ev := e.(type) {
-	case events.TextInputEvent:
-		return ev.ChatID
-	case events.ImageInputEvent:
-		return ev.ChatID
-	case events.HeartbeatEvent:
-		return ev.ChatID
-	case events.CronEvent:
-		return ev.ChatID
-	case events.NewSessionEvent:
-		return ev.ChatID
-	case events.ConfigQueryEvent:
-		return ev.ChatID
-	case events.ConfigChangeEvent:
-		return ev.ChatID
-	}
-	return ""
 }

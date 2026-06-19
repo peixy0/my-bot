@@ -193,13 +193,10 @@ func chatIDOf(ev events.AgentEvent) string {
 		return e.ChatID
 	case events.ImageInputEvent:
 		return e.ChatID
-	case events.CronEvent:
-		return e.ChatID
 	case events.DropSessionEvent:
 		return e.ChatID
-	default:
-		return ""
 	}
+	panic("Invalid agent event")
 }
 
 func (s *Server) authorized(r *http.Request) bool {

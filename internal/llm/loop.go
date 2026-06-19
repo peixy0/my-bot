@@ -2,7 +2,9 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"path/filepath"
 
 	"my-bot/internal/config"
 	"my-bot/internal/tools"
@@ -41,5 +43,21 @@ func (l *AgentLoop) DumpConversation(path string) error {
 	if err != nil {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
 	return os.WriteFile(path, data, 0600)
+}
+
+func (l *AgentLoop) LoadConversation(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var messages []Message
+	if err := json.Unmarshal(data, &messages); err != nil {
+		return err
+	}
+	l.conv = &Conversation{Messages: messages}
+	return nil
 }

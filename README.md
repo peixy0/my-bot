@@ -60,6 +60,8 @@ While chatting with the bot:
 | `/model <name>` | Switch the active LLM model for the current chat/session |
 | `/vision on|off` | Toggle image input support for the current chat/session |
 | `/queue <text>` | Queue a message to run after the current agent loop finishes |
+| `/dump` | Save the current conversation to a UUID-named session file |
+| `/resume <id>` | Load a saved conversation into the current chat/session |
 | `/cron load <name>` | Reload cron tasks defined in `.cron/<name>/*.md` |
 | `/cron unload <name>` | Stop a loaded cron job |
 | `/cron ls` | List available and loaded cron jobs |

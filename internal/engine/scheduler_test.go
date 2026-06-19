@@ -2,7 +2,12 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"my-bot/internal/config"
 	"my-bot/internal/events"
@@ -220,6 +225,111 @@ func TestSchedulerQueueCommandQueuesWithExistingWorker(t *testing.T) {
 	}
 }
 
+func TestSchedulerDumpCommandQueuesUUIDDump(t *testing.T) {
+	worker := &ConversationWorker{
+		Events:      inbox.NewMemory[events.WorkerEvent](1),
+		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
+	}
+	out := &captureOutbound{}
+	s := &Scheduler{
+		sessions: map[string]*chatSession{
+			"chat-1": newStubSession(worker),
+		},
+	}
+
+	s.handleSlashCommand(context.Background(), "dump", events.TextInputEvent{
+		ChatID: "chat-1",
+		Sender: out,
+	})
+
+	msg, err := worker.Events.Receive(context.Background())
+	if err != nil {
+		t.Fatalf("receive dump event: %v", err)
+	}
+	ev, ok := msg.Payload.(events.DumpCommand)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", msg.Payload)
+	}
+	if _, err := uuid.Parse(ev.ID); err != nil {
+		t.Fatalf("dump id is not a UUID: %q", ev.ID)
+	}
+	if ev.Sender != out {
+		t.Fatal("expected dump command to keep original sender")
+	}
+	if len(out.messages) != 0 {
+		t.Fatalf("expected scheduler not to send dump success before worker writes, got %v", out.messages)
+	}
+}
+
+func TestSchedulerDumpCommandRequiresActiveSession(t *testing.T) {
+	out := &captureOutbound{}
+	s := &Scheduler{sessions: map[string]*chatSession{}}
+
+	s.handleSlashCommand(context.Background(), "dump", events.TextInputEvent{
+		ChatID: "chat-1",
+		Sender: out,
+	})
+
+	if len(out.messages) != 1 || out.messages[0] != "no active session" {
+		t.Fatalf("unexpected response: %v", out.messages)
+	}
+}
+
+func TestSchedulerResumeCommandQueuesResume(t *testing.T) {
+	worker := &ConversationWorker{
+		Events:      inbox.NewMemory[events.WorkerEvent](1),
+		InLoopInbox: inbox.NewMemory[events.WorkerEvent](1),
+	}
+	out := &captureOutbound{}
+	id := uuid.NewString()
+	s := &Scheduler{
+		sessions: map[string]*chatSession{
+			"chat-1": newStubSession(worker),
+		},
+	}
+
+	s.handleSlashCommand(context.Background(), "resume "+id, events.TextInputEvent{
+		ChatID: "chat-1",
+		Sender: out,
+	})
+
+	msg, err := worker.Events.Receive(context.Background())
+	if err != nil {
+		t.Fatalf("receive resume event: %v", err)
+	}
+	ev, ok := msg.Payload.(events.ResumeCommand)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", msg.Payload)
+	}
+	if ev.ID != id || ev.Sender != out {
+		t.Fatalf("unexpected resume event: %+v", ev)
+	}
+}
+
+func TestSchedulerResumeCommandValidatesUsageAndUUID(t *testing.T) {
+	out := &captureOutbound{}
+	s := &Scheduler{sessions: map[string]*chatSession{}}
+
+	s.handleSlashCommand(context.Background(), "resume", events.TextInputEvent{
+		ChatID: "chat-1",
+		Sender: out,
+	})
+	s.handleSlashCommand(context.Background(), "resume not-a-uuid", events.TextInputEvent{
+		ChatID: "chat-1",
+		Sender: out,
+	})
+
+	want := []string{"usage: /resume <id>", "resume id must be a UUID"}
+	if len(out.messages) != len(want) {
+		t.Fatalf("unexpected responses: %v", out.messages)
+	}
+	for i := range want {
+		if out.messages[i] != want[i] {
+			t.Fatalf("response %d = %q, want %q", i, out.messages[i], want[i])
+		}
+	}
+}
+
 func TestSchedulerModelCommandQueuesConfigChange(t *testing.T) {
 	worker := &ConversationWorker{
 		Events:      inbox.NewMemory[events.WorkerEvent](1),
@@ -246,6 +356,70 @@ func TestSchedulerModelCommandQueuesConfigChange(t *testing.T) {
 	}
 	if ev.Key != events.ConfigKeyModel || ev.Value != "gpt-test" {
 		t.Fatalf("unexpected model event: %+v", ev)
+	}
+}
+
+func TestWorkerResumeLoadsConversation(t *testing.T) {
+	sessionDir := t.TempDir()
+	worker := newConfigTestWorker(&config.Config{
+		Workspace: config.WorkspaceConfig{SessionDir: sessionDir},
+		Tool:      config.ToolConfig{MaxOutputChars: 1000},
+	})
+	out := &captureOutbound{}
+	id := uuid.NewString()
+	messages := []llm.Message{
+		{"role": "user", "content": "old question"},
+		{"role": "assistant", "content": "old answer"},
+	}
+	data, err := json.Marshal(messages)
+	if err != nil {
+		t.Fatalf("marshal conversation: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, id+".json"), data, 0600); err != nil {
+		t.Fatalf("write conversation: %v", err)
+	}
+
+	if err := worker.processResume(context.Background(), events.ResumeCommand{ID: id, Sender: out}); err != nil {
+		t.Fatalf("resume conversation: %v", err)
+	}
+	if len(out.messages) != 1 || out.messages[0] != "session resumed: "+id {
+		t.Fatalf("unexpected response: %v", out.messages)
+	}
+
+	dumpPath := filepath.Join(sessionDir, "after.json")
+	if err := worker.loop.DumpConversation(dumpPath); err != nil {
+		t.Fatalf("dump resumed conversation: %v", err)
+	}
+	var got []llm.Message
+	dumped, err := os.ReadFile(dumpPath)
+	if err != nil {
+		t.Fatalf("read dumped conversation: %v", err)
+	}
+	if err := json.Unmarshal(dumped, &got); err != nil {
+		t.Fatalf("unmarshal dumped conversation: %v", err)
+	}
+	if len(got) != 2 || got[0]["content"] != "old question" || got[1]["content"] != "old answer" {
+		t.Fatalf("unexpected resumed messages: %#v", got)
+	}
+}
+
+func TestWorkerDumpWritesUUIDConversation(t *testing.T) {
+	sessionDir := t.TempDir()
+	worker := newConfigTestWorker(&config.Config{
+		Workspace: config.WorkspaceConfig{SessionDir: sessionDir},
+		Tool:      config.ToolConfig{MaxOutputChars: 1000},
+	})
+	out := &captureOutbound{}
+	id := uuid.NewString()
+
+	if err := worker.processDump(context.Background(), events.DumpCommand{ID: id, Sender: out}); err != nil {
+		t.Fatalf("dump conversation: %v", err)
+	}
+	if len(out.messages) != 1 || out.messages[0] != "session dumped, load with: /resume "+id {
+		t.Fatalf("unexpected response: %v", out.messages)
+	}
+	if _, err := os.Stat(filepath.Join(sessionDir, id+".json")); err != nil {
+		t.Fatalf("expected dumped file: %v", err)
 	}
 }
 

@@ -77,12 +77,17 @@ type DropSessionEvent struct {
 }
 
 type DumpCommand struct {
+	ID     string
+	Sender Outbound
+}
+
+type ResumeCommand struct {
+	ID     string
+	Sender Outbound
 }
 
 func (TextInputEvent) agentEvent()   {}
 func (ImageInputEvent) agentEvent()  {}
-func (CronEvent) agentEvent()        {}
-func (DumpCommand) agentEvent()      {}
 func (DropSessionEvent) agentEvent() {}
 
 func (TextInputEvent) workerEvent()    {}
@@ -93,3 +98,4 @@ func (NewSessionEvent) workerEvent()   {}
 func (ConfigQueryEvent) workerEvent()  {}
 func (ConfigChangeEvent) workerEvent() {}
 func (DumpCommand) workerEvent()       {}
+func (ResumeCommand) workerEvent()     {}

@@ -140,11 +140,6 @@ func (w *ConversationWorker) Run(ctx context.Context) error {
 		select {
 		case msg := <-w.Events.C():
 			e := msg.Payload
-			if _, ok := e.(events.DumpCommand); ok {
-				path := fmt.Sprintf("session-%s.jsonl", w.chatID)
-				w.loop.DumpConversation(filepath.Join(w.cfg.Workspace.SessionDir, path))
-				continue
-			}
 			w.stopHeartbeat()
 			if hb, ok := e.(events.HeartbeatEvent); ok {
 				w.lastHeartbeat = &hb
@@ -185,6 +180,10 @@ func (w *ConversationWorker) handleEvent(ctx context.Context, e events.WorkerEve
 		return w.processConfigQuery(ctx, ev)
 	case events.ConfigChangeEvent:
 		return w.processConfigChange(ctx, ev)
+	case events.DumpCommand:
+		return w.processDump(ctx, ev)
+	case events.ResumeCommand:
+		return w.processResume(ctx, ev)
 	default:
 		return fmt.Errorf("unexpected event type %T", e)
 	}
@@ -247,6 +246,24 @@ func (w *ConversationWorker) processCron(ctx context.Context, ev events.CronEven
 func (w *ConversationWorker) processNewSession(ctx context.Context, ev events.NewSessionEvent) error {
 	slog.Debug("new session", "chat", w.chatID)
 	w.loop.ResetConv()
+	return nil
+}
+
+func (w *ConversationWorker) processDump(ctx context.Context, ev events.DumpCommand) error {
+	path := w.conversationPath(ev.ID)
+	if err := w.loop.DumpConversation(path); err != nil {
+		return err
+	}
+	ev.Sender.Send(ctx, fmt.Sprintf("session dumped, load with: /resume %s", ev.ID))
+	return nil
+}
+
+func (w *ConversationWorker) processResume(ctx context.Context, ev events.ResumeCommand) error {
+	path := w.conversationPath(ev.ID)
+	if err := w.loop.LoadConversation(path); err != nil {
+		return err
+	}
+	ev.Sender.Send(ctx, fmt.Sprintf("session resumed: %s", ev.ID))
 	return nil
 }
 
@@ -383,7 +400,15 @@ func (w *ConversationWorker) reportError(ctx context.Context, err error, e event
 		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
 	case events.ConfigChangeEvent:
 		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
+	case events.DumpCommand:
+		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
+	case events.ResumeCommand:
+		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
 	}
+}
+
+func (w *ConversationWorker) conversationPath(id string) string {
+	return filepath.Join(w.cfg.Workspace.SessionDir, id+".json")
 }
 
 func wrapUserMessage(msg string) string {

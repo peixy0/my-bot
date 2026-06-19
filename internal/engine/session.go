@@ -96,8 +96,12 @@ func (s *chatSession) publishInLoop(ev events.WorkerEvent) bool {
 	return s.worker.InLoopInbox.TryPublish(workerEnvelope(s.chatID, ev))
 }
 
-func (s *chatSession) dump() bool {
-	return s.publish(events.DumpCommand{})
+func (s *chatSession) dump(id string, sender events.Outbound) bool {
+	return s.publish(events.DumpCommand{ID: id, Sender: sender})
+}
+
+func (s *chatSession) resume(id string, sender events.Outbound) bool {
+	return s.publish(events.ResumeCommand{ID: id, Sender: sender})
 }
 
 func (s *chatSession) cronWorker() *CronWorker {
