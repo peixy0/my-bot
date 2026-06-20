@@ -123,7 +123,7 @@ Key directories:
 - `internal/tools` — tool registry and built-in toolsets.
 - `internal/api` — HTTP server and WebSocket WebUI.
 
-For design philosophy, intentional choices, the concurrency map, and contributor rules, see [AGENT.md](./AGENT.md).
+For design philosophy, intentional choices, the concurrency map, and contributor rules, see [AGENTS.md](./AGENTS.md).
 
 ## Development
 
@@ -134,7 +134,7 @@ go vet ./...
 go test ./... -race -count=1
 ```
 
-Read [AGENT.md](./AGENT.md) before contributing — it covers the no-comments policy, single-owner invariants, how to add tools / events / providers, and the testing seams.
+Read [AGENTS.md](./AGENTS.md) before contributing — it covers the no-comments policy, single-owner invariants, how to add tools / events / providers, and the testing seams.
 
 ## License
 
