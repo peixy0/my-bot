@@ -399,26 +399,13 @@ func (w *ConversationWorker) stopHeartbeat() {
 	}
 }
 
-func (w *ConversationWorker) reportError(ctx context.Context, err error, e any) {
-	slog.Error("event handler", "chat", w.chatID, "event", fmt.Sprintf("%T", e), "err", err)
-	switch ev := e.(type) {
-	case events.TextInputEvent:
-		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
-	case events.ImageInputEvent:
-		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
-	case events.HeartbeatEvent:
-		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
-	case events.CronEvent:
-		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
-	case events.ConfigQueryEvent:
-		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
-	case events.ConfigChangeEvent:
-		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
-	case events.DumpCommand:
-		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
-	case events.ResumeCommand:
-		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
+func (w *ConversationWorker) reportError(ctx context.Context, err error, ev events.EventWithSender) {
+	slog.Error("event handler", "chat", w.chatID, "event", fmt.Sprintf("%T", ev), "err", err)
+	if err == llm.ErrAborted {
+		ev.GetSender().Send(ctx, "session aborted")
+		return
 	}
+	ev.GetSender().Send(ctx, fmt.Sprintf("error: %v", err))
 }
 
 func (w *ConversationWorker) conversationPath(id string) string {

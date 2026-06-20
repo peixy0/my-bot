@@ -108,7 +108,6 @@ func (s *chatSession) publishMessage(ev events.MessageEvent) bool {
 func (s *chatSession) tryAbort(ctx context.Context, sender events.Outbound) bool {
 	select {
 	case s.worker.abortCh <- struct{}{}:
-		sender.Send(ctx, "abort requested")
 		return true
 	default:
 		return false
