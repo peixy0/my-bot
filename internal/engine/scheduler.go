@@ -96,111 +96,8 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 	case "drop":
 		s.closeSession(e.ChatID)
 		e.Sender.Send(ctx, fmt.Sprintf("dropped session: %s", e.ChatID))
-	case "model":
-		if len(parts) < 2 {
-			s.dispatchToSession(ctx, e.ChatID, events.ConfigQueryEvent{
-				ChatID: e.ChatID,
-				Key:    events.ConfigKeyModel,
-				Sender: e.Sender,
-			})
-			return
-		}
-		s.dispatchToSession(ctx, e.ChatID, events.ConfigChangeEvent{
-			ChatID: e.ChatID,
-			Key:    events.ConfigKeyModel,
-			Value:  parts[1],
-			Sender: e.Sender,
-		})
-	case "vision":
-		if len(parts) < 2 {
-			s.dispatchToSession(ctx, e.ChatID, events.ConfigQueryEvent{
-				ChatID: e.ChatID,
-				Key:    events.ConfigKeyVision,
-				Sender: e.Sender,
-			})
-			return
-		}
-		s.dispatchToSession(ctx, e.ChatID, events.ConfigChangeEvent{
-			ChatID: e.ChatID,
-			Key:    events.ConfigKeyVision,
-			Value:  parts[1],
-			Sender: e.Sender,
-		})
-	case "temperature":
-		if len(parts) < 2 {
-			s.dispatchToSession(ctx, e.ChatID, events.ConfigQueryEvent{
-				ChatID: e.ChatID,
-				Key:    events.ConfigKeyTemperature,
-				Sender: e.Sender,
-			})
-			return
-		}
-		s.dispatchToSession(ctx, e.ChatID, events.ConfigChangeEvent{
-			ChatID: e.ChatID,
-			Key:    events.ConfigKeyTemperature,
-			Value:  parts[1],
-			Sender: e.Sender,
-		})
-	case "top_p":
-		if len(parts) < 2 {
-			s.dispatchToSession(ctx, e.ChatID, events.ConfigQueryEvent{
-				ChatID: e.ChatID,
-				Key:    events.ConfigKeyTopP,
-				Sender: e.Sender,
-			})
-			return
-		}
-		s.dispatchToSession(ctx, e.ChatID, events.ConfigChangeEvent{
-			ChatID: e.ChatID,
-			Key:    events.ConfigKeyTopP,
-			Value:  parts[1],
-			Sender: e.Sender,
-		})
-	case "top_k":
-		if len(parts) < 2 {
-			s.dispatchToSession(ctx, e.ChatID, events.ConfigQueryEvent{
-				ChatID: e.ChatID,
-				Key:    events.ConfigKeyTopK,
-				Sender: e.Sender,
-			})
-			return
-		}
-		s.dispatchToSession(ctx, e.ChatID, events.ConfigChangeEvent{
-			ChatID: e.ChatID,
-			Key:    events.ConfigKeyTopK,
-			Value:  parts[1],
-			Sender: e.Sender,
-		})
-	case "max_tokens":
-		if len(parts) < 2 {
-			s.dispatchToSession(ctx, e.ChatID, events.ConfigQueryEvent{
-				ChatID: e.ChatID,
-				Key:    events.ConfigKeyMaxTokens,
-				Sender: e.Sender,
-			})
-			return
-		}
-		s.dispatchToSession(ctx, e.ChatID, events.ConfigChangeEvent{
-			ChatID: e.ChatID,
-			Key:    events.ConfigKeyMaxTokens,
-			Value:  parts[1],
-			Sender: e.Sender,
-		})
-	case "context_window":
-		if len(parts) < 2 {
-			s.dispatchToSession(ctx, e.ChatID, events.ConfigQueryEvent{
-				ChatID: e.ChatID,
-				Key:    events.ConfigKeyContextWindow,
-				Sender: e.Sender,
-			})
-			return
-		}
-		s.dispatchToSession(ctx, e.ChatID, events.ConfigChangeEvent{
-			ChatID: e.ChatID,
-			Key:    events.ConfigKeyContextWindow,
-			Value:  parts[1],
-			Sender: e.Sender,
-		})
+	case "model", "vision", "temperature", "top_p", "top_k", "max_tokens", "context_window":
+		s.handleConfigCommand(ctx, parts, e)
 	case "queue":
 		text := strings.TrimSpace(strings.TrimPrefix(cmd, "queue"))
 		if text == "" {
@@ -240,6 +137,15 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 func (s *Scheduler) dispatchUserInput(ctx context.Context, chatID string, e events.MessageEvent) {
 	session := s.getOrCreateSession(ctx, chatID)
 	session.publishMessage(e)
+}
+
+func (s *Scheduler) handleConfigCommand(ctx context.Context, parts []string, e events.TextInputEvent) {
+	key := parts[0]
+	if len(parts) < 2 {
+		s.dispatchToSession(ctx, e.ChatID, events.ConfigQueryEvent{ChatID: e.ChatID, Key: key, Sender: e.Sender})
+		return
+	}
+	s.dispatchToSession(ctx, e.ChatID, events.ConfigChangeEvent{ChatID: e.ChatID, Key: key, Value: parts[1], Sender: e.Sender})
 }
 
 func (s *Scheduler) heartbeatInterval(ctx context.Context, args []string, sender events.Outbound) (int, bool) {
