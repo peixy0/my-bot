@@ -17,20 +17,29 @@ type SearchResult struct {
 	Body  string `json:"body"`
 }
 
-func WebSearch(ctx context.Context, baseAPI, query string, page int) ([]SearchResult, error) {
-	transport := &http.Transport{}
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   3 * time.Minute,
-	}
+type WebSearch struct {
+	baseAPI string
+	client  *http.Client
+}
 
-	reqURL := fmt.Sprintf("%s?query=%s&page=%d", baseAPI, url.QueryEscape(query), page)
+func NewWebSearch(baseAPI string) *WebSearch {
+	return &WebSearch{
+		baseAPI: baseAPI,
+		client: &http.Client{
+			Transport: &http.Transport{},
+			Timeout:   3 * time.Minute,
+		},
+	}
+}
+
+func (w *WebSearch) Search(ctx context.Context, query string, page int) ([]SearchResult, error) {
+	reqURL := fmt.Sprintf("%s?query=%s&page=%d", w.baseAPI, url.QueryEscape(query), page)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := client.Do(req)
+	resp, err := w.client.Do(req)
 	if err != nil {
 		return nil, err
 	}

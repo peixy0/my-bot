@@ -5,27 +5,27 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
-	"mime"
-	"net/http"
-	"net/url"
 	"strings"
-	"time"
 
 	"my-bot/internal/config"
 	"my-bot/internal/runtime"
-
-	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
 )
 
 type DefaultToolset struct {
-	rt     runtime.Runtime
-	skills *SkillLoader
-	cfg    *config.Config
+	rt        runtime.Runtime
+	skills    *SkillLoader
+	cfg       *config.Config
+	webSearch *WebSearch
+	fetcher   *Fetcher
 }
 
 func NewDefaultToolset(rt runtime.Runtime, skills *SkillLoader, cfg *config.Config) *DefaultToolset {
-	return &DefaultToolset{rt: rt, skills: skills, cfg: cfg}
+	d := &DefaultToolset{rt: rt, skills: skills, cfg: cfg}
+	if cfg.Tool.WebSearchAPI != "" {
+		d.webSearch = NewWebSearch(cfg.Tool.WebSearchAPI)
+	}
+	d.fetcher = NewFetcher(d.rt, cfg.Tool.FetchProxy, cfg.Tool.MaxOutputChars)
+	return d
 }
 
 func (d *DefaultToolset) Register(r *Registry) {
@@ -75,7 +75,7 @@ func (d *DefaultToolset) registerWebSearch(r *Registry) {
 		if err := json.Unmarshal(args, &p); err != nil {
 			return ToolResult{}, err
 		}
-		results, err := WebSearch(ctx, d.cfg.Tool.WebSearchAPI, p.Query, p.Page)
+		results, err := d.webSearch.Search(ctx, p.Query, p.Page)
 		if err != nil {
 			return ToolResult{}, err
 		}
@@ -105,65 +105,8 @@ func (d *DefaultToolset) registerFetch(r *Registry) {
 		if err := json.Unmarshal(args, &p); err != nil {
 			return ToolResult{}, err
 		}
-		proxyURL := d.cfg.Tool.FetchProxy
-		transport := &http.Transport{}
-		if proxyURL != "" {
-			u, err := url.Parse(proxyURL)
-			if err != nil {
-				return ToolResult{}, err
-			}
-			transport.Proxy = http.ProxyURL(u)
-		}
 
-		rawURL := p.URL
-		client := &http.Client{Transport: transport, Timeout: 3 * time.Minute}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-		if err != nil {
-			return ToolResult{}, err
-		}
-		req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; bot/1.0)")
-
-		resp, err := client.Do(req)
-		if err != nil {
-			return ToolResult{}, err
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return ToolResult{}, fmt.Errorf("request failed with status code: %d", resp.StatusCode)
-		}
-
-		contentType := resp.Header.Get("content-type")
-		mediaType, _, _ := mime.ParseMediaType(contentType)
-
-		switch mediaType {
-		case "text/html":
-			markdown, err := htmltomarkdown.ConvertReader(resp.Body)
-			if err != nil {
-				return ToolResult{}, fmt.Errorf("failed to convert HTML to Markdown: %w", err)
-			}
-			truncated := d.rt.Truncate(ctx, string(markdown), d.cfg.Tool.MaxOutputChars)
-			return TextResult(truncated), nil
-
-		case "text/markdown", "text/x-markdown", "text/plain", "application/json":
-			rawBytes, err := io.ReadAll(resp.Body)
-			if err != nil {
-				return ToolResult{}, fmt.Errorf("failed to read raw content: %w", err)
-			}
-			truncated := d.rt.Truncate(ctx, string(rawBytes), d.cfg.Tool.MaxOutputChars)
-			return TextResult(truncated), nil
-
-		default:
-			rawBytes, err := io.ReadAll(resp.Body)
-			if err != nil {
-				return ToolResult{}, fmt.Errorf("failed to read unknown content type: %w", err)
-			}
-			path, err := d.rt.WriteTmpFile(ctx, string(rawBytes))
-			if err != nil {
-				return TextResult(fmt.Sprintf("Content-Type: %s\n\n[output not readable]", contentType)), nil
-			}
-			return TextResult(fmt.Sprintf("Content-Type: %s\n\n[output saved to %s]", contentType, path)), nil
-		}
+		return d.fetcher.Fetch(ctx, p.URL)
 	})
 }
 

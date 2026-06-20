@@ -18,35 +18,98 @@ An event-driven AI agent framework in Go. Connects messaging platforms (Feishu/L
 # Build
 go build -o bot ./cmd/bot
 
-# Configure (minimal, OpenAI only)
-export OPENAI_API_KEY=sk-...
-# Optional: a workspace where the agent reads PERSONA.md / RULES.md / etc.
-export CWD=$(pwd)/workspace
+# Write your config (see "config.example.yaml" for the full schema)
+cat > config.yaml <<'EOF'
+log_level: debug
+llm:
+  api_key: sk-...        # your OpenAI-compatible provider's API key
+  base_url: https://api.openai.com/v1
+  model: gpt-4o
+feishu:
+  app_id: ...
+  app_secret: ...
+webui:
+  enabled: true
+  port: 8017
+EOF
 
-# Run
+# Run (defaults to ./config.yaml, or pass a path)
 ./bot
 ```
 
-To enable Feishu/Lark:
+## Configuration
 
-```bash
-export FEISHU_APP_ID=...
-export FEISHU_APP_SECRET=...
-export FEISHU_ENCRYPT_KEY=...
-export FEISHU_VERIFICATION_TOKEN=...
+All configuration lives in a single YAML file (default `./config.yaml`, or pass a path as the first arg to the bot binary). There are no environment variables — everything is in the config.
+
+Minimal OpenAI-only config:
+
+```yaml
+log_level: debug         # debug | info | warn | error
+llm:
+  base_url: https://api.openai.com/v1
+  api_key: sk-...
+  model: gpt-4o
+  temperature: 1.0       # optional
+  top_p: 1.0             # optional
 ```
 
-To enable the local WebUI:
+Enable Feishu/Lark:
 
-```bash
-export WEBUI_ENABLED=true
-export WEBUI_HOST=127.0.0.1
-export WEBUI_PORT=8017
-# Optional: require http://localhost:8017/?token=... and ws://localhost:8017/api/bot?token=...
-export WEBUI_TOKEN=change-me
+```yaml
+feishu:
+  app_id: ...
+  app_secret: ...
+  encrypt_key: ...         # required by Feishu's event signature scheme
+  verification_token: ...  # required by Feishu's event signature scheme
 ```
 
-Then open `http://localhost:8017`.
+Enable the local WebUI (HTTP + WebSocket):
+
+```yaml
+webui:
+  enabled: true
+  host: 127.0.0.1
+  port: 8017
+  token: change-me        # optional; gates http://host:port/?token=... and ws://...?token=...
+```
+
+Other notable sections:
+
+```yaml
+tool:
+  max_output_chars: 50000    # cap on text payloads returned to the model
+  web_search_api: https://... # enables the web_search tool; empty disables it
+  fetch_proxy: http://...     # optional proxy for the fetch tool
+
+workspace:
+  cwd: ./workspace              # where PERSONA.md / RULES.md / etc. live
+  project_dir: ./dev            # default cwd for read/write/edit tools
+  skills_dir: ./.skills
+  crons_dir: ./.cron
+  session_dir: ./.sessions
+
+context:
+  auto_compression: true
+  window_tokens: 200000
+  max_output_tokens: 16384
+
+heartbeat:
+  interval_seconds: 1800
+
+vision:
+  enabled: false
+  max_image_bytes: 5242880      # 5 MiB
+
+container:                       # tool-execution sandbox
+  enabled: false
+  runtime: podman                # podman | docker
+  name: my-bot-sandbox
+
+sessions:                        # per-chat overrides (keyed by chat id)
+  "oc_xxx":
+    llm:
+      model: gpt-4o-mini
+```
 
 ## Slash Commands
 
@@ -56,7 +119,7 @@ While chatting with the bot:
 |---|---|
 | `/new` | Start a fresh session in this chat |
 | `/drop` | Drop the current session and worker |
-| `/heartbeat [seconds]` | Begin autonomous heartbeat cycles in this chat, optionally overriding `WAKE_INTERVAL_SECONDS` |
+| `/heartbeat [seconds]` | Begin autonomous heartbeat cycles in this chat, optionally overriding `heartbeat.interval_seconds` |
 | `/model <name>` | Switch the active LLM model for the current chat/session |
 | `/vision on|off` | Toggle image input support for the current chat/session |
 | `/queue <text>` | Queue a message to run after the current agent loop finishes |
@@ -114,7 +177,7 @@ Inbound (Feishu / WebSocket / cron / heartbeat)
 Key directories:
 
 - `cmd/bot` — entry point and dependency wiring.
-- `internal/config` — env-driven configuration.
+- `internal/config` — YAML configuration (loaded once at startup).
 - `internal/events` — event types and the `Outbound` interface.
 - `internal/engine` — scheduler, per-chat workers, cron loader.
 - `internal/llm` — agent loop, orchestrators, prompt builders, OpenAI-compatible provider.
@@ -136,6 +199,3 @@ go test ./... -race -count=1
 
 Read [AGENTS.md](./AGENTS.md) before contributing — it covers the no-comments policy, single-owner invariants, how to add tools / events / providers, and the testing seams.
 
-## License
-
-See repository for license information.

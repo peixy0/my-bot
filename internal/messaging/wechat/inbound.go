@@ -10,6 +10,7 @@ import (
 
 	"my-bot/internal/events"
 	"my-bot/internal/inbox"
+	"my-bot/internal/messaging/dedup"
 )
 
 const enqueueTimeout = 5 * time.Second
@@ -19,7 +20,7 @@ type Inbound struct {
 	inbox  inbox.Inbox[events.AgentEvent]
 	hc     *httpClient
 	cursor string
-	dedup  *dedup
+	dedup  *dedup.Dedup
 }
 
 func NewInbound(cfg Config, agentInbox inbox.Inbox[events.AgentEvent]) *Inbound {
@@ -30,7 +31,7 @@ func NewInbound(cfg Config, agentInbox inbox.Inbox[events.AgentEvent]) *Inbound 
 }
 
 func (i *Inbound) Run(ctx context.Context) error {
-	i.dedup = newDedup(ctx, dedupCapacity, dedupTTL)
+	i.dedup = dedup.New(ctx, dedupCapacity, dedupTTL)
 
 	if err := i.ensureLogin(ctx); err != nil {
 		return err
@@ -243,7 +244,7 @@ func (i *Inbound) poll(ctx context.Context) error {
 		if msg.MessageType != msgTypeUser {
 			continue
 		}
-		if !i.dedup.check(msg.ClientID) {
+		if !i.dedup.Check(msg.ClientID) {
 			continue
 		}
 		go i.processMessage(ctx, msg, i.hc)

@@ -11,6 +11,7 @@ import (
 
 	"my-bot/internal/events"
 	"my-bot/internal/inbox"
+	"my-bot/internal/messaging/dedup"
 	"my-bot/internal/runtime"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
@@ -25,10 +26,14 @@ type Inbound struct {
 	inbox  inbox.Inbox[events.AgentEvent]
 	rt     runtime.Runtime
 	client *lark.Client
-	dedup  *dedup
+	dedup  *dedup.Dedup
 }
 
-const enqueueTimeout = 5 * time.Second
+const (
+	dedupCapacity  = 1024
+	dedupTTL       = 5 * time.Minute
+	enqueueTimeout = 5 * time.Second
+)
 
 func NewInbound(cfg Config, agentInbox inbox.Inbox[events.AgentEvent], rt runtime.Runtime) *Inbound {
 	client := lark.NewClient(cfg.AppID, cfg.AppSecret,
@@ -43,7 +48,7 @@ func NewInbound(cfg Config, agentInbox inbox.Inbox[events.AgentEvent], rt runtim
 }
 
 func (i *Inbound) Run(ctx context.Context) error {
-	i.dedup = newDedup(ctx, dedupCapacity, dedupTTL)
+	i.dedup = dedup.New(ctx, dedupCapacity, dedupTTL)
 
 	d := dispatcher.NewEventDispatcher(i.cfg.VerificationToken, i.cfg.EncryptKey).
 		OnP2MessageReceiveV1(i.onMessageReceive)
@@ -58,7 +63,7 @@ func (i *Inbound) Run(ctx context.Context) error {
 func (i *Inbound) onMessageReceive(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 	msg := event.Event.Message
 	msgID := *msg.MessageId
-	if !i.dedup.check(msgID) {
+	if !i.dedup.Check(msgID) {
 		return nil
 	}
 
