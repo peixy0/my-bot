@@ -90,7 +90,7 @@ func (s *chatSession) close() {
 }
 
 func (s *chatSession) publishEvent(ev events.WorkerEvent) bool {
-	if s.worker.Events.TryPublish(workerEnvelope(ev)) {
+	if s.worker.Events.TryPublish(ev) {
 		return true
 	}
 	slog.Error("worker event dropped: channel full", "chat", s.chatID, "event", fmt.Sprintf("%T", ev))
@@ -98,7 +98,7 @@ func (s *chatSession) publishEvent(ev events.WorkerEvent) bool {
 }
 
 func (s *chatSession) publishMessage(ev events.MessageEvent) bool {
-	if s.worker.MessageInbox.TryPublish(messageEnvelope(ev)) {
+	if s.worker.MessageInbox.TryPublish(ev) {
 		return true
 	}
 	slog.Error("message event dropped: channel full", "chat", s.chatID, "event", fmt.Sprintf("%T", ev))

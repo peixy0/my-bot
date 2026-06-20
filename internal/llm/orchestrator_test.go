@@ -40,8 +40,8 @@ func TestHumanInputOrchestrator_DrainInLoopInputTextOnly(t *testing.T) {
 	reg := tools.NewRegistry()
 	orch := NewHumanInputOrchestrator(reg, sender, inLoopInbox)
 
-	inLoopInbox.TryPublish(inbox.NewEnvelope[events.MessageEvent](events.TextInputEvent{ChatID: "chat", Message: "stop doing that"}))
-	inLoopInbox.TryPublish(inbox.NewEnvelope[events.MessageEvent](events.TextInputEvent{ChatID: "chat", Message: "do this instead"}))
+	inLoopInbox.TryPublish(events.TextInputEvent{ChatID: "chat", Message: "stop doing that"})
+	inLoopInbox.TryPublish(events.TextInputEvent{ChatID: "chat", Message: "do this instead"})
 
 	calls := []ToolCall{{ID: "c1", Name: "unknown_tool", Args: []byte(`{}`)}}
 	msgs, err := orch.DispatchTools(context.Background(), calls)
@@ -72,8 +72,8 @@ func TestHumanInputOrchestrator_DrainInLoopInputWithImageUsesMultipart(t *testin
 	reg := tools.NewRegistry()
 	orch := NewHumanInputOrchestrator(reg, sender, inLoopInbox).WithVision(true)
 
-	inLoopInbox.TryPublish(inbox.NewEnvelope[events.MessageEvent](events.TextInputEvent{ChatID: "chat", Message: "stop doing that"}))
-	inLoopInbox.TryPublish(inbox.NewEnvelope[events.MessageEvent](events.ImageInputEvent{ChatID: "chat", Message: "see image", MIMEType: "image/png", ImageData: []byte{1, 2, 3}}))
+	inLoopInbox.TryPublish(events.TextInputEvent{ChatID: "chat", Message: "stop doing that"})
+	inLoopInbox.TryPublish(events.ImageInputEvent{ChatID: "chat", Message: "see image", MIMEType: "image/png", ImageData: []byte{1, 2, 3}})
 
 	calls := []ToolCall{{ID: "c1", Name: "unknown_tool", Args: []byte(`{}`)}}
 	msgs, err := orch.DispatchTools(context.Background(), calls)

@@ -277,7 +277,7 @@ func extractText(msg wxMsg) string {
 func (i *Inbound) enqueue(ctx context.Context, ev events.AgentEvent) {
 	ctx, cancel := context.WithTimeout(ctx, enqueueTimeout)
 	defer cancel()
-	err := i.inbox.Publish(ctx, inbox.NewEnvelope(ev))
+	err := i.inbox.Publish(ctx, ev)
 	if err != nil {
 		slog.Warn("wechat enqueue failed", "err", err)
 	}

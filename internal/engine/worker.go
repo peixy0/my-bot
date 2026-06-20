@@ -138,8 +138,7 @@ func (w *ConversationWorker) Run(ctx context.Context) error {
 	slog.Debug("worker started", "chat", w.chatID)
 	for {
 		select {
-		case msg := <-w.Events.C():
-			e := msg.Payload
+		case e := <-w.Events.C():
 			w.stopHeartbeat()
 			if hb, ok := e.(events.HeartbeatEvent); ok {
 				w.lastHeartbeat = &hb
@@ -148,8 +147,7 @@ func (w *ConversationWorker) Run(ctx context.Context) error {
 				w.reportError(ctx, err, e)
 			}
 			w.scheduleHeartbeat()
-		case msg := <-w.MessageInbox.C():
-			e := msg.Payload
+		case e := <-w.MessageInbox.C():
 			slog.Debug("message input", "chat", w.chatID, "event", fmt.Sprintf("%T", e))
 			w.stopHeartbeat()
 			if err := w.handleMessage(ctx, e); err != nil {
@@ -385,7 +383,7 @@ func (w *ConversationWorker) scheduleHeartbeat() {
 	hb := *w.lastHeartbeat
 	interval := time.Duration(hb.IntervalSeconds) * time.Second
 	w.heartbeatTimer = time.AfterFunc(interval, func() {
-		if !w.Events.TryPublish(workerEnvelope(hb)) {
+		if !w.Events.TryPublish(hb) {
 			slog.Warn("heartbeat dropped: events channel full", "chat", w.chatID)
 		}
 	})
@@ -431,10 +429,3 @@ func formatFloat(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
-func workerEnvelope(ev events.WorkerEvent) inbox.Envelope[events.WorkerEvent] {
-	return inbox.NewEnvelope(ev)
-}
-
-func messageEnvelope(ev events.MessageEvent) inbox.Envelope[events.MessageEvent] {
-	return inbox.NewEnvelope(ev)
-}

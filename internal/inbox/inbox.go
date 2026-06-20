@@ -10,38 +10,28 @@ var (
 	ErrClosed = errors.New("inbox closed")
 )
 
-type Envelope[T any] struct {
-	Payload T
-}
-
 type Inbox[T any] interface {
-	Publish(ctx context.Context, msg Envelope[T]) error
-	Receive(ctx context.Context) (Envelope[T], error)
-	TryPublish(msg Envelope[T]) bool
-	TryReceive() (Envelope[T], bool)
+	Publish(ctx context.Context, msg T) error
+	Receive(ctx context.Context) (T, error)
+	TryPublish(msg T) bool
+	TryReceive() (T, bool)
 	Close()
 	Len() int
 	Cap() int
 }
 
 type Memory[T any] struct {
-	ch chan Envelope[T]
+	ch chan T
 }
 
 func NewMemory[T any](capacity int) *Memory[T] {
 	if capacity < 0 {
 		capacity = 0
 	}
-	return &Memory[T]{ch: make(chan Envelope[T], capacity)}
+	return &Memory[T]{ch: make(chan T, capacity)}
 }
 
-func NewEnvelope[T any](payload T) Envelope[T] {
-	return Envelope[T]{
-		Payload: payload,
-	}
-}
-
-func (m *Memory[T]) Publish(ctx context.Context, msg Envelope[T]) (err error) {
+func (m *Memory[T]) Publish(ctx context.Context, msg T) (err error) {
 	defer func() {
 		if recover() != nil {
 			err = ErrClosed
@@ -55,31 +45,33 @@ func (m *Memory[T]) Publish(ctx context.Context, msg Envelope[T]) (err error) {
 	}
 }
 
-func (m *Memory[T]) Receive(ctx context.Context) (Envelope[T], error) {
+func (m *Memory[T]) Receive(ctx context.Context) (T, error) {
+	var zero T
 	select {
 	case msg, ok := <-m.ch:
 		if !ok {
-			return Envelope[T]{}, ErrClosed
+			return zero, ErrClosed
 		}
 		return msg, nil
 	case <-ctx.Done():
-		return Envelope[T]{}, ctx.Err()
+		return zero, ctx.Err()
 	}
 }
 
-func (m *Memory[T]) TryReceive() (Envelope[T], bool) {
+func (m *Memory[T]) TryReceive() (T, bool) {
+	var zero T
 	select {
 	case msg, ok := <-m.ch:
 		if !ok {
-			return Envelope[T]{}, false
+			return zero, false
 		}
 		return msg, true
 	default:
-		return Envelope[T]{}, false
+		return zero, false
 	}
 }
 
-func (m *Memory[T]) TryPublish(msg Envelope[T]) (ok bool) {
+func (m *Memory[T]) TryPublish(msg T) (ok bool) {
 	defer func() {
 		if recover() != nil {
 			ok = false
@@ -100,7 +92,7 @@ func (m *Memory[T]) Close() {
 	close(m.ch)
 }
 
-func (m *Memory[T]) C() <-chan Envelope[T] { return m.ch }
+func (m *Memory[T]) C() <-chan T { return m.ch }
 
 func (m *Memory[T]) Len() int { return len(m.ch) }
 

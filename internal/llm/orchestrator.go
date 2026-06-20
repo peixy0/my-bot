@@ -94,7 +94,7 @@ func (o *HumanInputOrchestrator) drainInLoopInput() *Message {
 		if !ok {
 			break
 		}
-		items = append(items, msg.Payload)
+		items = append(items, msg)
 	}
 	if len(items) == 0 {
 		return nil

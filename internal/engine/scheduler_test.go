@@ -65,7 +65,7 @@ func TestSchedulerHeartbeatInterval(t *testing.T) {
 
 func TestSendWorkerEventPublishesEnvelope(t *testing.T) {
 	workerInbox := inbox.NewMemory[events.WorkerEvent](1)
-	if !workerInbox.TryPublish(workerEnvelope(events.TextInputEvent{ChatID: "chat-1", Message: "hi"})) {
+	if !workerInbox.TryPublish(events.TextInputEvent{ChatID: "chat-1", Message: "hi"}) {
 		t.Fatal("expected worker event publish to succeed")
 	}
 
@@ -73,17 +73,17 @@ func TestSendWorkerEventPublishesEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("receive worker event: %v", err)
 	}
-	if _, ok := msg.Payload.(events.TextInputEvent); !ok {
-		t.Fatalf("unexpected payload type: %T", msg.Payload)
+	if _, ok := msg.(events.TextInputEvent); !ok {
+		t.Fatalf("unexpected payload type: %T", msg)
 	}
 }
 
 func TestSendWorkerEventDropsWhenInboxFull(t *testing.T) {
 	workerInbox := inbox.NewMemory[events.WorkerEvent](1)
-	if !workerInbox.TryPublish(workerEnvelope(events.TextInputEvent{ChatID: "chat-1", Message: "hi"})) {
+	if !workerInbox.TryPublish(events.TextInputEvent{ChatID: "chat-1", Message: "hi"}) {
 		t.Fatal("expected first publish to succeed")
 	}
-	if workerInbox.TryPublish(workerEnvelope(events.TextInputEvent{ChatID: "chat-1", Message: "hi"})) {
+	if workerInbox.TryPublish(events.TextInputEvent{ChatID: "chat-1", Message: "hi"}) {
 		t.Fatal("expected second publish to fail when inbox is full")
 	}
 }
@@ -110,9 +110,9 @@ func TestSchedulerDispatchTextInputPublishesToExistingWorkerMessageInbox(t *test
 	if err != nil {
 		t.Fatalf("receive in-loop input: %v", err)
 	}
-	ev, ok := msg.Payload.(events.TextInputEvent)
+	ev, ok := msg.(events.TextInputEvent)
 	if !ok {
-		t.Fatalf("unexpected payload type: %T", msg.Payload)
+		t.Fatalf("unexpected payload type: %T", msg)
 	}
 	if ev.Message != "change direction" {
 		t.Fatalf("unexpected in-loop text: %q", ev.Message)
@@ -146,9 +146,9 @@ func TestSchedulerDispatchImageInputPublishesToExistingWorkerMessageInbox(t *tes
 	if err != nil {
 		t.Fatalf("receive in-loop input: %v", err)
 	}
-	ev, ok := msg.Payload.(events.ImageInputEvent)
+	ev, ok := msg.(events.ImageInputEvent)
 	if !ok {
-		t.Fatalf("unexpected payload type: %T", msg.Payload)
+		t.Fatalf("unexpected payload type: %T", msg)
 	}
 	if ev.Message != "look at this" || ev.MIMEType != "image/png" {
 		t.Fatalf("unexpected in-loop image input: %+v", ev)
@@ -163,7 +163,7 @@ func TestSchedulerDispatchTextInputQueuesWhenMessageInboxFull(t *testing.T) {
 		Events:       inbox.NewMemory[events.WorkerEvent](1),
 		MessageInbox: inbox.NewMemory[events.MessageEvent](1),
 	}
-	worker.MessageInbox.TryPublish(messageEnvelope(events.TextInputEvent{ChatID: "chat-1", Message: "already pending"}))
+	worker.MessageInbox.TryPublish(events.TextInputEvent{ChatID: "chat-1", Message: "already pending"})
 	s := &Scheduler{
 		sessions: map[string]*chatSession{
 			"chat-1": newStubSession(worker),
@@ -180,9 +180,9 @@ func TestSchedulerDispatchTextInputQueuesWhenMessageInboxFull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("receive worker event: %v", err)
 	}
-	ev, ok := msg.Payload.(events.TextInputEvent)
+	ev, ok := msg.(events.TextInputEvent)
 	if !ok {
-		t.Fatalf("unexpected payload type: %T", msg.Payload)
+		t.Fatalf("unexpected payload type: %T", msg)
 	}
 	if ev.Message != "fallback task" {
 		t.Fatalf("unexpected queued text: %q", ev.Message)
@@ -210,9 +210,9 @@ func TestSchedulerQueueCommandQueuesWithExistingWorker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("receive worker event: %v", err)
 	}
-	ev, ok := msg.Payload.(events.TextInputEvent)
+	ev, ok := msg.(events.TextInputEvent)
 	if !ok {
-		t.Fatalf("unexpected payload type: %T", msg.Payload)
+		t.Fatalf("unexpected payload type: %T", msg)
 	}
 	if ev.Message != "handle this later" {
 		t.Fatalf("unexpected queued text: %q", ev.Message)
@@ -243,9 +243,9 @@ func TestSchedulerDumpCommandQueuesUUIDDump(t *testing.T) {
 	if err != nil {
 		t.Fatalf("receive dump event: %v", err)
 	}
-	ev, ok := msg.Payload.(events.DumpCommand)
+	ev, ok := msg.(events.DumpCommand)
 	if !ok {
-		t.Fatalf("unexpected payload type: %T", msg.Payload)
+		t.Fatalf("unexpected payload type: %T", msg)
 	}
 	if _, err := uuid.Parse(ev.ID); err != nil {
 		t.Fatalf("dump id is not a UUID: %q", ev.ID)
@@ -294,9 +294,9 @@ func TestSchedulerResumeCommandQueuesResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("receive resume event: %v", err)
 	}
-	ev, ok := msg.Payload.(events.ResumeCommand)
+	ev, ok := msg.(events.ResumeCommand)
 	if !ok {
-		t.Fatalf("unexpected payload type: %T", msg.Payload)
+		t.Fatalf("unexpected payload type: %T", msg)
 	}
 	if ev.ID != id || ev.Sender != out {
 		t.Fatalf("unexpected resume event: %+v", ev)
@@ -347,9 +347,9 @@ func TestSchedulerModelCommandQueuesConfigChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("receive config event: %v", err)
 	}
-	ev, ok := msg.Payload.(events.ConfigChangeEvent)
+	ev, ok := msg.(events.ConfigChangeEvent)
 	if !ok {
-		t.Fatalf("unexpected payload type: %T", msg.Payload)
+		t.Fatalf("unexpected payload type: %T", msg)
 	}
 	if ev.Key != events.ConfigKeyModel || ev.Value != "gpt-test" {
 		t.Fatalf("unexpected model event: %+v", ev)
@@ -438,9 +438,9 @@ func TestSchedulerVisionCommandReportsCurrentSetting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("receive config event: %v", err)
 	}
-	ev, ok := msg.Payload.(events.ConfigQueryEvent)
+	ev, ok := msg.(events.ConfigQueryEvent)
 	if !ok {
-		t.Fatalf("unexpected payload type: %T", msg.Payload)
+		t.Fatalf("unexpected payload type: %T", msg)
 	}
 	if ev.Key != events.ConfigKeyVision {
 		t.Fatalf("unexpected query key: %q", ev.Key)
@@ -470,9 +470,9 @@ func TestSchedulerVisionCommandTogglesWorkerSetting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("receive config event: %v", err)
 	}
-	ev, ok := msg.Payload.(events.ConfigChangeEvent)
+	ev, ok := msg.(events.ConfigChangeEvent)
 	if !ok {
-		t.Fatalf("unexpected payload type: %T", msg.Payload)
+		t.Fatalf("unexpected payload type: %T", msg)
 	}
 	if ev.Key != events.ConfigKeyVision || ev.Value != "on" {
 		t.Fatalf("unexpected vision event: %+v", ev)
@@ -492,9 +492,9 @@ func TestSchedulerVisionCommandTogglesWorkerSetting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("receive config event: %v", err)
 	}
-	ev, ok = msg.Payload.(events.ConfigChangeEvent)
+	ev, ok = msg.(events.ConfigChangeEvent)
 	if !ok {
-		t.Fatalf("unexpected payload type: %T", msg.Payload)
+		t.Fatalf("unexpected payload type: %T", msg)
 	}
 	if ev.Key != events.ConfigKeyVision || ev.Value != "off" {
 		t.Fatalf("unexpected vision event: %+v", ev)
@@ -528,9 +528,9 @@ func TestWorkerVisionConfigChangeRejectsInvalidValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("receive config event: %v", err)
 	}
-	ev, ok := msg.Payload.(events.ConfigChangeEvent)
+	ev, ok := msg.(events.ConfigChangeEvent)
 	if !ok {
-		t.Fatalf("unexpected payload type: %T", msg.Payload)
+		t.Fatalf("unexpected payload type: %T", msg)
 	}
 	if err := worker.processConfigChange(context.Background(), ev); err != nil {
 		t.Fatalf("process config change: %v", err)
@@ -561,9 +561,9 @@ func TestWorkerGenerationConfigCommands(t *testing.T) {
 		if err != nil {
 			t.Fatalf("receive config event: %v", err)
 		}
-		ev, ok := msg.Payload.(events.ConfigChangeEvent)
+		ev, ok := msg.(events.ConfigChangeEvent)
 		if !ok {
-			t.Fatalf("unexpected payload type: %T", msg.Payload)
+			t.Fatalf("unexpected payload type: %T", msg)
 		}
 		if err := worker.processConfigChange(context.Background(), ev); err != nil {
 			t.Fatalf("process config change: %v", err)

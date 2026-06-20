@@ -54,7 +54,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		s.dispatch(ctx, msg.Payload)
+		s.dispatch(ctx, msg)
 	}
 }
 
