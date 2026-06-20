@@ -2,7 +2,9 @@ package llm
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	"my-bot/internal/config"
 	"my-bot/internal/tools"
@@ -12,6 +14,7 @@ type mockClient struct {
 	responses []CompletionResponse
 	calls     []mockCompletionCall
 	callCount int
+	abortCh   chan struct{}
 }
 
 type mockCompletionCall struct {
@@ -39,6 +42,12 @@ func (m *mockClient) Complete(ctx context.Context, req CompletionRequest) (Compl
 	if req.OnContentDelta != nil && resp.Content != "" {
 		req.OnContentDelta(ctx, resp.Content)
 	}
+
+	if m.abortCh != nil && idx == 0 {
+		<-ctx.Done()
+		return resp, context.Canceled
+	}
+
 	return resp, nil
 }
 
@@ -117,7 +126,7 @@ func TestAgent_ToolCallDispatch(t *testing.T) {
 	orch := newMockOrchestrator()
 
 	cfg := &config.Config{LLM: config.LLMConfig{Model: "test-model"}, Context: config.ContextConfig{MaxOutputTokens: 16384}}
-	err := agent.Run(context.Background(), cfg, "sys", conv, orch, tools.NewRegistry())
+	err := agent.Run(context.Background(), nil, cfg, "sys", conv, orch, tools.NewRegistry())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -158,7 +167,7 @@ func TestAgent_BeforeToolUseErrorNonFatal(t *testing.T) {
 	conv.Messages = append(conv.Messages, userMessage("hi"))
 	orch := newMockOrchestrator()
 
-	err := agent.Run(context.Background(), &config.Config{LLM: config.LLMConfig{Model: "test-model"}, Context: config.ContextConfig{MaxOutputTokens: 16384}}, "sys", conv, orch, tools.NewRegistry())
+	err := agent.Run(context.Background(), nil, &config.Config{LLM: config.LLMConfig{Model: "test-model"}, Context: config.ContextConfig{MaxOutputTokens: 16384}}, "sys", conv, orch, tools.NewRegistry())
 	if err != nil {
 		t.Fatalf("error should not propagate, got: %v", err)
 	}
@@ -203,7 +212,7 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 			CompressionThreshold: 1.0,
 		},
 	}
-	err := agent.Run(context.Background(), cfg, "sys", conv, orch, tools.NewRegistry())
+	err := agent.Run(context.Background(), nil, cfg, "sys", conv, orch, tools.NewRegistry())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -263,4 +272,119 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 	if finalCall.messages[3]["role"] != "tool" || finalCall.messages[3]["tool_call_id"] != "c1" {
 		t.Fatalf("expected tool result after retained assistant tool call, got %#v", finalCall.messages[3])
 	}
+}
+
+func TestAgent_AbortDuringCompletion(t *testing.T) {
+	abortCh := make(chan struct{})
+
+	client := &mockClient{
+		responses: []CompletionResponse{
+			{Content: "aborted", FinishReason: "stop"},
+		},
+		abortCh: abortCh,
+	}
+
+	agent := NewAgent(client)
+	conv := NewConversation()
+	conv.Messages = append(conv.Messages, userMessage("hello"))
+	orch := newMockOrchestrator()
+
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		close(abortCh)
+	}()
+
+	err := agent.Run(context.Background(), abortCh, &config.Config{
+		LLM:     config.LLMConfig{Model: "test"},
+		Context: config.ContextConfig{MaxOutputTokens: 16384},
+	}, "sys", conv, orch, tools.NewRegistry())
+
+	if err != ErrAborted {
+		t.Fatalf("expected ErrAborted, got %v", err)
+	}
+	wg.Wait()
+}
+
+func TestAgent_AbortDuringToolExecution(t *testing.T) {
+	abortCh := make(chan struct{})
+
+	client := &mockClient{
+		responses: []CompletionResponse{
+			{
+				Content:      "call tool",
+				FinishReason: "tool_calls",
+				ToolCalls:    []ToolCall{{ID: "c1", Name: "t", Args: []byte(`{}`)}},
+			},
+			{Content: "should not reach", FinishReason: "stop"},
+		},
+		abortCh: abortCh,
+	}
+
+	agent := NewAgent(client)
+	conv := NewConversation()
+	conv.Messages = append(conv.Messages, userMessage("start"))
+	orch := &mockOrchestratorWithAbort{
+		mockOrchestrator: mockOrchestrator{registry: tools.NewRegistry()},
+		abortCh:          abortCh,
+	}
+
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		time.Sleep(20 * time.Millisecond)
+		close(abortCh)
+	}()
+
+	err := agent.Run(context.Background(), abortCh, &config.Config{
+		LLM:     config.LLMConfig{Model: "test"},
+		Context: config.ContextConfig{MaxOutputTokens: 16384},
+	}, "sys", conv, orch, tools.NewRegistry())
+
+	if err != ErrAborted {
+		t.Fatalf("expected ErrAborted, got %v", err)
+	}
+	wg.Wait()
+
+	if len(client.calls) != 1 {
+		t.Fatalf("expected 1 LLM call, got %d", len(client.calls))
+	}
+}
+
+func TestAgent_AbortNoActiveCompletion(t *testing.T) {
+	agent := NewAgent(&mockClient{
+		responses: []CompletionResponse{
+			{Content: "ok", FinishReason: "stop"},
+		},
+	})
+	conv := NewConversation()
+	conv.Messages = append(conv.Messages, userMessage("hi"))
+	orch := newMockOrchestrator()
+
+	err := agent.Run(context.Background(), nil, &config.Config{
+		LLM:     config.LLMConfig{Model: "test"},
+		Context: config.ContextConfig{MaxOutputTokens: 16384},
+	}, "sys", conv, orch, tools.NewRegistry())
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+type mockOrchestratorWithAbort struct {
+	mockOrchestrator
+	abortCh chan struct{}
+}
+
+func (o *mockOrchestratorWithAbort) DispatchTools(_ context.Context, calls []ToolCall) ([]Message, error) {
+	result, err := o.mockOrchestrator.DispatchTools(context.Background(), calls)
+	go func() {
+		select {
+		case o.abortCh <- struct{}{}:
+		default:
+		}
+	}()
+	return result, err
 }

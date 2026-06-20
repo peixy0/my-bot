@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -9,6 +10,8 @@ import (
 	"my-bot/internal/config"
 	"my-bot/internal/tools"
 )
+
+var ErrAborted = errors.New("aborted")
 
 type Agent struct {
 	client CompletionClient
@@ -24,21 +27,39 @@ func (a *Agent) Fork() *Agent {
 
 func (a *Agent) Run(
 	ctx context.Context,
+	abortCh <-chan struct{},
 	cfg *config.Config,
 	systemPrompt string,
 	conv *Conversation,
 	orch Orchestrator,
 	reg *tools.Registry,
 ) error {
+	abortCtx, abortCancel := context.WithCancel(context.Background())
+	defer abortCancel()
+
+	if abortCh != nil {
+		go func() {
+			select {
+			case <-abortCh:
+				abortCancel()
+			case <-ctx.Done():
+			}
+		}()
+	}
+
 	systemMessages := []Message{
 		{"role": "system", "content": systemPrompt},
 	}
 
 	for {
+		if abortCtx.Err() == context.Canceled {
+			return ErrAborted
+		}
+
 		allMessages := append(systemMessages, conv.Messages...)
 		model := cfg.LLM.Model
 		slog.Debug("llm request", "model", model, "messages", len(allMessages), "tools", len(reg.Schemas()))
-		resp, err := a.client.Complete(ctx, CompletionRequest{
+		resp, err := a.client.Complete(abortCtx, CompletionRequest{
 			Model:          model,
 			Messages:       allMessages,
 			Tools:          reg.Schemas(),
@@ -50,6 +71,9 @@ func (a *Agent) Run(
 			OnContentDelta: orch.OnContentDelta,
 		})
 		if err != nil {
+			if abortCtx.Err() == context.Canceled {
+				return ErrAborted
+			}
 			return err
 		}
 
@@ -76,7 +100,10 @@ func (a *Agent) Run(
 
 		if cfg.Context.AutoCompression && int(conv.TotalTokens) >= int(float64(cfg.Context.WindowTokens)*cfg.Context.CompressionThreshold) {
 			slog.Debug("context compression triggered", "tokens", conv.TotalTokens, "context_window", cfg.Context.WindowTokens)
-			if err := a.Compress(ctx, cfg, systemPrompt, conv); err != nil {
+			if err := a.Compress(abortCtx, cfg, systemPrompt, conv); err != nil {
+				if abortCtx.Err() == context.Canceled {
+					return ErrAborted
+				}
 				return fmt.Errorf("compress: %w", err)
 			}
 			slog.Debug("context compression done", "tokens", conv.TotalTokens)

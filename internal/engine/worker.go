@@ -35,6 +35,8 @@ type ConversationWorker struct {
 	Events       *inbox.Memory[events.WorkerEvent]
 	MessageInbox *inbox.Memory[events.MessageEvent]
 
+	abortCh chan struct{}
+
 	heartbeatTimer *time.Timer
 	lastHeartbeat  *events.HeartbeatEvent
 }
@@ -67,6 +69,7 @@ func newConversationWorker(
 		tools:        tools,
 		Events:       inbox.NewMemory[events.WorkerEvent](workerEventBuf),
 		MessageInbox: inbox.NewMemory[events.MessageEvent](messageInboxBuf),
+		abortCh:      make(chan struct{}),
 	}
 	w.loop = llm.NewAgentLoop(w.cfg, workerAgent)
 	return w
@@ -206,7 +209,7 @@ func (w *ConversationWorker) processText(ctx context.Context, ev events.TextInpu
 	orch := llm.NewHumanInputOrchestrator(reg, ev.Sender, w.MessageInbox).WithVision(w.VisionSupported())
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
-	return w.loop.Run(ctx, reg, orch, prompt, wrapUserMessage(ev.Message))
+	return w.loop.Run(ctx, w.abortCh, reg, orch, prompt, wrapUserMessage(ev.Message))
 }
 
 func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageInputEvent) error {
@@ -232,7 +235,7 @@ func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageIn
 	orch := llm.NewHumanInputOrchestrator(reg, ev.Sender, w.MessageInbox).WithVision(true)
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
-	return w.loop.Run(ctx, reg, orch, prompt, content)
+	return w.loop.Run(ctx, w.abortCh, reg, orch, prompt, content)
 }
 
 func (w *ConversationWorker) processHeartbeat(ctx context.Context, ev events.HeartbeatEvent) error {
@@ -361,7 +364,7 @@ func (w *ConversationWorker) processConfigChange(ctx context.Context, ev events.
 func (w *ConversationWorker) runBackground(ctx context.Context, sender events.Outbound, prompt llm.SystemPrompt, content any) error {
 	reg := w.tools.Registry(sender)
 	orch := llm.NewBackgroundOrchestrator(reg, sender)
-	return w.loop.Run(ctx, reg, orch, prompt, content)
+	return w.loop.Run(ctx, nil, reg, orch, prompt, content)
 }
 
 func (w *ConversationWorker) maybeCompress(ctx context.Context, prompt llm.SystemPrompt) error {
@@ -403,6 +406,10 @@ func (w *ConversationWorker) reportError(ctx context.Context, err error, e any) 
 		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
 	case events.ImageInputEvent:
 		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
+	case events.HeartbeatEvent:
+		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
+	case events.CronEvent:
+		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
 	case events.ConfigQueryEvent:
 		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
 	case events.ConfigChangeEvent:
@@ -428,4 +435,3 @@ func wrapUserMessage(msg string) string {
 func formatFloat(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
 }
-

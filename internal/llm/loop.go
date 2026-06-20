@@ -29,9 +29,9 @@ func (l *AgentLoop) TotalTokens() int64 { return l.conv.TotalTokens }
 
 func (l *AgentLoop) ResetConv() { l.conv = NewConversation() }
 
-func (l *AgentLoop) Run(ctx context.Context, reg *tools.Registry, orch Orchestrator, prompt SystemPrompt, content any) error {
+func (l *AgentLoop) Run(ctx context.Context, abortCh <-chan struct{}, reg *tools.Registry, orch Orchestrator, prompt SystemPrompt, content any) error {
 	l.conv.Messages = append(l.conv.Messages, Message{"role": "user", "content": content})
-	return l.agent.Run(ctx, l.cfg, prompt.Build(ctx), l.conv, orch, reg)
+	return l.agent.Run(ctx, abortCh, l.cfg, prompt.Build(ctx), l.conv, orch, reg)
 }
 
 func (l *AgentLoop) Compress(ctx context.Context, prompt SystemPrompt) error {

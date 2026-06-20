@@ -127,6 +127,10 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 	case "session":
 		e.Sender.Send(ctx, fmt.Sprintf("current session: %s", e.ChatID))
 		return
+	case "abort":
+		if !s.getOrCreateSession(ctx, e.ChatID).tryAbort(ctx, e.Sender) {
+			e.Sender.Send(ctx, "no active completion")
+		}
 	case "cron":
 		s.handleCronCommand(ctx, parts[1:], e)
 	default:

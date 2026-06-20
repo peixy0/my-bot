@@ -105,6 +105,16 @@ func (s *chatSession) publishMessage(ev events.MessageEvent) bool {
 	return false
 }
 
+func (s *chatSession) tryAbort(ctx context.Context, sender events.Outbound) bool {
+	select {
+	case s.worker.abortCh <- struct{}{}:
+		sender.Send(ctx, "abort requested")
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *chatSession) cronWorker() *CronWorker {
 	return s.cron
 }

@@ -72,7 +72,7 @@ func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task 
 			reg := NewSubagentRegistry(r.rt, r.skills, r.cfg, r.agent, taskManager, cmdTools)
 			orch := NewSubagentOrchestrator(reg, emit, input)
 			loop := NewAgentLoop(r.cfg, r.agent.Fork())
-			err := loop.Run(innerCtx, reg, orch, NewSubagentPrompt(r.skills, r.rt, systemPrompt), task)
+			err := loop.Run(innerCtx, nil, reg, orch, NewSubagentPrompt(r.skills, r.rt, systemPrompt), task)
 			if err != nil {
 				emit.Output(err.Error())
 				emit.Complete(tasks.TaskResult{Error: err.Error()})
