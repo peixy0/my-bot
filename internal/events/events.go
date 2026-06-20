@@ -10,16 +10,11 @@ type Outbound interface {
 	EndThinking(ctx context.Context)
 }
 
-type EventWithSender interface {
-	GetSender() Outbound
-}
 type AgentEvent interface{ agentEvent() }
 type MessageEvent interface {
-	EventWithSender
 	messageEvent()
 }
 type WorkerEvent interface {
-	EventWithSender
 	workerEvent()
 }
 
@@ -108,13 +103,3 @@ func (ConfigQueryEvent) workerEvent()  {}
 func (ConfigChangeEvent) workerEvent() {}
 func (DumpCommand) workerEvent()       {}
 func (ResumeCommand) workerEvent()     {}
-
-func (e TextInputEvent) GetSender() Outbound    { return e.Sender }
-func (e ImageInputEvent) GetSender() Outbound   { return e.Sender }
-func (e HeartbeatEvent) GetSender() Outbound    { return e.Sender }
-func (e CronEvent) GetSender() Outbound         { return e.Sender }
-func (e NewSessionEvent) GetSender() Outbound   { return e.Sender }
-func (e ConfigQueryEvent) GetSender() Outbound  { return e.Sender }
-func (e ConfigChangeEvent) GetSender() Outbound { return e.Sender }
-func (e DumpCommand) GetSender() Outbound       { return e.Sender }
-func (e ResumeCommand) GetSender() Outbound     { return e.Sender }

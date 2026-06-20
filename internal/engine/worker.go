@@ -147,7 +147,7 @@ func (w *ConversationWorker) Run(ctx context.Context) error {
 				w.lastHeartbeat = &hb
 			}
 			if err := w.handleEvent(ctx, e); err != nil {
-				w.reportError(ctx, err, e)
+				slog.Error("event handler", "chat", w.chatID, "event", fmt.Sprintf("%T", e), "err", err)
 			}
 			w.scheduleHeartbeat()
 		case e := <-w.MessageInbox.C():
@@ -155,7 +155,6 @@ func (w *ConversationWorker) Run(ctx context.Context) error {
 			w.stopHeartbeat()
 			if err := w.handleMessage(ctx, e); err != nil {
 				slog.Error("message input", "chat", w.chatID, "err", err)
-				w.reportError(ctx, err, e)
 			}
 			w.scheduleHeartbeat()
 		case <-ctx.Done():
@@ -209,7 +208,11 @@ func (w *ConversationWorker) processText(ctx context.Context, ev events.TextInpu
 	orch := llm.NewHumanInputOrchestrator(reg, ev.Sender, w.MessageInbox).WithVision(w.VisionSupported())
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
-	return w.loop.Run(ctx, w.abortCh, reg, orch, prompt, wrapUserMessage(ev.Message))
+	err := w.loop.Run(ctx, w.abortCh, reg, orch, prompt, wrapUserMessage(ev.Message))
+	if err != nil {
+		ev.Sender.Send(ctx, errorMessage(err))
+	}
+	return err
 }
 
 func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageInputEvent) error {
@@ -235,7 +238,11 @@ func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageIn
 	orch := llm.NewHumanInputOrchestrator(reg, ev.Sender, w.MessageInbox).WithVision(true)
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
-	return w.loop.Run(ctx, w.abortCh, reg, orch, prompt, content)
+	err := w.loop.Run(ctx, w.abortCh, reg, orch, prompt, content)
+	if err != nil {
+		ev.Sender.Send(ctx, errorMessage(err))
+	}
+	return err
 }
 
 func (w *ConversationWorker) processHeartbeat(ctx context.Context, ev events.HeartbeatEvent) error {
@@ -262,6 +269,7 @@ func (w *ConversationWorker) processNewSession(ctx context.Context, ev events.Ne
 func (w *ConversationWorker) processDump(ctx context.Context, ev events.DumpCommand) error {
 	path := w.conversationPath(ev.ID)
 	if err := w.loop.DumpConversation(path); err != nil {
+		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
 		return err
 	}
 	ev.Sender.Send(ctx, fmt.Sprintf("session dumped, load with: /resume %s", ev.ID))
@@ -271,6 +279,7 @@ func (w *ConversationWorker) processDump(ctx context.Context, ev events.DumpComm
 func (w *ConversationWorker) processResume(ctx context.Context, ev events.ResumeCommand) error {
 	path := w.conversationPath(ev.ID)
 	if err := w.loop.LoadConversation(path); err != nil {
+		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
 		return err
 	}
 	ev.Sender.Send(ctx, fmt.Sprintf("session resumed: %s", ev.ID))
@@ -399,13 +408,11 @@ func (w *ConversationWorker) stopHeartbeat() {
 	}
 }
 
-func (w *ConversationWorker) reportError(ctx context.Context, err error, ev events.EventWithSender) {
-	slog.Error("event handler", "chat", w.chatID, "event", fmt.Sprintf("%T", ev), "err", err)
+func errorMessage(err error) string {
 	if err == llm.ErrAborted {
-		ev.GetSender().Send(ctx, "session aborted")
-		return
+		return "session aborted"
 	}
-	ev.GetSender().Send(ctx, fmt.Sprintf("error: %v", err))
+	return fmt.Sprintf("error: %v", err)
 }
 
 func (w *ConversationWorker) conversationPath(id string) string {

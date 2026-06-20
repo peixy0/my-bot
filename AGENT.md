@@ -218,7 +218,7 @@ Continue propagating `io.ReadAll` and streaming parse errors at I/O boundaries. 
 1. Define struct in `events/events.go` with appropriate marker methods.
 2. Handle in `scheduler.go:dispatch()` (routing) and `worker.go:handleEvent()` (processing).
 3. Update `chatIDOf()` if the event carries a ChatID.
-4. Update `reportError()` in `worker.go` if the event has a Sender.
+4. If the event carries a Sender and its `process*` function may fail, make it call `ev.Sender.Send(...)` with the error before returning it. The worker loop only logs non-user-visible failures; errors that should reach the user are reported at the source.
 
 ### Adding a New Goroutine
 1. Update the **Concurrency Map** above. Always.
