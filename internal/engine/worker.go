@@ -41,16 +41,6 @@ type ConversationWorker struct {
 	lastHeartbeat  *events.HeartbeatEvent
 }
 
-func NewConversationWorker(
-	chatID string,
-	cfg *config.Config,
-	agent *llm.Agent,
-	rt runtime.Runtime,
-	skills *tools.SkillLoader,
-) *ConversationWorker {
-	return newConversationWorker(chatID, cfg, agent, rt, skills, newSessionTools(rt, skills, cfg, agent))
-}
-
 func newConversationWorker(
 	chatID string,
 	cfg *config.Config,

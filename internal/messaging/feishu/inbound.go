@@ -202,18 +202,3 @@ func (i *Inbound) enqueue(ctx context.Context, ev events.AgentEvent) bool {
 	}
 	return false
 }
-
-func eventKind(ev events.AgentEvent) string {
-	return fmt.Sprintf("%T", ev)
-}
-
-func chatIDOf(ev events.AgentEvent) string {
-	switch e := ev.(type) {
-	case events.TextInputEvent:
-		return e.ChatID
-	case events.ImageInputEvent:
-		return e.ChatID
-	default:
-		return ""
-	}
-}

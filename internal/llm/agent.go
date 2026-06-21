@@ -34,7 +34,7 @@ func (a *Agent) Run(
 	orch Orchestrator,
 	reg *tools.Registry,
 ) error {
-	abortCtx, abortCancel := context.WithCancel(context.Background())
+	abortCtx, abortCancel := context.WithCancel(ctx)
 	defer abortCancel()
 
 	if abortCh != nil {
@@ -42,7 +42,7 @@ func (a *Agent) Run(
 			select {
 			case <-abortCh:
 				abortCancel()
-			case <-ctx.Done():
+			case <-abortCtx.Done():
 			}
 		}()
 	}

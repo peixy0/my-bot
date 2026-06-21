@@ -18,14 +18,14 @@ These are the core principles we hold the codebase to. They are load-bearing —
 - **Locks are a last resort.** A `sync.Mutex` is an admission that we couldn't structure the code as a single owner. Before adding one, ask: can this state live behind a channel, in a single goroutine, or be made immutable? Locks are acceptable only at boundaries where external libraries hand us callbacks on their own goroutines.
 - **Interface-driven boundaries for testability.** Every cross-package collaborator is an interface (`CompletionClient`, `Outbound`, `Runtime`, `Toolset`). Don't add concrete-to-concrete dependencies between sibling packages under `internal/`.
 - **Composable prompts and tools.** Prompts compose workspace `.md` files via `promptBase`; tools register into a `Registry`. Extending the system means adding implementations, not modifying the core.
-- **Fail loudly at boundaries, gracefully inside.** Errors at I/O boundaries (Feishu HTTP, file reads, LLM calls) get logged at `slog.Warn` or higher. Internal invariant violations should be unreachable, not silently swallowed. Prefer the `sendOrLog` pattern in `scheduler.go` over `_ = sender.Send(...)`.
+- **Fail loudly at boundaries, gracefully inside.** Errors at I/O boundaries (Feishu HTTP, file reads, LLM calls) get logged at `slog.Warn` or higher. Internal invariant violations should be unreachable, not silently swallowed.
 
 ## Architecture
 
 ```
 cmd/bot/main.go          ← entry point, wiring
 internal/
-  config/config.go       ← env-based configuration (30+ fields)
+  config/config.go       ← YAML-based configuration (30+ fields)
   events/events.go       ← event types & Outbound interface
   engine/
     scheduler.go         ← event dispatcher, session lifecycle, slash commands
@@ -158,8 +158,8 @@ These are the load-bearing invariants that an earlier draft expressed via inline
 - The Feishu image-download goroutine is fire-and-forget but every error path logs at `Warn` and surfaces a single user-visible failure message via `outbound.Send`. Don't add new fire-and-forget paths without the same discipline.
 
 ### Configuration
-- All config via environment variables, loaded once in `config.Load()`.
-- Defaults in `config.go`. New settings: add field to `Config`, call `getEnv*()`, document the env var name.
+- All config via a single YAML file (default `./config.yaml`), loaded once in `config.Load()`.
+- Defaults in `config.go`. New settings: add field to `Config` struct with `yaml` tag, add default in `defaultConfig()`, add validation in `Validate()`.
 
 ### Tool Registration
 - Implement `tools.Toolset`, call `r.Register(schema, handler)` in `Register()`.
@@ -171,7 +171,7 @@ These are the load-bearing invariants that an earlier draft expressed via inline
 ### Event System
 - New event types: add struct in `events/events.go`, implement marker methods (`agentEvent()`, `workerEvent()` if routed to workers).
 - Add handling in `scheduler.go:dispatch()` and `worker.go:handleEvent()`.
-- Update `chatIDOf()` in `scheduler.go` for new `WorkerEvent` types.
+- Route new `WorkerEvent` types in `scheduler.go:dispatch()` and handle in `worker.go:handleEvent()`.
 
 ### Prompt System
 - System prompts built from workspace `.md` files (PERSONA.md, RULES.md, CONTEXT.md, TOOLS.md, plus per-mode files).
@@ -189,7 +189,7 @@ These are the load-bearing invariants that an earlier draft expressed via inline
 
 ### MEDIUM: Swallowed errors in I/O paths
 
-Continue propagating `io.ReadAll` and streaming parse errors at I/O boundaries. For `Sender.Send()` failures use `sendOrLog` (in `engine/scheduler.go`); for `json.Marshal` of known-good schemas, ignoring is acceptable.
+Continue propagating `io.ReadAll` and streaming parse errors at I/O boundaries. `Sender.Send()` failures are logged at `Warn` level; for `json.Marshal` of known-good schemas, ignoring is acceptable.
 
 ## Development Rules
 
@@ -217,7 +217,7 @@ Continue propagating `io.ReadAll` and streaming parse errors at I/O boundaries. 
 ### Adding a New Event Type
 1. Define struct in `events/events.go` with appropriate marker methods.
 2. Handle in `scheduler.go:dispatch()` (routing) and `worker.go:handleEvent()` (processing).
-3. Update `chatIDOf()` if the event carries a ChatID.
+3. Ensure the event carries a `ChatID` field for routing; the scheduler dispatches by `ChatID` directly.
 4. If the event carries a Sender and its `process*` function may fail, make it call `ev.Sender.Send(...)` with the error before returning it. The worker loop only logs non-user-visible failures; errors that should reach the user are reported at the source.
 
 ### Adding a New Goroutine
@@ -247,14 +247,11 @@ Continue propagating `io.ReadAll` and streaming parse errors at I/O boundaries. 
 # Build
 go build -o bot ./cmd/bot
 
-# Run (requires .env or exported env vars)
+# Run (requires config.yaml)
 ./bot
 
-# Required env vars for OpenAI provider:
-#   OPENAI_API_KEY
-
-# Required env vars for Feishu:
-#   FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_ENCRYPT_KEY, FEISHU_VERIFICATION_TOKEN
+# Or specify a config path:
+./bot /path/to/config.yaml
 ```
 
 ## File Quick Reference
