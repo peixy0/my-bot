@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -54,7 +53,7 @@ func (w *WebSearch) Search(ctx context.Context, query string, page int) ([]Searc
 		Results []SearchResult `json:"results"`
 	}
 	if err := json.Unmarshal(body, &searchResponse); err != nil {
-		return []SearchResult{}, errors.New(string(body))
+		return []SearchResult{}, fmt.Errorf("unmarshal search results: %w", err)
 	}
 	return searchResponse.Results, nil
 }

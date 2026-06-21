@@ -73,7 +73,7 @@ func (d *DefaultToolset) registerWebSearch(r *Registry) {
 		}
 		p.Page = 1
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
+			return ToolResult{}, fmt.Errorf("parse web_search args: %w", err)
 		}
 		results, err := d.webSearch.Search(ctx, p.Query, p.Page)
 		if err != nil {
@@ -103,7 +103,7 @@ func (d *DefaultToolset) registerFetch(r *Registry) {
 			URL string `json:"url"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
+			return ToolResult{}, fmt.Errorf("parse fetch args: %w", err)
 		}
 
 		return d.fetcher.Fetch(ctx, p.URL)
@@ -144,7 +144,7 @@ func (d *DefaultToolset) registerReadFile(r *Registry) {
 		p.StartLine = 1
 		p.Limit = 500
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
+			return ToolResult{}, fmt.Errorf("parse read_file args: %w", err)
 		}
 		res, err := d.rt.ReadFile(ctx, p.Filename, p.StartLine, p.Limit)
 		if err != nil {
@@ -178,7 +178,7 @@ func (d *DefaultToolset) registerWriteFile(r *Registry) {
 			Content  string `json:"content"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
+			return ToolResult{}, fmt.Errorf("parse write_file args: %w", err)
 		}
 		if err := d.rt.WriteFile(ctx, p.Filename, p.Content); err != nil {
 			return ToolResult{}, err
@@ -211,7 +211,7 @@ func (d *DefaultToolset) registerAppendFile(r *Registry) {
 			Content  string `json:"content"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
+			return ToolResult{}, fmt.Errorf("parse append_file args: %w", err)
 		}
 		if err := d.rt.AppendFile(ctx, p.Filename, p.Content); err != nil {
 			return ToolResult{}, err
@@ -261,7 +261,7 @@ func (d *DefaultToolset) registerEditFile(r *Registry) {
 			} `json:"edits"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
+			return ToolResult{}, fmt.Errorf("parse edit_file args: %w", err)
 		}
 		edits := make([]runtime.Edit, len(p.Edits))
 		for i, e := range p.Edits {
@@ -293,7 +293,7 @@ func (d *DefaultToolset) registerApplyPatch(r *Registry) {
 			Patch string `json:"patch"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
+			return ToolResult{}, fmt.Errorf("parse apply_patch args: %w", err)
 		}
 		res, err := d.rt.Execute(ctx, fmt.Sprintf("patch -p1 <<'PATCH'\n%s\nPATCH", p.Patch))
 		if err != nil {
@@ -349,7 +349,7 @@ func (d *DefaultToolset) registerGrep(r *Registry) {
 		}
 		p.SurroundingLines = 2
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
+			return ToolResult{}, fmt.Errorf("parse grep args: %w", err)
 		}
 		var sb strings.Builder
 		sb.WriteString("rg -n")
@@ -400,7 +400,7 @@ func (d *DefaultToolset) registerGlob(r *Registry) {
 			Pattern string `json:"pattern"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
+			return ToolResult{}, fmt.Errorf("parse glob args: %w", err)
 		}
 		result, err := d.rt.Glob(ctx, p.Pattern)
 		if err != nil {
@@ -430,7 +430,7 @@ func (d *DefaultToolset) registerReadImage(r *Registry) {
 			Filename string `json:"filename"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
+			return ToolResult{}, fmt.Errorf("parse read_image args: %w", err)
 		}
 		data, err := d.rt.ReadRawBytes(ctx, p.Filename)
 		if err != nil {

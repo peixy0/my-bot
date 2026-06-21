@@ -88,7 +88,7 @@ func (i *Inbound) readImageData(ctx context.Context, msgID, msgBody string) ([]b
 		ImageKey string `json:"image_key"`
 	}
 	if err := json.Unmarshal([]byte(msgBody), &body); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unmarshal image msg body: %w", err)
 	}
 	req := larkim.NewGetMessageResourceReqBuilder().
 		MessageId(msgID).

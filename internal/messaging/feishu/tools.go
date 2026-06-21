@@ -35,7 +35,7 @@ func (o *Outbound) registerAddReaction(r *tools.Registry) {
 			Emoji string `json:"emoji"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return tools.ToolResult{}, err
+			return tools.ToolResult{}, fmt.Errorf("parse add_reaction args: %w", err)
 		}
 		if err := o.addReaction(ctx, p.Emoji); err != nil {
 			return tools.ToolResult{}, err
@@ -60,7 +60,7 @@ func (o *Outbound) registerSendImage(r *tools.Registry) {
 			ImagePath string `json:"image_path"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return tools.ToolResult{}, err
+			return tools.ToolResult{}, fmt.Errorf("parse send_image args: %w", err)
 		}
 		data, err := o.rt.ReadRawBytes(ctx, p.ImagePath)
 		if err != nil {
@@ -95,7 +95,7 @@ func (o *Outbound) registerSendFile(r *tools.Registry) {
 			FilePath string `json:"file_path"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return tools.ToolResult{}, err
+			return tools.ToolResult{}, fmt.Errorf("parse send_file args: %w", err)
 		}
 		data, err := o.rt.ReadRawBytes(ctx, p.FilePath)
 		if err != nil {

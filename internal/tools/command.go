@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"my-bot/internal/runtime"
@@ -44,7 +45,7 @@ func (s *CommandToolset) Register(r *Registry) {
 		}
 		p.TimeoutSeconds = 60
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
+			return ToolResult{}, fmt.Errorf("parse run_command args: %w", err)
 		}
 		snap, err := s.tasks.Start(ctx, tasks.StartOptions{
 			Description: p.Command,
@@ -88,7 +89,7 @@ func (s *CommandToolset) Register(r *Registry) {
 			TaskID string `json:"task_id"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
+			return ToolResult{}, fmt.Errorf("parse get_task args: %w", err)
 		}
 		snap, _, err := s.tasks.Get(ctx, p.TaskID, true)
 		if err != nil {
@@ -122,7 +123,7 @@ func (s *CommandToolset) Register(r *Registry) {
 		}
 		p.TimeoutSeconds = 60
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
+			return ToolResult{}, fmt.Errorf("parse await_task args: %w", err)
 		}
 		if p.TimeoutSeconds > 600 {
 			p.TimeoutSeconds = 600
@@ -171,7 +172,7 @@ func (s *CommandToolset) Register(r *Registry) {
 			TaskID string `json:"task_id"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
+			return ToolResult{}, fmt.Errorf("parse kill_task args: %w", err)
 		}
 		if _, err := s.tasks.Kill(ctx, p.TaskID); err != nil {
 			var snapErr error
@@ -208,7 +209,7 @@ func (s *CommandToolset) Register(r *Registry) {
 			Input  string `json:"input"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
+			return ToolResult{}, fmt.Errorf("parse write_to_task args: %w", err)
 		}
 		if err := s.tasks.WriteInput(ctx, p.TaskID, p.Input); err != nil {
 			return ToolResult{}, err

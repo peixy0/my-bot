@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -56,7 +57,7 @@ func (l *AgentLoop) LoadConversation(path string) error {
 	}
 	var messages []Message
 	if err := json.Unmarshal(data, &messages); err != nil {
-		return err
+		return fmt.Errorf("unmarshal conversation: %w", err)
 	}
 	l.conv = &Conversation{Messages: messages}
 	return nil

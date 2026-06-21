@@ -131,7 +131,7 @@ func (s *SubagentToolset) Register(r *tools.Registry) {
 			SystemPrompt string `json:"system_prompt"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return tools.ToolResult{}, err
+			return tools.ToolResult{}, fmt.Errorf("parse agent args: %w", err)
 		}
 		slog.Debug("subagent start", "task_len", len(p.Task))
 		snap, err := s.runner.startAgentTask(ctx, p.SystemPrompt, p.Task)
@@ -168,7 +168,7 @@ func (s *FleetToolset) Register(r *tools.Registry) {
 			Tasks        []string `json:"tasks"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return tools.ToolResult{}, err
+			return tools.ToolResult{}, fmt.Errorf("parse fleet args: %w", err)
 		}
 		slog.Debug("fleet start", "tasks", len(p.Tasks))
 		taskIDs, err := s.runner.startFleetTask(ctx, p.SystemPrompt, p.Tasks)

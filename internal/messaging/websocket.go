@@ -93,7 +93,7 @@ func (o *WSOutbound) RegisterTools(r *tools.Registry) {
 			ImagePath string `json:"image_path"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return tools.ToolResult{}, err
+			return tools.ToolResult{}, fmt.Errorf("parse send_image args: %w", err)
 		}
 		data, err := o.rt.ReadRawBytes(ctx, p.ImagePath)
 		if err != nil {

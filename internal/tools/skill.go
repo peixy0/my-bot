@@ -91,7 +91,7 @@ func registerSkillTool(r *Registry, loader *SkillLoader) {
 			SkillName string `json:"skill_name"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, err
+			return ToolResult{}, fmt.Errorf("parse use_skill args: %w", err)
 		}
 		skill, err := loader.Load(p.SkillName)
 		if err != nil {
