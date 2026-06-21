@@ -20,7 +20,7 @@ func NewSessionRegistry(
 	reg := tools.NewRegistry()
 	registerBaseTools(reg, rt, skills, cfg, cmdTools)
 	registerOutboundTools(reg, sender)
-	RegisterMetaTools(reg, agent, skills, cfg, rt, taskManager)
+	registerMetaTools(reg, agent, skills, cfg, rt, taskManager)
 	return reg
 }
 
@@ -28,14 +28,16 @@ func NewSubagentRegistry(
 	rt runtime.Runtime,
 	skills *tools.SkillLoader,
 	cfg *config.Config,
-	agent *Agent,
-	taskManager *tasks.Manager,
 	cmdTools *tools.CommandToolset,
 ) *tools.Registry {
 	reg := tools.NewRegistry()
 	registerBaseTools(reg, rt, skills, cfg, cmdTools)
-	RegisterMetaTools(reg, agent, skills, cfg, rt, taskManager)
 	return reg
+}
+
+func registerMetaTools(r *tools.Registry, agent *Agent, skills *tools.SkillLoader, cfg *config.Config, rt runtime.Runtime, taskManager *tasks.Manager) {
+	NewSubagentToolset(agent, skills, cfg, rt, taskManager).Register(r)
+	NewFleetToolset(agent, skills, cfg, rt, taskManager).Register(r)
 }
 
 func registerBaseTools(reg *tools.Registry, rt runtime.Runtime, skills *tools.SkillLoader, cfg *config.Config, cmdTools *tools.CommandToolset) {

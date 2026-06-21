@@ -8,20 +8,13 @@ import (
 	"strings"
 	"sync"
 
-	"my-bot/internal/config"
 	"my-bot/internal/events"
 	"my-bot/internal/inbox"
-	"my-bot/internal/runtime"
 	"my-bot/internal/tasks"
 	"my-bot/internal/tools"
 
 	"golang.org/x/sync/errgroup"
 )
-
-func RegisterMetaTools(r *tools.Registry, agent *Agent, skills *tools.SkillLoader, cfg *config.Config, rt runtime.Runtime, taskManager *tasks.Manager) {
-	NewSubagentToolset(agent, skills, cfg, rt, taskManager).Register(r)
-	NewFleetToolset(agent, skills, cfg, rt, taskManager).Register(r)
-}
 
 type Orchestrator interface {
 	OnContentDelta(ctx context.Context, delta string)

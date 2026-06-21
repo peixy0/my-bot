@@ -426,45 +426,24 @@ func (r *nullRuntime) OSInfo(_ context.Context) (string, error) {
 	return "OS: linux/amd64\nWorking directory: /workspace", nil
 }
 
-func TestForBackground_HasMetaTools(t *testing.T) {
-	client := &mockClient{
-		responses: []CompletionResponse{
-			{Content: "done", FinishReason: "stop", TotalTokens: 10},
-		},
-	}
-	agent := NewAgent(client)
-	skills := tools.NewSkillLoader("")
+func TestSubagentRegistry_HasNoMetaTools(t *testing.T) {
 	rt := &nullRuntime{}
+	skills := tools.NewSkillLoader("")
 	cfg := &config.Config{}
-
-	reg := tools.NewRegistry()
 	manager := tasks.NewManager(1000)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_ = manager.Shutdown(ctx)
 	}()
-	RegisterMetaTools(reg, agent, skills, cfg, rt, manager)
+	cmdTools := tools.NewCommandToolset(rt, manager)
 
-	schemas := reg.Schemas()
-	hasAgent := false
-	hasFleet := false
-	for _, s := range schemas {
-		fn, _ := s["function"].(map[string]any)
-		if fn != nil {
-			name, _ := fn["name"].(string)
-			if name == "agent" {
-				hasAgent = true
-			}
-			if name == "fleet" {
-				hasFleet = true
-			}
-		}
+	reg := NewSubagentRegistry(rt, skills, cfg, cmdTools)
+
+	if _, ok := reg.Handler("agent"); ok {
+		t.Error("subagent registry should not expose 'agent' meta-tool")
 	}
-	if !hasAgent {
-		t.Error("expected background orchestrator to have 'agent' meta-tool")
-	}
-	if !hasFleet {
-		t.Error("expected background orchestrator to have 'fleet' meta-tool")
+	if _, ok := reg.Handler("fleet"); ok {
+		t.Error("subagent registry should not expose 'fleet' meta-tool")
 	}
 }

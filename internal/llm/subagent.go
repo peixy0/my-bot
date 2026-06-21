@@ -69,7 +69,7 @@ func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task 
 				defer cancel()
 				_ = taskManager.Shutdown(ctx2)
 			}()
-			reg := NewSubagentRegistry(r.rt, r.skills, r.cfg, r.agent, taskManager, cmdTools)
+			reg := NewSubagentRegistry(r.rt, r.skills, r.cfg, cmdTools)
 			orch := NewSubagentOrchestrator(reg, emit, input)
 			loop := NewAgentLoop(r.cfg, r.agent.Fork())
 			err := loop.Run(innerCtx, nil, reg, orch, NewSubagentPrompt(r.skills, r.rt, systemPrompt), task)
