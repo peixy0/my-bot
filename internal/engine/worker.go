@@ -49,11 +49,10 @@ func newConversationWorker(
 	skills *tools.SkillLoader,
 	tools *sessionTools,
 ) *ConversationWorker {
-	workerAgent := agent.Fork()
 	w := &ConversationWorker{
 		chatID:       chatID,
 		cfg:          cfg,
-		agent:        workerAgent,
+		agent:        agent,
 		rt:           rt,
 		skills:       skills,
 		tools:        tools,
@@ -61,7 +60,7 @@ func newConversationWorker(
 		MessageInbox: inbox.NewMemory[events.MessageEvent](messageInboxBuf),
 		abortCh:      make(chan struct{}),
 	}
-	w.loop = llm.NewAgentLoop(w.cfg, workerAgent)
+	w.loop = llm.NewAgentLoop(w.cfg, agent)
 	return w
 }
 
@@ -156,8 +155,6 @@ func (w *ConversationWorker) Run(ctx context.Context) error {
 
 func (w *ConversationWorker) handleEvent(ctx context.Context, e events.WorkerEvent) error {
 	switch ev := e.(type) {
-	case events.TextInputEvent:
-		return w.processText(ctx, ev)
 	case events.HeartbeatEvent:
 		return w.processHeartbeat(ctx, ev)
 	case events.CronEvent:
@@ -172,6 +169,13 @@ func (w *ConversationWorker) handleEvent(ctx context.Context, e events.WorkerEve
 		return w.processDump(ctx, ev)
 	case events.ResumeCommand:
 		return w.processResume(ctx, ev)
+	case events.QueuedInputEvent:
+		return w.processText(ctx, events.TextInputEvent{
+			ChatID:    ev.ChatID,
+			MessageID: ev.MessageID,
+			Message:   ev.Message,
+			Sender:    ev.Sender,
+		})
 	default:
 		return fmt.Errorf("unexpected event type %T", e)
 	}

@@ -65,7 +65,7 @@ func TestSchedulerHeartbeatInterval(t *testing.T) {
 
 func TestSendWorkerEventPublishesEnvelope(t *testing.T) {
 	workerInbox := inbox.NewMemory[events.WorkerEvent](1)
-	if !workerInbox.TryPublish(events.TextInputEvent{ChatID: "chat-1", Message: "hi"}) {
+	if !workerInbox.TryPublish(events.HeartbeatEvent{ChatID: "chat-1"}) {
 		t.Fatal("expected worker event publish to succeed")
 	}
 
@@ -73,17 +73,17 @@ func TestSendWorkerEventPublishesEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("receive worker event: %v", err)
 	}
-	if _, ok := msg.(events.TextInputEvent); !ok {
+	if _, ok := msg.(events.HeartbeatEvent); !ok {
 		t.Fatalf("unexpected payload type: %T", msg)
 	}
 }
 
 func TestSendWorkerEventDropsWhenInboxFull(t *testing.T) {
 	workerInbox := inbox.NewMemory[events.WorkerEvent](1)
-	if !workerInbox.TryPublish(events.TextInputEvent{ChatID: "chat-1", Message: "hi"}) {
+	if !workerInbox.TryPublish(events.HeartbeatEvent{ChatID: "chat-1"}) {
 		t.Fatal("expected first publish to succeed")
 	}
-	if workerInbox.TryPublish(events.TextInputEvent{ChatID: "chat-1", Message: "hi"}) {
+	if workerInbox.TryPublish(events.HeartbeatEvent{ChatID: "chat-1"}) {
 		t.Fatal("expected second publish to fail when inbox is full")
 	}
 }
@@ -170,7 +170,7 @@ func TestSchedulerDispatchTextInputQueuesWhenMessageInboxFull(t *testing.T) {
 		},
 	}
 
-	s.dispatchToSession(context.Background(), "chat-1", events.TextInputEvent{
+	s.dispatchToSession(context.Background(), "chat-1", events.QueuedInputEvent{
 		ChatID:  "chat-1",
 		Message: "fallback task",
 		Sender:  &captureOutbound{},
@@ -180,7 +180,7 @@ func TestSchedulerDispatchTextInputQueuesWhenMessageInboxFull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("receive worker event: %v", err)
 	}
-	ev, ok := msg.(events.TextInputEvent)
+	ev, ok := msg.(events.QueuedInputEvent)
 	if !ok {
 		t.Fatalf("unexpected payload type: %T", msg)
 	}
@@ -210,7 +210,7 @@ func TestSchedulerQueueCommandQueuesWithExistingWorker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("receive worker event: %v", err)
 	}
-	ev, ok := msg.(events.TextInputEvent)
+	ev, ok := msg.(events.QueuedInputEvent)
 	if !ok {
 		t.Fatalf("unexpected payload type: %T", msg)
 	}

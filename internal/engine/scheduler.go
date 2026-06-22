@@ -104,8 +104,12 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 			e.Sender.Send(ctx, "usage: /queue <message>")
 			return
 		}
-		e.Message = text
-		s.dispatchToSession(ctx, e.ChatID, e)
+		s.dispatchToSession(ctx, e.ChatID, events.QueuedInputEvent{
+			ChatID:    e.ChatID,
+			MessageID: e.MessageID,
+			Message:   text,
+			Sender:    e.Sender,
+		})
 	case "dump":
 		session, ok := s.sessions[e.ChatID]
 		if !ok {

@@ -24,6 +24,20 @@ type Orchestrator interface {
 	DispatchTools(ctx context.Context, calls []ToolCall) ([]Message, error)
 }
 
+type ContentStreamer interface {
+	OnContentDelta(ctx context.Context, delta string)
+	OnContentFinal(ctx context.Context, content string)
+}
+
+type ResponseHandler interface {
+	OnFinalResponse(ctx context.Context, content string)
+}
+
+type ToolDispatcher interface {
+	BeforeToolUse(ctx context.Context, content string)
+	DispatchTools(ctx context.Context, calls []ToolCall) ([]Message, error)
+}
+
 func sendBeforeToolUse(ctx context.Context, sender events.Outbound, content string) {
 	if sender == nil {
 		return

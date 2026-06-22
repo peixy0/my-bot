@@ -21,10 +21,6 @@ func NewAgent(client CompletionClient) *Agent {
 	return &Agent{client: client}
 }
 
-func (a *Agent) Fork() *Agent {
-	return NewAgent(a.client)
-}
-
 func (a *Agent) Run(
 	ctx context.Context,
 	abortCh <-chan struct{},

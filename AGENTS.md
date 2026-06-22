@@ -33,7 +33,6 @@ internal/
     worker.go            ← per-chat conversation logic and event loop
     cron.go              ← cron job loading & scheduling
   llm/
-    client.go            ← CompletionClient interface, Message types
     agent.go             ← LLM agent loop + context compression
     loop.go              ← AgentLoop (owns Conversation only)
     orchestrator.go      ← tool dispatch and response strategies
@@ -56,10 +55,11 @@ internal/
   tools/
     registry.go          ← Registry, Toolset, ToolRegistrar interfaces
     toolbox.go           ← DefaultToolset (8+ core tools)
-    background.go        ← CommandToolset task APIs (run_command, await_task, etc.)
+    command.go           ← CommandToolset task APIs (run_command, await_task, etc.)
     skill.go             ← SkillLoader (frontmatter .md files)
-    search.go            ← DuckDuckGo web search
-    markdown.go          ← frontmatter parser
+    search.go            ← web search
+    fetch.go             ← HTTP fetch
+    format.go            ← formatting utilities
   tasks/                 ← event-driven TaskManager, task drivers, retention
   api/
     server.go            ← HTTP + WebSocket server
@@ -115,8 +115,8 @@ These are non-obvious decisions worth preserving. If you're tempted to "fix" one
 - **Single-goroutine Scheduler dispatch.** `Scheduler.sessions` is deliberately unprotected by mutex. The invariant: only `Run()` reads/writes it. If you ever need access from elsewhere, send an event into the queue rather than introducing a lock. The map is documented in `scheduler.go`.
 - **Per-chat ConversationWorker isolation.** Each chat has its own goroutine, its own `Events` channel, and its own conversation state. No cross-chat sharing means no cross-chat synchronization.
 - **Session owns resources; worker borrows them.** `chatSession` owns `tasks.Manager`, `CommandToolset`, cron lifecycle, and shutdown. `ConversationWorker` uses these resources through `sessionTools` and should not become an owner again.
-- **Per-worker model and vision selection.** `Scheduler` keeps one base `Agent` for dependency wiring, but each `ConversationWorker` owns its config copy; `/model` and `/vision` change only that worker's config.
-- **Live user input uses a separate in-loop input inbox, not the worker queue.** While an agent loop is running, ordinary text/images are routed as non-blocking interrupts with a `default` fallthrough; `/queue` forces the worker queue for handling after the current loop finishes.
+- **Per-session config isolation.** `Scheduler` calls `cfg.ForSession(chatID)` to produce a per-session Config. Each `chatSession` and its single `ConversationWorker` share this copy; `/model` and `/vision` changes affect only that session. Sessions never share Config instances.
+- **Live user input uses a separate in-loop input inbox, not the worker queue.** While an agent loop is running, ordinary text/images are routed as non-blocking interrupts with a `default` fallthrough; `/queue` wraps the input in `QueuedInputEvent` and dispatches it as a `WorkerEvent` for handling after the current loop finishes.
 - **Three orchestrator variants instead of mode flags.** Strategy pattern keeps each orchestrator's responsibility crisp; we'd rather grow a fourth variant than feature-flag an existing one.
 - **Raw `net/http` for LLM calls, no SDK.** The OpenAI-compatible provider serializes messages and tools as `map[string]any` and consumes streaming chat-completion events directly. Don't reintroduce `openai-go`.
 - **Composable system prompts.** Prompts compose workspace `.md` files; behavior is data-driven, not code-driven. New prompts should declare their section list, not duplicate file-reading logic.
@@ -153,7 +153,7 @@ These are the load-bearing invariants that an earlier draft expressed via inline
 - `CronWorker.jobs` is mutated only from the Scheduler goroutine. The `cron.Cron` library invokes registered funcs on its own goroutines, but those funcs only send on `workerCh` — they never touch the `jobs` map. No mutex.
 - `messaging.dedup` is the canonical example of the channel-as-single-owner pattern: one goroutine owns the `expires` map and `order` slice; all callers reach it via the request channel `dedup.in`. The goroutine dies cleanly when the inbound context is cancelled. If `dedup.check` cannot reach the goroutine within 1s, it fails open (returns true) — under shutdown we'd rather risk a duplicate than a deadlock.
 - `ConversationWorker.heartbeatTimer` is a `time.AfterFunc` that may outlive normal event processing. It is `Stop()`-ed at the top of every event-loop iteration. Session teardown cancels the worker context, which ends the loop and triggers resource shutdown in `chatSession`.
-- `ConversationWorker.cfg` owns per-chat model and vision settings. `Scheduler.agent` is dependency wiring only and should not be mutated by slash commands.
+- `ConversationWorker.cfg` is a per-worker `Config` clone; model and vision changes affect only that worker. The base `Agent` is shared and never forked — `http.Client` is thread-safe.
 - `chatSession` owns `sessionTools`, `CronWorker`, and the only shutdown path for `tasks.Manager`. `ConversationWorker` must not call `tasks.Manager.Shutdown()` directly.
 - The Feishu image-download goroutine is fire-and-forget but every error path logs at `Warn` and surfaces a single user-visible failure message via `outbound.Send`. Don't add new fire-and-forget paths without the same discipline.
 
@@ -169,7 +169,7 @@ These are the load-bearing invariants that an earlier draft expressed via inline
 - New tools must be safe for the current serial-dispatch model. Document any state they share with `tasks.Manager`.
 
 ### Event System
-- New event types: add struct in `events/events.go`, implement marker methods (`agentEvent()`, `workerEvent()` if routed to workers).
+- New event types: add struct in `events/events.go`, implement marker methods (`agentEvent()`, `messageEvent()`, `workerEvent()` as appropriate). `TextInputEvent` and `ImageInputEvent` are `AgentEvent`+`MessageEvent`; `/queue` wraps them in `QueuedInputEvent` for the worker queue.
 - Add handling in `scheduler.go:dispatch()` and `worker.go:handleEvent()`.
 - Route new `WorkerEvent` types in `scheduler.go:dispatch()` and handle in `worker.go:handleEvent()`.
 
@@ -260,7 +260,7 @@ go build -o bot ./cmd/bot
 |---------------------|------------|
 | Add/change config | `internal/config/config.go` |
 | Add a tool | `internal/tools/toolbox.go` or new toolset file |
-| Add a background-task tool | `internal/tools/background.go` + `internal/tasks/` |
+| Add a background-task tool | `internal/tools/command.go` + `internal/tasks/` |
 | Add an event type | `internal/events/events.go` |
 | Change LLM behavior | `internal/llm/agent.go` (loop), `openai.go` (provider) |
 | Change the agent loop / context compression | `internal/llm/loop.go`, `internal/llm/agent.go` |

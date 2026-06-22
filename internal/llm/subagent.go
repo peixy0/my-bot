@@ -57,21 +57,22 @@ func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task 
 	if r.taskManager == nil {
 		return tasks.Snapshot{}, fmt.Errorf("task manager is nil")
 	}
+	cfg := *r.cfg
 	driver := tasks.FuncDriver(func(taskCtx context.Context, info tasks.TaskInfo, emit *tasks.Emitter) (tasks.Controller, error) {
 		input := make(chan string, 32)
 		innerCtx, cancel := context.WithCancel(taskCtx)
 		ctrl := newAgentTaskController(input, cancel)
 		go func() {
-			taskManager := tasks.NewManager(r.cfg.Tool.MaxOutputChars)
+			taskManager := tasks.NewManager(cfg.Tool.MaxOutputChars)
 			cmdTools := tools.NewCommandToolset(r.rt, taskManager)
 			defer func() {
 				ctx2, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 				defer cancel()
 				_ = taskManager.Shutdown(ctx2)
 			}()
-			reg := NewSubagentRegistry(r.rt, r.skills, r.cfg, cmdTools)
+			reg := NewSubagentRegistry(r.rt, r.skills, &cfg, cmdTools)
 			orch := NewSubagentOrchestrator(reg, emit, input)
-			loop := NewAgentLoop(r.cfg, r.agent.Fork())
+			loop := NewAgentLoop(&cfg, r.agent)
 			err := loop.Run(innerCtx, nil, reg, orch, NewSubagentPrompt(r.skills, r.rt, systemPrompt), task)
 			if err != nil {
 				emit.Output(err.Error())

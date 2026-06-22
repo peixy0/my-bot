@@ -31,12 +31,7 @@ func NewMemory[T any](capacity int) *Memory[T] {
 	return &Memory[T]{ch: make(chan T, capacity)}
 }
 
-func (m *Memory[T]) Publish(ctx context.Context, msg T) (err error) {
-	defer func() {
-		if recover() != nil {
-			err = ErrClosed
-		}
-	}()
+func (m *Memory[T]) Publish(ctx context.Context, msg T) error {
 	select {
 	case m.ch <- msg:
 		return nil
@@ -71,12 +66,7 @@ func (m *Memory[T]) TryReceive() (T, bool) {
 	}
 }
 
-func (m *Memory[T]) TryPublish(msg T) (ok bool) {
-	defer func() {
-		if recover() != nil {
-			ok = false
-		}
-	}()
+func (m *Memory[T]) TryPublish(msg T) bool {
 	select {
 	case m.ch <- msg:
 		return true
@@ -86,9 +76,6 @@ func (m *Memory[T]) TryPublish(msg T) (ok bool) {
 }
 
 func (m *Memory[T]) Close() {
-	defer func() {
-		_ = recover()
-	}()
 	close(m.ch)
 }
 

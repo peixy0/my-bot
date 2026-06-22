@@ -95,7 +95,6 @@ func (DropSessionEvent) agentEvent() {}
 
 func (TextInputEvent) messageEvent()   {}
 func (ImageInputEvent) messageEvent()  {}
-func (TextInputEvent) workerEvent()    {}
 func (HeartbeatEvent) workerEvent()    {}
 func (CronEvent) workerEvent()         {}
 func (NewSessionEvent) workerEvent()   {}
@@ -103,3 +102,14 @@ func (ConfigQueryEvent) workerEvent()  {}
 func (ConfigChangeEvent) workerEvent() {}
 func (DumpCommand) workerEvent()       {}
 func (ResumeCommand) workerEvent()     {}
+
+// QueuedInputEvent is used by the /queue command to wrap user input
+// into a worker event that will be processed when the current work completes.
+type QueuedInputEvent struct {
+	ChatID    string
+	MessageID string
+	Message   string
+	Sender    Outbound
+}
+
+func (QueuedInputEvent) workerEvent() {}

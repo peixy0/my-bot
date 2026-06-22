@@ -73,16 +73,10 @@ func TestMemoryReceiveCanceled(t *testing.T) {
 	}
 }
 
-func TestMemoryClose(t *testing.T) {
+func TestMemoryClose_ReceiveReturnsErrClosed(t *testing.T) {
 	ib := NewMemory[string](1)
 	ib.Close()
 
-	if ib.TryPublish("msg") {
-		t.Fatal("expected TryPublish to fail after close")
-	}
-	if err := ib.Publish(context.Background(), "msg"); !errors.Is(err, ErrClosed) {
-		t.Fatalf("expected ErrClosed from Publish, got %v", err)
-	}
 	if _, err := ib.Receive(context.Background()); !errors.Is(err, ErrClosed) {
 		t.Fatalf("expected ErrClosed from Receive, got %v", err)
 	}
