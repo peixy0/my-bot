@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"net/url"
@@ -26,9 +27,10 @@ func NewFetcher(rt runtime.Runtime, proxyURL string, maxOutputChars int) *Fetche
 	if proxyURL != "" {
 		u, err := url.Parse(proxyURL)
 		if err != nil {
-			panic(fmt.Sprintf("invalid fetch proxy %q: %v", proxyURL, err))
+			slog.Warn("invalid fetch proxy, ignoring", "proxy", proxyURL, "err", err)
+		} else {
+			transport.Proxy = http.ProxyURL(u)
 		}
-		transport.Proxy = http.ProxyURL(u)
 	}
 	return &Fetcher{
 		client: &http.Client{
@@ -57,7 +59,7 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (ToolResult, error) 
 		return ToolResult{}, fmt.Errorf("request failed with status code: %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxHTTPBodySize))
 	if err != nil {
 		return ToolResult{}, err
 	}

@@ -54,12 +54,12 @@ func TestHumanInputOrchestrator_DrainInLoopInputTextOnly(t *testing.T) {
 	}
 
 	inputMsg := msgs[1]
-	if inputMsg["role"] != "user" {
-		t.Errorf("expected in-loop input role=user, got %v", inputMsg["role"])
+	if inputMsg.Role != "user" {
+		t.Errorf("expected in-loop input role=user, got %v", inputMsg.Role)
 	}
-	content, ok := inputMsg["content"].(string)
+	content, ok := inputMsg.Content.(string)
 	if !ok {
-		t.Fatalf("expected text content, got %T", inputMsg["content"])
+		t.Fatalf("expected text content, got %T", inputMsg.Content)
 	}
 	if !strings.Contains(content, "stop doing that") || !strings.Contains(content, "do this instead") {
 		t.Fatalf("expected drained text inputs in content, got %q", content)
@@ -86,12 +86,12 @@ func TestHumanInputOrchestrator_DrainInLoopInputWithImageUsesMultipart(t *testin
 	}
 
 	inputMsg := msgs[1]
-	if inputMsg["role"] != "user" {
-		t.Errorf("expected in-loop input role=user, got %v", inputMsg["role"])
+	if inputMsg.Role != "user" {
+		t.Errorf("expected in-loop input role=user, got %v", inputMsg.Role)
 	}
-	content, ok := inputMsg["content"].([]map[string]any)
+	content, ok := inputMsg.Content.([]map[string]any)
 	if !ok {
-		t.Fatalf("expected multimodal content, got %T", inputMsg["content"])
+		t.Fatalf("expected multimodal content, got %T", inputMsg.Content)
 	}
 	if len(content) != 2 {
 		t.Fatalf("expected text plus image content, got %d parts", len(content))
@@ -296,7 +296,7 @@ type echoTaskClient struct{}
 func (c *echoTaskClient) Complete(ctx context.Context, req CompletionRequest) (CompletionResponse, error) {
 	content := ""
 	if len(req.Messages) > 0 {
-		content, _ = req.Messages[len(req.Messages)-1]["content"].(string)
+		content, _ = req.Messages[len(req.Messages)-1].Content.(string)
 	}
 	result := "result:" + content
 	req.OnContentDelta(ctx, result)
@@ -314,7 +314,7 @@ func TestRunDispatch_UnknownTool(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}
-	content, _ := msgs[0]["content"].(string)
+	content, _ := msgs[0].Content.(string)
 	if content == "" {
 		t.Error("expected error content for unknown tool")
 	}
@@ -341,19 +341,19 @@ func TestRunDispatch_ImageToolInjectsMultimodalUserMessage(t *testing.T) {
 	if len(msgs) != 2 {
 		t.Fatalf("expected tool reply plus injected user multimodal message, got %d", len(msgs))
 	}
-	if msgs[0]["role"] != "tool" {
+	if msgs[0].Role != "tool" {
 		t.Fatalf("expected first message role=tool, got %#v", msgs[0])
 	}
-	toolContent, _ := msgs[0]["content"].(string)
+	toolContent, _ := msgs[0].Content.(string)
 	if !strings.Contains(toolContent, "non-text content") {
 		t.Fatalf("expected tool placeholder text, got %q", toolContent)
 	}
-	if msgs[1]["role"] != "user" {
+	if msgs[1].Role != "user" {
 		t.Fatalf("expected second message role=user, got %#v", msgs[1])
 	}
-	content, ok := msgs[1]["content"].([]map[string]any)
+	content, ok := msgs[1].Content.([]map[string]any)
 	if !ok {
-		t.Fatalf("expected multimodal content, got %T", msgs[1]["content"])
+		t.Fatalf("expected multimodal content, got %T", msgs[1].Content)
 	}
 	if len(content) != 2 {
 		t.Fatalf("expected text preface plus image block, got %d parts", len(content))
@@ -390,10 +390,10 @@ func TestRunDispatch_MultipleToolsAppendFollowupsAfterAllToolReplies(t *testing.
 	if len(msgs) != 3 {
 		t.Fatalf("expected two tool replies and one follow-up user message, got %d", len(msgs))
 	}
-	if msgs[0]["role"] != "tool" || msgs[1]["role"] != "tool" {
+	if msgs[0].Role != "tool" || msgs[1].Role != "tool" {
 		t.Fatalf("expected tool replies first, got %#v %#v", msgs[0], msgs[1])
 	}
-	if msgs[2]["role"] != "user" {
+	if msgs[2].Role != "user" {
 		t.Fatalf("expected user follow-up after all tool replies, got %#v", msgs[2])
 	}
 }

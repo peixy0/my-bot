@@ -25,7 +25,7 @@ func (r *HostRuntime) Truncate(ctx context.Context, text string, limit int) stri
 }
 
 func (r *HostRuntime) Execute(ctx context.Context, command string) (ExecResult, error) {
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	cmd := exec.CommandContext(ctx, "bash", "-l", "-c", command)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -44,7 +44,7 @@ func (r *HostRuntime) Execute(ctx context.Context, command string) (ExecResult, 
 }
 
 func (r *HostRuntime) Spawn(ctx context.Context, command string) (*ProcessHandle, error) {
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	cmd := exec.CommandContext(ctx, "bash", "-l", "-c", command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

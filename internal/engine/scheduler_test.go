@@ -365,8 +365,8 @@ func TestWorkerResumeLoadsConversation(t *testing.T) {
 	out := &captureOutbound{}
 	id := uuid.NewString()
 	messages := []llm.Message{
-		{"role": "user", "content": "old question"},
-		{"role": "assistant", "content": "old answer"},
+		{Role: "user", Content: "old question"},
+		{Role: "assistant", Content: "old answer"},
 	}
 	data, err := json.Marshal(messages)
 	if err != nil {
@@ -395,7 +395,7 @@ func TestWorkerResumeLoadsConversation(t *testing.T) {
 	if err := json.Unmarshal(dumped, &got); err != nil {
 		t.Fatalf("unmarshal dumped conversation: %v", err)
 	}
-	if len(got) != 2 || got[0]["content"] != "old question" || got[1]["content"] != "old answer" {
+	if len(got) != 2 || got[0].Content != "old question" || got[1].Content != "old answer" {
 		t.Fatalf("unexpected resumed messages: %#v", got)
 	}
 }

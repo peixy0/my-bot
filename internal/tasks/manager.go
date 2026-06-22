@@ -11,6 +11,7 @@ type Manager struct {
 	rootCtx        context.Context
 	rootCancel     context.CancelFunc
 	inbox          chan any
+	shutdownDone   chan struct{}
 }
 
 type startReq struct {
@@ -100,6 +101,7 @@ func NewManager(maxOutputChars int) *Manager {
 		rootCtx:        rootCtx,
 		rootCancel:     rootCancel,
 		inbox:          make(chan any, 256),
+		shutdownDone:   make(chan struct{}),
 	}
 	go m.loop()
 	return m
@@ -109,6 +111,7 @@ func (m *Manager) loop() {
 	tasks := make(map[string]*taskState)
 	order := make([]string, 0, 16)
 	nextID := 0
+	shuttingDown := false
 	for msg := range m.inbox {
 		switch req := msg.(type) {
 		case startReq:
@@ -173,6 +176,9 @@ func (m *Manager) loop() {
 				task.status = StatusExited
 			}
 			close(task.done)
+			if shuttingDown {
+				m.maybeSignalShutdownDone(tasks)
+			}
 		case getReq:
 			task := tasks[req.taskID]
 			if task == nil {
@@ -243,6 +249,7 @@ func (m *Manager) loop() {
 			req.resp <- nil
 			close(req.resp)
 		case shutdownReq:
+			shuttingDown = true
 			for _, id := range order {
 				task := tasks[id]
 				if task == nil || task.status != StatusRunning {
@@ -254,6 +261,7 @@ func (m *Manager) loop() {
 					_ = task.controller.Kill()
 				}
 			}
+			m.maybeSignalShutdownDone(tasks)
 			req.resp <- struct{}{}
 			close(req.resp)
 		case stopReq:
@@ -261,6 +269,19 @@ func (m *Manager) loop() {
 			close(req.resp)
 			return
 		}
+	}
+}
+
+func (m *Manager) maybeSignalShutdownDone(tasks map[string]*taskState) {
+	for _, task := range tasks {
+		if task.status == StatusRunning {
+			return
+		}
+	}
+	select {
+	case <-m.shutdownDone:
+	default:
+		close(m.shutdownDone)
 	}
 }
 
@@ -413,26 +434,10 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	for {
-		snaps, err := m.List(ctx)
-		if err != nil {
-			return err
-		}
-		running := false
-		for _, snap := range snaps {
-			if snap.Status == StatusRunning {
-				running = true
-				break
-			}
-		}
-		if !running {
-			break
-		}
-		select {
-		case <-time.After(10 * time.Millisecond):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+	select {
+	case <-m.shutdownDone:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 	m.rootCancel()
 	stopResp := make(chan struct{}, 1)

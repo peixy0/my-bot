@@ -44,7 +44,7 @@ func (w *WebSearch) Search(ctx context.Context, query string, page int) ([]Searc
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxHTTPBodySize))
 	if err != nil {
 		return nil, err
 	}

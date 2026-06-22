@@ -111,8 +111,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		ticker := time.NewTicker(pingInterval)
 		defer ticker.Stop()
-		for range ticker.C {
-			if err := outbound.Ping(pongTimeout); err != nil {
+		for {
+			select {
+			case <-ticker.C:
+				if err := outbound.Ping(pongTimeout); err != nil {
+					return
+				}
+			case <-r.Context().Done():
 				return
 			}
 		}

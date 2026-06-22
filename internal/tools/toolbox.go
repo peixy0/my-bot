@@ -11,6 +11,8 @@ import (
 	"my-bot/internal/runtime"
 )
 
+const maxHTTPBodySize = 1 << 20
+
 type DefaultToolset struct {
 	rt        runtime.Runtime
 	skills    *SkillLoader
@@ -37,7 +39,7 @@ func (d *DefaultToolset) Register(r *Registry) {
 	d.registerWriteFile(r)
 	d.registerAppendFile(r)
 	d.registerEditFile(r)
-	d.registerApplyPatch(r)
+
 	d.registerGrep(r)
 	d.registerGlob(r)
 	if d.cfg.Vision.Enabled {
@@ -271,38 +273,6 @@ func (d *DefaultToolset) registerEditFile(r *Registry) {
 			return ToolResult{}, err
 		}
 		return TextResult(fmt.Sprintf("edited %s", p.Filename)), nil
-	})
-}
-
-func (d *DefaultToolset) registerApplyPatch(r *Registry) {
-	r.Register(ToolSchema{
-		Name:        "apply_patch",
-		Description: "Apply a unified diff patch to one or more files in the workspace.\n\nUse this when you already have a patch in unified diff format. Prefer edit_file() for changes you are constructing from scratch.",
-		ParameterDesc: (map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"patch": map[string]any{
-					"type":        "string",
-					"description": "A unified diff patch string (output of git diff or diff -u). Must include --- a/ and +++ b/ file headers. May span multiple files.",
-				},
-			},
-			"required": []string{"patch"},
-		}),
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
-		var p struct {
-			Patch string `json:"patch"`
-		}
-		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, fmt.Errorf("parse apply_patch args: %w", err)
-		}
-		res, err := d.rt.Execute(ctx, fmt.Sprintf("patch -p1 <<'PATCH'\n%s\nPATCH", p.Patch))
-		if err != nil {
-			return ToolResult{}, err
-		}
-		if res.ReturnCode != 0 {
-			return ToolResult{}, fmt.Errorf("%s", res.Stderr)
-		}
-		return TextResult(res.Stdout), nil
 	})
 }
 

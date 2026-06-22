@@ -65,7 +65,9 @@ func (b *promptBase) compose(ctx context.Context, sections ...string) string {
 	return sb.String()
 }
 
-var baseSections = []string{"PERSONA.md", "RULES.md", "CONTEXT.md", "TOOLS.md", "USER.md"}
+func baseSections() []string {
+	return []string{"PERSONA.md", "RULES.md", "CONTEXT.md", "TOOLS.md", "USER.md"}
+}
 
 type MainPrompt struct{ promptBase }
 
@@ -74,7 +76,7 @@ func NewMainPrompt(skills *tools.SkillLoader, rt runtime.Runtime) *MainPrompt {
 }
 
 func (p *MainPrompt) Build(ctx context.Context) string {
-	return p.compose(ctx, baseSections...)
+	return p.compose(ctx, baseSections()...)
 }
 
 type HeartbeatPrompt struct{ promptBase }
@@ -84,7 +86,7 @@ func NewHeartbeatPrompt(skills *tools.SkillLoader, rt runtime.Runtime) *Heartbea
 }
 
 func (p *HeartbeatPrompt) Build(ctx context.Context) string {
-	return p.compose(ctx, append(baseSections, "HEARTBEAT.md")...)
+	return p.compose(ctx, append(baseSections(), "HEARTBEAT.md")...)
 }
 
 type CronPrompt struct{ promptBase }
@@ -94,7 +96,7 @@ func NewCronPrompt(skills *tools.SkillLoader, rt runtime.Runtime) *CronPrompt {
 }
 
 func (p *CronPrompt) Build(ctx context.Context) string {
-	return p.compose(ctx, append(baseSections, "CRON.md")...)
+	return p.compose(ctx, append(baseSections(), "CRON.md")...)
 }
 
 type SubagentPrompt struct {

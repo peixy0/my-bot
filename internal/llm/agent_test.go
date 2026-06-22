@@ -53,13 +53,7 @@ func (m *mockClient) Complete(ctx context.Context, req CompletionRequest) (Compl
 
 func cloneMessages(messages []Message) []Message {
 	out := make([]Message, len(messages))
-	for i, msg := range messages {
-		c := make(Message, len(msg))
-		for k, v := range msg {
-			c[k] = v
-		}
-		out[i] = c
-	}
+	copy(out, messages)
 	return out
 }
 
@@ -144,7 +138,7 @@ func TestAgent_ToolCallDispatch(t *testing.T) {
 		t.Fatalf("expected second call to include prior assistant message, got %+v", client.calls)
 	}
 	assistantMsg := client.calls[1].messages[2]
-	if assistantMsg["reasoning_content"] != "private chain" {
+	if assistantMsg.ReasoningContent != "private chain" {
 		t.Fatalf("expected reasoning_content in replayed assistant message, got %#v", assistantMsg)
 	}
 }
@@ -219,7 +213,7 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 
 	foundAnchor := false
 	for _, msg := range conv.Messages {
-		if content, ok := msg["content"].(string); ok {
+		if content, ok := msg.Content.(string); ok {
 			if len(content) > 0 && content[:min(len(content), 16)] == "[CONTEXT ANCHOR]" {
 				foundAnchor = true
 			}
@@ -248,14 +242,14 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 	if len(compressCall.messages) != 3 {
 		t.Fatalf("expected system + evicted user + instruction, got %d messages", len(compressCall.messages))
 	}
-	if compressCall.messages[0]["role"] != "system" || compressCall.messages[0]["content"] != "sys" {
+	if compressCall.messages[0].Role != "system" || compressCall.messages[0].Content != "sys" {
 		t.Fatalf("expected compression to reuse active system prompt, got %#v", compressCall.messages[0])
 	}
-	if compressCall.messages[1]["role"] != "user" || compressCall.messages[1]["content"] != "start" {
+	if compressCall.messages[1].Role != "user" || compressCall.messages[1].Content != "start" {
 		t.Fatalf("expected original user message in compression call, got %#v", compressCall.messages[1])
 	}
-	instruction, _ := compressCall.messages[2]["content"].(string)
-	if compressCall.messages[2]["role"] != "user" || instruction == "" {
+	instruction, _ := compressCall.messages[2].Content.(string)
+	if compressCall.messages[2].Role != "user" || instruction == "" {
 		t.Fatalf("expected final compression instruction, got %#v", compressCall.messages[2])
 	}
 
@@ -263,13 +257,13 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 	if len(finalCall.messages) < 4 {
 		t.Fatalf("expected final call to include anchor, assistant tool call, and tool result, got %d messages", len(finalCall.messages))
 	}
-	if finalCall.messages[1]["role"] != "user" {
+	if finalCall.messages[1].Role != "user" {
 		t.Fatalf("expected anchor as first conversation message, got %#v", finalCall.messages[1])
 	}
-	if finalCall.messages[2]["role"] != "assistant" || finalCall.messages[2]["tool_calls"] == nil {
+	if finalCall.messages[2].Role != "assistant" || finalCall.messages[2].ToolCalls == nil {
 		t.Fatalf("expected retained assistant tool call before tool result, got %#v", finalCall.messages[2])
 	}
-	if finalCall.messages[3]["role"] != "tool" || finalCall.messages[3]["tool_call_id"] != "c1" {
+	if finalCall.messages[3].Role != "tool" || finalCall.messages[3].ToolCallID != "c1" {
 		t.Fatalf("expected tool result after retained assistant tool call, got %#v", finalCall.messages[3])
 	}
 }

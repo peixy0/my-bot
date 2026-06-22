@@ -4,7 +4,26 @@ import (
 	"context"
 )
 
-type Message = map[string]any
+type Message struct {
+	Role             string          `json:"role"`
+	Content          any             `json:"content,omitempty"`
+	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCallInMsg `json:"tool_calls,omitempty"`
+	ToolCallID       string          `json:"tool_call_id,omitempty"`
+}
+
+type ToolCallInMsg struct {
+	ID       string       `json:"id"`
+	Type     string       `json:"type"`
+	Function ToolCallFunc `json:"function"`
+}
+
+type ToolCallFunc struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type ContentPart = map[string]any
 
 type ToolCall struct {
 	ID   string
@@ -46,47 +65,47 @@ func NewConversation() *Conversation {
 }
 
 func userMessage(content string) Message {
-	return Message{"role": "user", "content": content}
+	return Message{Role: "user", Content: content}
 }
 
 func assistantMessage(content, reasoningContent string, toolCalls []ToolCall) Message {
-	msg := Message{"role": "assistant"}
+	msg := Message{Role: "assistant"}
 	if content != "" {
-		msg["content"] = content
+		msg.Content = content
 	}
 	if reasoningContent != "" {
-		msg["reasoning_content"] = reasoningContent
+		msg.ReasoningContent = reasoningContent
 	}
 	if len(toolCalls) > 0 {
-		calls := make([]map[string]any, len(toolCalls))
+		calls := make([]ToolCallInMsg, len(toolCalls))
 		for i, tc := range toolCalls {
-			calls[i] = map[string]any{
-				"id":   tc.ID,
-				"type": "function",
-				"function": map[string]any{
-					"name":      tc.Name,
-					"arguments": string(tc.Args),
+			calls[i] = ToolCallInMsg{
+				ID:   tc.ID,
+				Type: "function",
+				Function: ToolCallFunc{
+					Name:      tc.Name,
+					Arguments: string(tc.Args),
 				},
 			}
 		}
-		msg["tool_calls"] = calls
+		msg.ToolCalls = calls
 	}
 	return msg
 }
 
 func toolResultMessage(callID, content string) Message {
 	return Message{
-		"role":         "tool",
-		"tool_call_id": callID,
-		"content":      content,
+		Role:       "tool",
+		ToolCallID: callID,
+		Content:    content,
 	}
 }
 
-func userBlocksMessage(text string, blocks []map[string]any) Message {
-	parts := make([]map[string]any, 0, len(blocks)+1)
+func userBlocksMessage(text string, blocks []ContentPart) Message {
+	parts := make([]ContentPart, 0, len(blocks)+1)
 	if text != "" {
-		parts = append(parts, map[string]any{"type": "text", "text": text})
+		parts = append(parts, ContentPart{"type": "text", "text": text})
 	}
 	parts = append(parts, blocks...)
-	return Message{"role": "user", "content": parts}
+	return Message{Role: "user", Content: parts}
 }

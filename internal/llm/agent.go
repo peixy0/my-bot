@@ -44,7 +44,7 @@ func (a *Agent) Run(
 	}
 
 	systemMessages := []Message{
-		{"role": "system", "content": systemPrompt},
+		{Role: "system", Content: systemPrompt},
 	}
 
 	for {
@@ -138,7 +138,7 @@ func (a *Agent) Compress(ctx context.Context, cfg *config.Config, systemPrompt s
 
 	anchor := strings.TrimSpace(resp.Content)
 	conv.Messages = []Message{
-		{"role": "user", "content": "[CONTEXT ANCHOR]\n" + anchor},
+		{Role: "user", Content: "[CONTEXT ANCHOR]\n" + anchor},
 		retained,
 	}
 	conv.TotalTokens = resp.TotalTokens
@@ -178,7 +178,7 @@ const compressionInstruction = "You are compressing context for an autonomous AI
 
 func buildCompressionMessages(systemPrompt string, messages []Message) []Message {
 	out := make([]Message, 0, len(messages)+2)
-	out = append(out, Message{"role": "system", "content": systemPrompt})
+	out = append(out, Message{Role: "system", Content: systemPrompt})
 	out = append(out, messages...)
 	out = append(out, userMessage(compressionInstruction))
 	return out

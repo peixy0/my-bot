@@ -211,6 +211,7 @@ func (w *ConversationWorker) processText(ctx context.Context, ev events.TextInpu
 
 func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageInputEvent) error {
 	if !w.VisionSupported() {
+		ev.Sender.Send(ctx, "Image processing is disabled for the current model")
 		return nil
 	}
 	slog.Debug("image input", "chat", w.chatID, "msg_id", ev.MessageID, "mime", ev.MIMEType, "bytes", len(ev.ImageData))

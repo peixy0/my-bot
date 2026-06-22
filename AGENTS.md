@@ -239,7 +239,7 @@ Continue propagating `io.ReadAll` and streaming parse errors at I/O boundaries. 
 - All major components accept interfaces, not concrete types.
 - Orchestrators are mode-specific collaborators constructed at worker call sites and wired through the `Orchestrator` interface.
 - `Runtime` abstracts host vs container execution.
-- Avoid adding direct dependencies between sibling packages under `internal/`. The one current edge worth flagging: `messaging` imports `tools` for `ToolRegistrar` — moving that interface to `events` is queued for cleanup.
+- Avoid adding direct dependencies between sibling packages under `internal/`. The one current edge worth flagging: `messaging` imports `tools` for `ToolRegistrar`.
 
 ## Build & Run
 
