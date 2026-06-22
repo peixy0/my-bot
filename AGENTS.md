@@ -52,8 +52,10 @@ internal/
     runtime.go           ← Runtime interface (Execute, Spawn, ReadFile, etc.)
     host.go              ← local bash execution
     container.go         ← podman/docker execution
+  toolkit/
+    types.go             ← ToolSchema, ToolResult, ToolHandler protocol types + ToolRegistrar, ToolRegistry interfaces
   tools/
-    registry.go          ← Registry, Toolset, ToolRegistrar interfaces
+    registry.go          ← Registry (implements ToolRegistry), Toolset interface
     toolbox.go           ← DefaultToolset (8+ core tools)
     command.go           ← CommandToolset task APIs (run_command, await_task, etc.)
     skill.go             ← SkillLoader (frontmatter .md files)
@@ -100,7 +102,7 @@ Every long-lived goroutine and what it owns. This is the single source of truth 
 | `Runtime` | `runtime` | Execution environment abstraction |
 | `Outbound` | `events` | Send messages back to user |
 | `Toolset` | `tools` | Registers tools into a Registry |
-| `ToolRegistrar` | `tools` | Optional interface for Outbound impls that add platform-specific tools |
+| `ToolRegistrar` | `toolkit` | Optional interface for Outbound impls that add platform-specific tools |
 
 ### Orchestrator Variants
 
@@ -165,7 +167,7 @@ These are the load-bearing invariants that an earlier draft expressed via inline
 - Implement `tools.Toolset`, call `r.Register(schema, handler)` in `Register()`.
 - Tool schemas use OpenAI function-calling format (JSON Schema).
 - Tool handlers: `func(ctx context.Context, args []byte) (ToolResult, error)`.
-- Platform-specific tools: implement `ToolRegistrar` on your `Outbound`.
+- Platform-specific tools: implement `toolkit.ToolRegistrar` on your `Outbound`.
 - New tools must be safe for the current serial-dispatch model. Document any state they share with `tasks.Manager`.
 
 ### Event System
@@ -198,14 +200,14 @@ Continue propagating `io.ReadAll` and streaming parse errors at I/O boundaries. 
 2. Schema: JSON Schema construction.
 3. Handler: always unmarshal args with `json.Unmarshal`, return `(ToolResult, error)`.
 4. Register in the appropriate toolset's `Register()` method.
-5. For platform-specific tools, implement `ToolRegistrar` on the `Outbound`.
+5. For platform-specific tools, implement `toolkit.ToolRegistrar` on the `Outbound`.
 6. Confirm it's safe under serial dispatch; document any shared state with `tasks.Manager`.
 
 ### Adding a New Messaging Platform
 1. Create a subpackage under `internal/messaging/<platform>/`.
 2. Implement `events.Outbound` (Send, StartThinking, EndThinking) on a type in that package.
 3. Implement `messaging.Inbound` (Run) on an inbound type that pushes events into the queue.
-4. Optionally implement `tools.ToolRegistrar` for platform-specific tools (e.g. reactions, uploads).
+4. Optionally implement `toolkit.ToolRegistrar` for platform-specific tools (e.g. reactions, uploads).
 5. Wire in `cmd/bot/main.go` — keep the integration optional behind a config flag, as Feishu is.
 
 ### Adding a New LLM Provider
@@ -239,7 +241,7 @@ Continue propagating `io.ReadAll` and streaming parse errors at I/O boundaries. 
 - All major components accept interfaces, not concrete types.
 - Orchestrators are mode-specific collaborators constructed at worker call sites and wired through the `Orchestrator` interface.
 - `Runtime` abstracts host vs container execution.
-- Avoid adding direct dependencies between sibling packages under `internal/`. The one current edge worth flagging: `messaging` imports `tools` for `ToolRegistrar`.
+- Avoid adding direct dependencies between sibling packages under `internal/`. The `toolkit` package holds shared protocol types (`ToolSchema`, `ToolHandler`, `ToolResult`) and interfaces (`ToolRegistrar`, `ToolRegistry`) that `tools`, `messaging`, and `llm` all depend on. Sibling packages must not import each other directly; shared contracts go in `toolkit`.
 
 ## Build & Run
 

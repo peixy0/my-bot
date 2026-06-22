@@ -1,20 +1,19 @@
 package tools
 
 import (
-	"context"
 	"fmt"
 	"sort"
 
+	"my-bot/internal/toolkit"
 	"my-bot/internal/util"
 )
 
-type ToolResult struct {
-	Text   string
-	Blocks []map[string]any // non-nil = multimodal content blocks
-}
+type ToolResult = toolkit.ToolResult
+type ToolSchema = toolkit.ToolSchema
+type ToolHandler = toolkit.ToolHandler
 
-func TextResult(s string) ToolResult            { return ToolResult{Text: s} }
-func ImageResult(b []map[string]any) ToolResult { return ToolResult{Blocks: b} }
+var TextResult = toolkit.TextResult
+var ImageResult = toolkit.ImageResult
 
 func MarshalResult(v any) string {
 	b, err := util.ToJSON(v)
@@ -24,32 +23,19 @@ func MarshalResult(v any) string {
 	return string(b)
 }
 
-type ToolHandler func(ctx context.Context, args []byte) (ToolResult, error)
-
-type ToolSchema struct {
-	Name          string
-	Description   string
-	ParameterDesc map[string]any
-	Parallel      bool
-}
-
-type ToolRegistrar interface {
-	RegisterTools(r *Registry)
-}
-
 type Registry struct {
-	schemas  map[string]ToolSchema
-	handlers map[string]ToolHandler
+	schemas  map[string]toolkit.ToolSchema
+	handlers map[string]toolkit.ToolHandler
 }
 
 func NewRegistry() *Registry {
 	return &Registry{
-		schemas:  make(map[string]ToolSchema),
-		handlers: make(map[string]ToolHandler),
+		schemas:  make(map[string]toolkit.ToolSchema),
+		handlers: make(map[string]toolkit.ToolHandler),
 	}
 }
 
-func (r *Registry) Register(schema ToolSchema, handler ToolHandler) {
+func (r *Registry) Register(schema toolkit.ToolSchema, handler toolkit.ToolHandler) {
 	r.schemas[schema.Name] = schema
 	r.handlers[schema.Name] = handler
 }
@@ -62,7 +48,7 @@ func (r *Registry) RegisterToolset(t Toolset) {
 	t.Register(r)
 }
 
-func (r *Registry) Handler(name string) (ToolHandler, bool) {
+func (r *Registry) Handler(name string) (toolkit.ToolHandler, bool) {
 	h, ok := r.handlers[name]
 	return h, ok
 }
@@ -72,7 +58,7 @@ func (r *Registry) IsParallel(name string) bool {
 	return ok && s.Parallel
 }
 
-func (r *Registry) Schema(name string) (ToolSchema, bool) {
+func (r *Registry) Schema(name string) (toolkit.ToolSchema, bool) {
 	s, ok := r.schemas[name]
 	return s, ok
 }

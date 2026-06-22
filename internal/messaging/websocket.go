@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"my-bot/internal/runtime"
-	"my-bot/internal/tools"
+	"my-bot/internal/toolkit"
 
 	"github.com/gorilla/websocket"
 )
@@ -77,8 +77,8 @@ func (o *WSOutbound) EndThinking(ctx context.Context) {
 	}
 }
 
-func (o *WSOutbound) RegisterTools(r *tools.Registry) {
-	r.Register(tools.ToolSchema{
+func (o *WSOutbound) RegisterTools(r toolkit.ToolRegistry) {
+	r.Register(toolkit.ToolSchema{
 		Name:        "send_image",
 		Description: "Send an image file to the WebSocket client.",
 		ParameterDesc: (map[string]any{
@@ -88,16 +88,16 @@ func (o *WSOutbound) RegisterTools(r *tools.Registry) {
 			},
 			"required": []string{"image_path"},
 		}),
-	}, func(ctx context.Context, args []byte) (tools.ToolResult, error) {
+	}, func(ctx context.Context, args []byte) (toolkit.ToolResult, error) {
 		var p struct {
 			ImagePath string `json:"image_path"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return tools.ToolResult{}, fmt.Errorf("parse send_image args: %w", err)
+			return toolkit.ToolResult{}, fmt.Errorf("parse send_image args: %w", err)
 		}
 		data, err := o.rt.ReadRawBytes(ctx, p.ImagePath)
 		if err != nil {
-			return tools.ToolResult{}, err
+			return toolkit.ToolResult{}, err
 		}
 		mimeType := http.DetectContentType(data)
 		b64 := base64.StdEncoding.EncodeToString(data)
@@ -107,9 +107,9 @@ func (o *WSOutbound) RegisterTools(r *tools.Registry) {
 			"data":      b64,
 			"mime_type": mimeType,
 		}); err != nil {
-			return tools.ToolResult{}, err
+			return toolkit.ToolResult{}, err
 		}
-		return tools.TextResult(fmt.Sprintf("sent %s", p.ImagePath)), nil
+		return toolkit.TextResult(fmt.Sprintf("sent %s", p.ImagePath)), nil
 	})
 }
 
