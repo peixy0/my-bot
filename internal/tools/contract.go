@@ -1,4 +1,4 @@
-package toolkit
+package tools
 
 import "context"
 
@@ -21,8 +21,4 @@ type ToolSchema struct {
 
 type ToolRegistry interface {
 	Register(schema ToolSchema, handler ToolHandler)
-}
-
-type ToolRegistrar interface {
-	RegisterTools(r ToolRegistry)
 }

@@ -5,7 +5,6 @@ import (
 	"my-bot/internal/events"
 	"my-bot/internal/runtime"
 	"my-bot/internal/tasks"
-	"my-bot/internal/toolkit"
 	"my-bot/internal/tools"
 )
 
@@ -47,9 +46,9 @@ func registerBaseTools(reg *tools.Registry, rt runtime.Runtime, skills *tools.Sk
 }
 
 func registerOutboundTools(reg *tools.Registry, sender events.Outbound) {
-	registrar, ok := sender.(toolkit.ToolRegistrar)
+	toolset, ok := sender.(tools.Toolset)
 	if !ok {
 		return
 	}
-	registrar.RegisterTools(reg)
+	toolset.Register(reg)
 }

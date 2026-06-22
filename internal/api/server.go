@@ -12,12 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
 	"my-bot/internal/events"
 	"my-bot/internal/inbox"
-	"my-bot/internal/messaging"
+	messaging "my-bot/internal/messaging/websocket"
 	"my-bot/internal/runtime"
+
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 )
 
 const (
@@ -105,7 +106,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	_ = conn.SetReadDeadline(time.Now().Add(pingInterval + pongTimeout))
 
 	chatID := s.nextChatID()
-	outbound := messaging.NewWSOutbound(conn, chatID, s.rt)
+	outbound := messaging.NewOutbound(conn, chatID, s.rt)
 	outbound.Connected(r.Context())
 
 	go func() {

@@ -4,16 +4,8 @@ import (
 	"fmt"
 	"sort"
 
-	"my-bot/internal/toolkit"
 	"my-bot/internal/util"
 )
-
-type ToolResult = toolkit.ToolResult
-type ToolSchema = toolkit.ToolSchema
-type ToolHandler = toolkit.ToolHandler
-
-var TextResult = toolkit.TextResult
-var ImageResult = toolkit.ImageResult
 
 func MarshalResult(v any) string {
 	b, err := util.ToJSON(v)
@@ -24,18 +16,18 @@ func MarshalResult(v any) string {
 }
 
 type Registry struct {
-	schemas  map[string]toolkit.ToolSchema
-	handlers map[string]toolkit.ToolHandler
+	schemas  map[string]ToolSchema
+	handlers map[string]ToolHandler
 }
 
 func NewRegistry() *Registry {
 	return &Registry{
-		schemas:  make(map[string]toolkit.ToolSchema),
-		handlers: make(map[string]toolkit.ToolHandler),
+		schemas:  make(map[string]ToolSchema),
+		handlers: make(map[string]ToolHandler),
 	}
 }
 
-func (r *Registry) Register(schema toolkit.ToolSchema, handler toolkit.ToolHandler) {
+func (r *Registry) Register(schema ToolSchema, handler ToolHandler) {
 	r.schemas[schema.Name] = schema
 	r.handlers[schema.Name] = handler
 }
@@ -48,7 +40,7 @@ func (r *Registry) RegisterToolset(t Toolset) {
 	t.Register(r)
 }
 
-func (r *Registry) Handler(name string) (toolkit.ToolHandler, bool) {
+func (r *Registry) Handler(name string) (ToolHandler, bool) {
 	h, ok := r.handlers[name]
 	return h, ok
 }
@@ -58,7 +50,7 @@ func (r *Registry) IsParallel(name string) bool {
 	return ok && s.Parallel
 }
 
-func (r *Registry) Schema(name string) (toolkit.ToolSchema, bool) {
+func (r *Registry) Schema(name string) (ToolSchema, bool) {
 	s, ok := r.schemas[name]
 	return s, ok
 }
