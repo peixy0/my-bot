@@ -6,8 +6,8 @@ An event-driven AI agent framework in Go. Connects messaging platforms (Feishu/L
 
 - **Event-driven core.** A single scheduler dispatches inbound events to per-chat workers via channels. State is owned by single goroutines wherever possible — locks are a last resort.
 - **OpenAI-compatible LLM provider.** Chat completions are streamed via raw `net/http` (no vendor SDK).
-- **Composable tools.** Built-in tools for filesystem, shell, web search, fetch, edit, glob, grep, and long-running background processes. Add new tools by implementing a small `Toolset` interface.
-- **Composable prompts.** System prompts assemble from workspace `.md` files (`PERSONA.md`, `RULES.md`, `CONTEXT.md`, `TOOLS.md`, plus per-mode files).
+- **Composable tools.** `DefaultToolset` covers `read_file` / `write_file` / `append_file` / `edit_file` / `grep` / `glob` / `web_search` / `fetch` / `read_image` (when vision is enabled) / `use_skill`; `CommandToolset` covers long-running processes (`run_command` / `get_task` / `await_task` / `list_tasks` / `kill_task` / `write_to_task`); the `agent` / `fleet` subagent toolsets delegate isolated work; platform adapters (`feishu`, `websocket`) add their own `send_image` / `send_file` / `add_reaction` tools. Add new tools by implementing a small `Toolset` interface.
+- **Composable prompts.** System prompts assemble from workspace `.md` files (`USER.md`, `PERSONA.md`, `RULES.md`, `CONTEXT.md`, `TOOLS.md`, plus per-mode files `HEARTBEAT.md` / `CRON.md`). The `SubagentPrompt` is deliberately lean — it loads only `TOOLS.md` plus a caller-supplied block.
 - **Three orchestration modes.** Interactive (with live user interrupts), background (heartbeat / cron), and isolated subagents.
 - **Runtime abstraction.** Tools execute on host bash or in a podman/docker sandbox with no caller changes.
 - **Skills system.** Markdown files with frontmatter become discoverable, on-demand-loadable agent skills.
@@ -25,10 +25,12 @@ llm:
   api_key: sk-...        # your OpenAI-compatible provider's API key
   base_url: https://api.openai.com/v1
   model: gpt-4o
-feishu:
+feishu:                   # Feishu is optional; omit if you don't need it
   app_id: ...
   app_secret: ...
-webui:
+wechat:                   # WeChat iLink bot is optional; defaults to disabled
+  enabled: false
+webui:                    # WebUI defaults to enabled (host 127.0.0.1, port 8017)
   enabled: true
   port: 8017
 EOF
@@ -50,7 +52,8 @@ llm:
   api_key: sk-...
   model: gpt-4o
   temperature: 1.0       # optional
-  top_p: 1.0             # optional
+  top_p: 0.95            # optional (default 0.95)
+  top_k: 0               # optional, only needed for some non-OpenAI providers
 ```
 
 Enable Feishu/Lark:
@@ -73,42 +76,61 @@ webui:
   token: change-me        # optional; gates http://host:port/?token=... and ws://...?token=...
 ```
 
-Other notable sections:
+Other notable sections (defaults shown):
 
 ```yaml
 tool:
-  max_output_chars: 50000    # cap on text payloads returned to the model
-  web_search_api: https://... # enables the web_search tool; empty disables it
-  fetch_proxy: http://...     # optional proxy for the fetch tool
+  max_output_chars: 100000     # cap on text payloads returned to the model
+  web_search_api: ""           # enables the web_search tool; empty disables it
+  fetch_proxy: ""              # optional proxy for the fetch tool
 
 workspace:
-  cwd: ./workspace              # where PERSONA.md / RULES.md / etc. live
-  project_dir: ./dev            # default cwd for read/write/edit tools
+  cwd: ./workspace             # where PERSONA.md / RULES.md / etc. live
+  project_dir: ../             # default cwd for read/write/edit tools
   skills_dir: ./.skills
   crons_dir: ./.cron
-  session_dir: ./.sessions
+  session_dir: ./.session
 
 context:
   auto_compression: true
-  window_tokens: 200000
+  window_tokens: 128000
   max_output_tokens: 16384
+  compression_threshold: 0.7   # fraction of window_tokens that triggers compression
+
+llm:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 0                     # optional, non-OpenAI providers
+  # extra_body:                # passthrough for provider-specific knobs
+  #   chat_template_kwargs:
+  #     enable_thinking: true
+
+models:                        # named presets applied when the chosen model matches
+  Qwen3-32B:
+    temperature: 0.6
+    extra_body: {chat_template_kwargs: {enable_thinking: true}}
 
 heartbeat:
   interval_seconds: 1800
 
 vision:
   enabled: false
-  max_image_bytes: 5242880      # 5 MiB
+  max_image_bytes: 5242880     # 5 MiB
 
-container:                       # tool-execution sandbox
+container:                     # tool-execution sandbox
   enabled: false
-  runtime: podman                # podman | docker
+  runtime: podman              # podman | docker
   name: my-bot-sandbox
 
-sessions:                        # per-chat overrides (keyed by chat id)
+sessions:                      # per-chat overrides (keyed by chat id)
   "oc_xxx":
     llm:
       model: gpt-4o-mini
+
+wechat:                        # WeChat iLink bot (QR login if bot_token is empty)
+  enabled: false
+  # bot_token: ""              # optional: skip QR login on startup
+  # base_url: ""               # optional: override https://ilinkai.weixin.qq.com
 ```
 
 ## Slash Commands
@@ -120,13 +142,21 @@ While chatting with the bot:
 | `/new` | Start a fresh session in this chat |
 | `/drop` | Drop the current session and worker |
 | `/heartbeat [seconds]` | Begin autonomous heartbeat cycles in this chat, optionally overriding `heartbeat.interval_seconds` |
-| `/model <name>` | Switch the active LLM model for the current chat/session |
+| `/model <name>` | Switch the active LLM model for the current chat/session (applies any matching model preset) |
 | `/vision on|off` | Toggle image input support for the current chat/session |
+| `/temperature <0..2>` | Set sampling temperature for the current chat/session |
+| `/top_p <0..1>` | Set top_p for the current chat/session |
+| `/top_k <positive int>` | Set top_k for the current chat/session |
+| `/max_tokens <positive int>` | Set max output tokens for the current chat/session |
+| `/context_window <positive int>` | Set context window size (compression trigger) for the current chat/session |
 | `/queue <text>` | Queue a message to run after the current agent loop finishes |
 | `/dump` | Save the current conversation to a UUID-named session file |
 | `/resume <id>` | Load a saved conversation into the current chat/session |
+| `/session` | Echo the current chat id |
+| `/abort` | Abort the currently running completion (no-op if none) |
 | `/cron load <name>` | Reload cron tasks defined in `.cron/<name>/*.md` |
 | `/cron unload <name>` | Stop a loaded cron job |
+| `/cron trigger <name>` | Fire a cron job immediately without waiting for its schedule |
 | `/cron ls` | List available and loaded cron jobs |
 
 ## Cron Jobs
@@ -166,24 +196,27 @@ The agent discovers skills automatically and loads them on demand via the `use_s
 ## Architecture
 
 ```
-Inbound (Feishu / WebSocket / cron / heartbeat)
-  → AgentEvent → queue (chan)
+Inbound (Feishu / WebSocket / WeChat / cron / heartbeat / subagent)
+  → AgentEvent → shared inbox (chan)
     → Scheduler.dispatch  (single goroutine)
       → ConversationWorker  (per chat, own goroutine)
         → Orchestrator + Agent.Run()  (LLM ↔ tools)
-          → Outbound.Send / SendDelta  (reply to user)
+          → Outbound.Send / SendDelta / SendFinal  (reply to user)
 ```
 
 Key directories:
 
 - `cmd/bot` — entry point and dependency wiring.
-- `internal/config` — YAML configuration (loaded once at startup).
+- `internal/config` — YAML configuration (loaded once at startup); supports per-session overrides and named model presets.
 - `internal/events` — event types and the `Outbound` interface.
+- `internal/inbox` — generic `Inbox[T]` channel-backed pub/sub used by every event queue.
 - `internal/engine` — scheduler, per-chat workers, cron loader.
-- `internal/llm` — agent loop, orchestrators, prompt builders, OpenAI-compatible provider.
-- `internal/messaging` — Feishu and WebSocket adapters.
+- `internal/llm` — agent loop, orchestrators, prompt builders, subagent/fleet toolsets, OpenAI-compatible provider.
+- `internal/messaging` — Feishu, WebSocket, and WeChat adapters, plus a shared `dedup` primitive.
 - `internal/runtime` — host-bash and container execution backends.
-- `internal/tools` — tool registry and built-in toolsets.
+- `internal/tools` — tool protocol, registry, built-in toolsets, skill loader.
+- `internal/tasks` — event-driven task manager, drivers, retention, output buffer.
+- `internal/util` — JSON encoding helpers used across the codebase.
 - `internal/api` — HTTP server and WebSocket WebUI.
 
 For design philosophy, intentional choices, the concurrency map, and contributor rules, see [AGENTS.md](./AGENTS.md).
