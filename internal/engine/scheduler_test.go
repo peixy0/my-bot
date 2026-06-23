@@ -364,7 +364,7 @@ func TestWorkerResumeLoadsConversation(t *testing.T) {
 	})
 	out := &captureOutbound{}
 	id := uuid.NewString()
-	messages := []llm.Message{
+	messages := []llm.ChatMessage{
 		{Role: "user", Content: "old question"},
 		{Role: "assistant", Content: "old answer"},
 	}
@@ -387,7 +387,7 @@ func TestWorkerResumeLoadsConversation(t *testing.T) {
 	if err := worker.loop.DumpConversation(dumpPath); err != nil {
 		t.Fatalf("dump resumed conversation: %v", err)
 	}
-	var got []llm.Message
+	var got []llm.ChatMessage
 	dumped, err := os.ReadFile(dumpPath)
 	if err != nil {
 		t.Fatalf("read dumped conversation: %v", err)

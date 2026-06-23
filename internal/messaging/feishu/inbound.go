@@ -48,7 +48,7 @@ func NewInbound(cfg Config, agentInbox inbox.Inbox[events.AgentEvent], rt runtim
 }
 
 func (i *Inbound) Run(ctx context.Context) error {
-	i.dedup = dedup.New(ctx, dedupCapacity, dedupTTL)
+	i.dedup = dedup.NewDedup(ctx, dedupCapacity, dedupTTL)
 
 	d := dispatcher.NewEventDispatcher(i.cfg.VerificationToken, i.cfg.EncryptKey).
 		OnP2MessageReceiveV1(i.onMessageReceive)

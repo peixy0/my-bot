@@ -31,7 +31,7 @@ func NewInbound(cfg Config, agentInbox inbox.Inbox[events.AgentEvent]) *Inbound 
 }
 
 func (i *Inbound) Run(ctx context.Context) error {
-	i.dedup = dedup.New(ctx, dedupCapacity, dedupTTL)
+	i.dedup = dedup.NewDedup(ctx, dedupCapacity, dedupTTL)
 
 	if err := i.ensureLogin(ctx); err != nil {
 		return err

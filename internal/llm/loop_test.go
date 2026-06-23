@@ -10,7 +10,7 @@ import (
 
 func TestAgentLoopDumpAndLoadConversation(t *testing.T) {
 	loop := NewAgentLoop(&config.Config{}, NewAgent(nil))
-	loop.conv.Messages = []Message{
+	loop.conv.Messages = []ChatMessage{
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "hi"},
 	}
@@ -38,7 +38,7 @@ func TestAgentLoopDumpAndLoadConversation(t *testing.T) {
 
 func TestAgentLoopLoadConversationInvalidJSONDoesNotOverwrite(t *testing.T) {
 	loop := NewAgentLoop(&config.Config{}, NewAgent(nil))
-	loop.conv.Messages = []Message{{Role: "user", Content: "keep me"}}
+	loop.conv.Messages = []ChatMessage{{Role: "user", Content: "keep me"}}
 
 	path := filepath.Join(t.TempDir(), "bad.json")
 	if err := os.WriteFile(path, []byte(`{"not":"a message array"}`), 0600); err != nil {

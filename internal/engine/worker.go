@@ -198,7 +198,7 @@ func (w *ConversationWorker) processText(ctx context.Context, ev events.TextInpu
 	if err := w.maybeCompress(ctx, prompt); err != nil {
 		slog.Error("compress", "chat", w.chatID, "err", err)
 	}
-	reg := w.tools.Registry(ev.Sender)
+	reg := w.tools.BuildRegistry(ev.Sender)
 	orch := llm.NewHumanInputOrchestrator(reg, ev.Sender, w.MessageInbox).WithVision(w.VisionSupported())
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
@@ -229,7 +229,7 @@ func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageIn
 			},
 		},
 	}
-	reg := w.tools.Registry(ev.Sender)
+	reg := w.tools.BuildRegistry(ev.Sender)
 	orch := llm.NewHumanInputOrchestrator(reg, ev.Sender, w.MessageInbox).WithVision(true)
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
@@ -366,7 +366,7 @@ func (w *ConversationWorker) processConfigChange(ctx context.Context, ev events.
 }
 
 func (w *ConversationWorker) runBackground(ctx context.Context, sender events.Outbound, prompt llm.SystemPrompt, content any) error {
-	reg := w.tools.Registry(sender)
+	reg := w.tools.BuildRegistry(sender)
 	orch := llm.NewBackgroundOrchestrator(reg, sender)
 	return w.loop.Run(ctx, nil, reg, orch, prompt, content)
 }

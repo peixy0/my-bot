@@ -40,7 +40,7 @@ internal/
     subagent.go          ← agent/fleet subagent toolset + task controller
     registry.go          ← NewSessionRegistry / NewSubagentRegistry helpers
     prompt.go            ← composable system prompt builders (Main/Heartbeat/Cron/Subagent)
-    client.go            ← shared types: Message, ToolCall, CompletionRequest/Response, Conversation
+    client.go            ← shared types: ChatMessage, ToolCall, CompletionRequest/Response, Conversation
     openai.go            ← OpenAI-compatible provider (raw net/http, retry, streaming)
   messaging/
     inbound.go           ← Inbound interface
@@ -61,7 +61,7 @@ internal/
     host.go              ← local bash execution
     container.go         ← podman/docker execution
   tools/
-    contract.go          ← ToolSchema, ToolResult, ToolHandler protocol types + ToolRegistry iface
+    contract.go          ← ToolSchema, ToolResult, ToolHandler protocol types (no separate registry interface — Registry satisfies the contract structurally)
     registry.go          ← Registry implementation + Toolset interface + MarshalResult
     toolbox.go           ← DefaultToolset (filesystem / grep / glob / web / vision / skills)
     command.go           ← CommandToolset (run_command / get_task / await_task / list_tasks / kill_task / write_to_task)
@@ -127,7 +127,6 @@ Every long-lived goroutine and what it owns. This is the single source of truth 
 | `Runtime` | `runtime` | Execution environment abstraction (Execute, Spawn, ReadFile, EditFile, Glob, OSInfo, ...) |
 | `Outbound` | `events` | `Send`, `SendDelta`, `SendFinal`, `StartThinking`, `EndThinking` |
 | `Toolset` | `tools` | `Register(r *Registry)` — every cross-package tool registration goes through this |
-| `ToolRegistry` | `tools` | `Register(schema ToolSchema, handler ToolHandler)` — public registrar interface |
 | `Inbound` | `messaging` | `Run(ctx) error` — pushes events into the shared inbox |
 | `inbox.Inbox[T]` | `inbox` | Generic pub/sub channel: `Publish`, `Receive`, `TryPublish`, `TryReceive`, `Close`, `Len`, `Cap` |
 | `tasks.Driver` / `tasks.Controller` | `tasks` | Driver starts a task; Controller writes input / kills it |

@@ -35,7 +35,7 @@ func TestOpenAIProvider_CompleteStreamsContent(t *testing.T) {
 	var deltas []string
 	resp, err := provider.Complete(context.Background(), CompletionRequest{
 		Model:       "test-model",
-		Messages:    []Message{userMessage("hi")},
+		Messages:    []ChatMessage{userMessage("hi")},
 		MaxTokens:   123,
 		Temperature: 0.2,
 		TopP:        0.9,

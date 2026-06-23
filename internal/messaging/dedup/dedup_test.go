@@ -10,7 +10,7 @@ import (
 func TestDedup_FreshAndDuplicate(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	d := New(ctx, 4, time.Minute)
+	d := NewDedup(ctx, 4, time.Minute)
 
 	if !d.Check("a") {
 		t.Fatal("first 'a' should be fresh")
@@ -26,7 +26,7 @@ func TestDedup_FreshAndDuplicate(t *testing.T) {
 func TestDedup_CapacityEviction(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	d := New(ctx, 2, time.Minute)
+	d := NewDedup(ctx, 2, time.Minute)
 
 	d.Check("a")
 	d.Check("b")
@@ -40,7 +40,7 @@ func TestDedup_CapacityEviction(t *testing.T) {
 func TestDedup_TTLEviction(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	d := New(ctx, 1024, 50*time.Millisecond)
+	d := NewDedup(ctx, 1024, 50*time.Millisecond)
 
 	d.Check("a")
 	if d.Check("a") {
@@ -55,7 +55,7 @@ func TestDedup_TTLEviction(t *testing.T) {
 func TestDedup_Concurrent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	d := New(ctx, 10000, time.Minute)
+	d := NewDedup(ctx, 10000, time.Minute)
 
 	const N = 200
 	results := make(chan bool, N)

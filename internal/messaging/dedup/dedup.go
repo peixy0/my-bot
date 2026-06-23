@@ -14,7 +14,7 @@ type Dedup struct {
 	in chan request
 }
 
-func New(ctx context.Context, capacity int, ttl time.Duration) *Dedup {
+func NewDedup(ctx context.Context, capacity int, ttl time.Duration) *Dedup {
 	d := &Dedup{in: make(chan request)}
 	go d.run(ctx, capacity, ttl)
 	return d

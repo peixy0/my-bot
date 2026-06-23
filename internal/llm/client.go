@@ -4,7 +4,7 @@ import (
 	"context"
 )
 
-type Message struct {
+type ChatMessage struct {
 	Role             string          `json:"role"`
 	Content          any             `json:"content,omitempty"`
 	ReasoningContent string          `json:"reasoning_content,omitempty"`
@@ -41,7 +41,7 @@ type CompletionResponse struct {
 
 type CompletionRequest struct {
 	Model          string
-	Messages       []Message
+	Messages       []ChatMessage
 	Tools          []map[string]any
 	MaxTokens      int64
 	Temperature    float64
@@ -56,7 +56,7 @@ type CompletionClient interface {
 }
 
 type Conversation struct {
-	Messages    []Message
+	Messages    []ChatMessage
 	TotalTokens int64
 }
 
@@ -64,12 +64,12 @@ func NewConversation() *Conversation {
 	return &Conversation{}
 }
 
-func userMessage(content string) Message {
-	return Message{Role: "user", Content: content}
+func userMessage(content string) ChatMessage {
+	return ChatMessage{Role: "user", Content: content}
 }
 
-func assistantMessage(content, reasoningContent string, toolCalls []ToolCall) Message {
-	msg := Message{Role: "assistant"}
+func assistantMessage(content, reasoningContent string, toolCalls []ToolCall) ChatMessage {
+	msg := ChatMessage{Role: "assistant"}
 	if content != "" {
 		msg.Content = content
 	}
@@ -93,19 +93,19 @@ func assistantMessage(content, reasoningContent string, toolCalls []ToolCall) Me
 	return msg
 }
 
-func toolResultMessage(callID, content string) Message {
-	return Message{
+func toolResultMessage(callID, content string) ChatMessage {
+	return ChatMessage{
 		Role:       "tool",
 		ToolCallID: callID,
 		Content:    content,
 	}
 }
 
-func userBlocksMessage(text string, blocks []ContentPart) Message {
+func userBlocksMessage(text string, blocks []ContentPart) ChatMessage {
 	parts := make([]ContentPart, 0, len(blocks)+1)
 	if text != "" {
 		parts = append(parts, ContentPart{"type": "text", "text": text})
 	}
 	parts = append(parts, blocks...)
-	return Message{Role: "user", Content: parts}
+	return ChatMessage{Role: "user", Content: parts}
 }

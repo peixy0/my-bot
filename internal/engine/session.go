@@ -35,7 +35,7 @@ func newSessionTools(rt runtime.Runtime, skills *tools.SkillLoader, cfg *config.
 	}
 }
 
-func (t *sessionTools) Registry(sender events.Outbound) *tools.Registry {
+func (t *sessionTools) BuildRegistry(sender events.Outbound) *tools.Registry {
 	return llm.NewSessionRegistry(t.rt, t.skills, t.cfg, t.agent, t.taskManager, t.cmdTools, sender)
 }
 

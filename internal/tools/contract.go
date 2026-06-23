@@ -18,7 +18,3 @@ type ToolSchema struct {
 	ParameterDesc map[string]any
 	Parallel      bool
 }
-
-type ToolRegistry interface {
-	Register(schema ToolSchema, handler ToolHandler)
-}

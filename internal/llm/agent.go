@@ -43,7 +43,7 @@ func (a *Agent) Run(
 		}()
 	}
 
-	systemMessages := []Message{
+	systemMessages := []ChatMessage{
 		{Role: "system", Content: systemPrompt},
 	}
 
@@ -137,7 +137,7 @@ func (a *Agent) Compress(ctx context.Context, cfg *config.Config, systemPrompt s
 	}
 
 	anchor := strings.TrimSpace(resp.Content)
-	conv.Messages = []Message{
+	conv.Messages = []ChatMessage{
 		{Role: "user", Content: "[CONTEXT ANCHOR]\n" + anchor},
 		retained,
 	}
@@ -176,9 +176,9 @@ const compressionInstruction = "You are compressing context for an autonomous AI
 	"## Pending Issues\n" +
 	"Unresolved errors, blockers, or open questions."
 
-func buildCompressionMessages(systemPrompt string, messages []Message) []Message {
-	out := make([]Message, 0, len(messages)+2)
-	out = append(out, Message{Role: "system", Content: systemPrompt})
+func buildCompressionMessages(systemPrompt string, messages []ChatMessage) []ChatMessage {
+	out := make([]ChatMessage, 0, len(messages)+2)
+	out = append(out, ChatMessage{Role: "system", Content: systemPrompt})
 	out = append(out, messages...)
 	out = append(out, userMessage(compressionInstruction))
 	return out

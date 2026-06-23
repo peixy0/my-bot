@@ -19,7 +19,7 @@ type mockClient struct {
 
 type mockCompletionCall struct {
 	model       string
-	messages    []Message
+	messages    []ChatMessage
 	tools       []map[string]any
 	maxTokens   int64
 	temperature float64
@@ -51,8 +51,8 @@ func (m *mockClient) Complete(ctx context.Context, req CompletionRequest) (Compl
 	return resp, nil
 }
 
-func cloneMessages(messages []Message) []Message {
-	out := make([]Message, len(messages))
+func cloneMessages(messages []ChatMessage) []ChatMessage {
+	out := make([]ChatMessage, len(messages))
 	copy(out, messages)
 	return out
 }
@@ -91,9 +91,9 @@ func (o *mockOrchestrator) OnFinalResponse(_ context.Context, content string) {
 func (o *mockOrchestrator) BeforeToolUse(_ context.Context, _ string) {
 	o.beforeToolCalls++
 }
-func (o *mockOrchestrator) DispatchTools(_ context.Context, calls []ToolCall) ([]Message, error) {
+func (o *mockOrchestrator) DispatchTools(_ context.Context, calls []ToolCall) ([]ChatMessage, error) {
 	o.dispatches++
-	msgs := make([]Message, len(calls))
+	msgs := make([]ChatMessage, len(calls))
 	for i, tc := range calls {
 		msgs[i] = toolResultMessage(tc.ID, "result")
 	}
@@ -372,7 +372,7 @@ type mockOrchestratorWithAbort struct {
 	abortCh chan struct{}
 }
 
-func (o *mockOrchestratorWithAbort) DispatchTools(_ context.Context, calls []ToolCall) ([]Message, error) {
+func (o *mockOrchestratorWithAbort) DispatchTools(_ context.Context, calls []ToolCall) ([]ChatMessage, error) {
 	result, err := o.mockOrchestrator.DispatchTools(context.Background(), calls)
 	go func() {
 		select {

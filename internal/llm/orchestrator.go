@@ -21,7 +21,7 @@ type Orchestrator interface {
 	OnContentFinal(ctx context.Context, content string)
 	OnFinalResponse(ctx context.Context, content string)
 	BeforeToolUse(ctx context.Context, content string)
-	DispatchTools(ctx context.Context, calls []ToolCall) ([]Message, error)
+	DispatchTools(ctx context.Context, calls []ToolCall) ([]ChatMessage, error)
 }
 
 type HumanInputOrchestrator struct {
@@ -58,7 +58,7 @@ func (o *HumanInputOrchestrator) OnFinalResponse(_ context.Context, _ string) {}
 
 func (o *HumanInputOrchestrator) BeforeToolUse(_ context.Context, _ string) {}
 
-func (o *HumanInputOrchestrator) DispatchTools(ctx context.Context, calls []ToolCall) ([]Message, error) {
+func (o *HumanInputOrchestrator) DispatchTools(ctx context.Context, calls []ToolCall) ([]ChatMessage, error) {
 	toolMsgs, err := runDispatch(ctx, o.registry, calls)
 	if err != nil {
 		return nil, err
@@ -70,7 +70,7 @@ func (o *HumanInputOrchestrator) DispatchTools(ctx context.Context, calls []Tool
 	return toolMsgs, nil
 }
 
-func (o *HumanInputOrchestrator) drainInLoopInput() *Message {
+func (o *HumanInputOrchestrator) drainInLoopInput() *ChatMessage {
 	var items []events.MessageEvent
 	for {
 		msg, ok := o.inLoopInbox.TryReceive()
@@ -134,7 +134,7 @@ func (o *BackgroundOrchestrator) OnFinalResponse(ctx context.Context, content st
 
 func (o *BackgroundOrchestrator) BeforeToolUse(_ context.Context, _ string) {}
 
-func (o *BackgroundOrchestrator) DispatchTools(ctx context.Context, calls []ToolCall) ([]Message, error) {
+func (o *BackgroundOrchestrator) DispatchTools(ctx context.Context, calls []ToolCall) ([]ChatMessage, error) {
 	return runDispatch(ctx, o.registry, calls)
 }
 
@@ -160,7 +160,7 @@ func (o *SubagentOrchestrator) OnFinalResponse(_ context.Context, content string
 
 func (o *SubagentOrchestrator) BeforeToolUse(_ context.Context, _ string) {}
 
-func (o *SubagentOrchestrator) DispatchTools(ctx context.Context, calls []ToolCall) ([]Message, error) {
+func (o *SubagentOrchestrator) DispatchTools(ctx context.Context, calls []ToolCall) ([]ChatMessage, error) {
 	toolMsgs, err := runDispatch(ctx, o.registry, calls)
 	if err != nil {
 		return nil, err
@@ -171,7 +171,7 @@ func (o *SubagentOrchestrator) DispatchTools(ctx context.Context, calls []ToolCa
 	return toolMsgs, nil
 }
 
-func (o *SubagentOrchestrator) drainInput() *Message {
+func (o *SubagentOrchestrator) drainInput() *ChatMessage {
 	if o.input == nil {
 		return nil
 	}
@@ -203,8 +203,8 @@ func appendVisionImagePart(parts []map[string]any, ev events.ImageInputEvent) []
 }
 
 type dispatchResult struct {
-	toolMsg  Message
-	followup *Message
+	toolMsg  ChatMessage
+	followup *ChatMessage
 }
 
 func execOne(ctx context.Context, r *tools.Registry, tc ToolCall) dispatchResult {
@@ -236,12 +236,12 @@ func execOne(ctx context.Context, r *tools.Registry, tc ToolCall) dispatchResult
 	return dispatchResult{toolMsg: toolResultMessage(tc.ID, result.Text)}
 }
 
-func runDispatch(ctx context.Context, r *tools.Registry, calls []ToolCall) ([]Message, error) {
+func runDispatch(ctx context.Context, r *tools.Registry, calls []ToolCall) ([]ChatMessage, error) {
 	results := make([]dispatchResult, len(calls))
 
 	if len(calls) == 1 {
 		res := execOne(ctx, r, calls[0])
-		msgs := []Message{res.toolMsg}
+		msgs := []ChatMessage{res.toolMsg}
 		if res.followup != nil {
 			msgs = append(msgs, *res.followup)
 		}
@@ -266,7 +266,7 @@ func runDispatch(ctx context.Context, r *tools.Registry, calls []ToolCall) ([]Me
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
-	msgs := make([]Message, 0, len(calls)*2)
+	msgs := make([]ChatMessage, 0, len(calls)*2)
 	for _, res := range results {
 		msgs = append(msgs, res.toolMsg)
 	}

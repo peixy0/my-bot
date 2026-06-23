@@ -31,7 +31,7 @@ func (l *AgentLoop) TotalTokens() int64 { return l.conv.TotalTokens }
 func (l *AgentLoop) ResetConv() { l.conv = NewConversation() }
 
 func (l *AgentLoop) Run(ctx context.Context, abortCh <-chan struct{}, reg *tools.Registry, orch Orchestrator, prompt SystemPrompt, content any) error {
-	l.conv.Messages = append(l.conv.Messages, Message{Role: "user", Content: content})
+	l.conv.Messages = append(l.conv.Messages, ChatMessage{Role: "user", Content: content})
 	return l.agent.Run(ctx, abortCh, l.cfg, prompt.Build(ctx), l.conv, orch, reg)
 }
 
@@ -55,7 +55,7 @@ func (l *AgentLoop) LoadConversation(path string) error {
 	if err != nil {
 		return err
 	}
-	var messages []Message
+	var messages []ChatMessage
 	if err := json.Unmarshal(data, &messages); err != nil {
 		return fmt.Errorf("unmarshal conversation: %w", err)
 	}
