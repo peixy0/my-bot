@@ -9,7 +9,7 @@ import (
 )
 
 func TestAgentLoopDumpAndLoadConversation(t *testing.T) {
-	loop := NewAgentLoop(&config.Config{}, NewAgent(nil))
+	loop := NewAgentLoop(&config.Config{}, NewAgent(nil, nil))
 	loop.conv.Messages = []ChatMessage{
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "hi"},
@@ -20,7 +20,7 @@ func TestAgentLoopDumpAndLoadConversation(t *testing.T) {
 		t.Fatalf("dump conversation: %v", err)
 	}
 
-	loaded := NewAgentLoop(&config.Config{}, NewAgent(nil))
+	loaded := NewAgentLoop(&config.Config{}, NewAgent(nil, nil))
 	if err := loaded.LoadConversation(path); err != nil {
 		t.Fatalf("load conversation: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestAgentLoopDumpAndLoadConversation(t *testing.T) {
 }
 
 func TestAgentLoopLoadConversationInvalidJSONDoesNotOverwrite(t *testing.T) {
-	loop := NewAgentLoop(&config.Config{}, NewAgent(nil))
+	loop := NewAgentLoop(&config.Config{}, NewAgent(nil, nil))
 	loop.conv.Messages = []ChatMessage{{Role: "user", Content: "keep me"}}
 
 	path := filepath.Join(t.TempDir(), "bad.json")

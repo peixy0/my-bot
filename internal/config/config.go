@@ -33,17 +33,23 @@ func (m *ModelConfig) ApplyTo(target *LLMConfig) {
 type Config struct {
 	LogLevel  string                     `yaml:"log_level"`
 	LLM       LLMConfig                  `yaml:"llm"`
+	Limiter   *LimiterConfig             `yaml:"limiter,omitempty"`
 	Models    map[string]ModelConfig     `yaml:"models,omitempty"`
-	Container ContainerConfig            `yaml:"container"`
+	Container *ContainerConfig           `yaml:"container,omitempty"`
 	Tool      ToolConfig                 `yaml:"tool"`
 	Workspace WorkspaceConfig            `yaml:"workspace"`
 	Context   ContextConfig              `yaml:"context"`
-	Feishu    FeishuConfig               `yaml:"feishu"`
-	WeChat    WeChatConfig               `yaml:"wechat"`
+	Feishu    *FeishuConfig              `yaml:"feishu"`
+	WeChat    *WeChatConfig              `yaml:"wechat"`
 	Vision    VisionConfig               `yaml:"vision"`
 	WebUI     WebUIConfig                `yaml:"webui"`
 	Heartbeat HeartbeatConfig            `yaml:"heartbeat"`
 	Sessions  map[string]SessionOverride `yaml:"sessions"`
+}
+
+type LimiterConfig struct {
+	RPM   int
+	Burst int
 }
 
 type LLMConfig struct {
@@ -57,7 +63,6 @@ type LLMConfig struct {
 }
 
 type ContainerConfig struct {
-	Enabled bool   `yaml:"enabled"`
 	Name    string `yaml:"name"`
 	Runtime string `yaml:"runtime"`
 }
@@ -91,7 +96,6 @@ type FeishuConfig struct {
 }
 
 type WeChatConfig struct {
-	Enabled  bool   `yaml:"enabled"`
 	BotToken string `yaml:"bot_token"`
 	BaseURL  string `yaml:"base_url"`
 }
@@ -237,6 +241,7 @@ func defaultConfig() *Config {
 			Temperature: 1,
 			TopP:        0.95,
 		},
+		Limiter: nil,
 		Tool: ToolConfig{
 			MaxOutputChars: 100_000,
 		},
@@ -280,14 +285,22 @@ func (cfg *Config) Validate() error {
 	if cfg.LLM.TopK < 0 {
 		return fmt.Errorf("llm.top_k must be non-negative")
 	}
-	if cfg.Container.Enabled {
+	if cfg.Limiter != nil {
+		if cfg.Limiter.RPM <= 0 {
+			return fmt.Errorf("limiter.rpm must be positive")
+		}
+		if cfg.Limiter.Burst <= 0 {
+			return fmt.Errorf("limiter.burst must be positive")
+		}
+	}
+	if cfg.Container != nil {
 		switch cfg.Container.Runtime {
 		case "podman", "docker":
 		default:
 			return fmt.Errorf("unsupported container.runtime %q", cfg.Container.Runtime)
 		}
 		if strings.TrimSpace(cfg.Container.Name) == "" {
-			return fmt.Errorf("container.name is required when container.enabled=true")
+			return fmt.Errorf("container.name is required when container is configured")
 		}
 	}
 	if cfg.Tool.MaxOutputChars <= 0 {

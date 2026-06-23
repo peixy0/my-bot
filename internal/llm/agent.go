@@ -9,16 +9,19 @@ import (
 
 	"my-bot/internal/config"
 	"my-bot/internal/tools"
+
+	"golang.org/x/time/rate"
 )
 
 var ErrAborted = errors.New("aborted")
 
 type Agent struct {
-	client CompletionClient
+	client  CompletionClient
+	limiter *rate.Limiter
 }
 
-func NewAgent(client CompletionClient) *Agent {
-	return &Agent{client: client}
+func NewAgent(client CompletionClient, limiter *rate.Limiter) *Agent {
+	return &Agent{client: client, limiter: limiter}
 }
 
 func (a *Agent) Run(
@@ -55,6 +58,15 @@ func (a *Agent) Run(
 		allMessages := append(systemMessages, conv.Messages...)
 		model := cfg.LLM.Model
 		slog.Debug("llm request", "model", model, "messages", len(allMessages), "tools", len(reg.Schemas()))
+		if a.limiter != nil {
+			err := a.limiter.Wait(abortCtx)
+			if err != nil {
+				if abortCtx.Err() == context.Canceled {
+					return ErrAborted
+				}
+				return err
+			}
+		}
 		resp, err := a.client.Complete(abortCtx, CompletionRequest{
 			Model:          model,
 			Messages:       allMessages,

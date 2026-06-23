@@ -193,7 +193,7 @@ func TestSubagentToolset_DoesNotForwardSubagentToolContent(t *testing.T) {
 			{Content: "subagent result", FinishReason: "stop", TotalTokens: 20},
 		},
 	}
-	agent := NewAgent(client)
+	agent := NewAgent(client, nil)
 	skills := tools.NewSkillLoader("")
 	rt := &nullRuntime{}
 	cfg := &config.Config{}
@@ -232,7 +232,7 @@ func TestSubagentToolset_DoesNotForwardSubagentToolContent(t *testing.T) {
 }
 
 func TestFleetToolset_ReturnsAllChildTaskIDs(t *testing.T) {
-	agent := NewAgent(&echoTaskClient{})
+	agent := NewAgent(&echoTaskClient{}, nil)
 	skills := tools.NewSkillLoader("")
 	rt := &nullRuntime{}
 	cfg := &config.Config{Tool: config.ToolConfig{MaxOutputChars: 1000}}

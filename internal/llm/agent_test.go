@@ -114,7 +114,7 @@ func TestAgent_ToolCallDispatch(t *testing.T) {
 		},
 	}
 
-	agent := NewAgent(client)
+	agent := NewAgent(client, nil)
 	conv := NewConversation()
 	conv.Messages = append(conv.Messages, userMessage("do something"))
 	orch := newMockOrchestrator()
@@ -156,7 +156,7 @@ func TestAgent_BeforeToolUseErrorNonFatal(t *testing.T) {
 		},
 	}
 
-	agent := NewAgent(client)
+	agent := NewAgent(client, nil)
 	conv := NewConversation()
 	conv.Messages = append(conv.Messages, userMessage("hi"))
 	orch := newMockOrchestrator()
@@ -184,7 +184,7 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 		},
 	}
 
-	agent := NewAgent(client)
+	agent := NewAgent(client, nil)
 	conv := NewConversation()
 	conv.Messages = append(conv.Messages, userMessage("start"))
 	orch := newMockOrchestrator()
@@ -278,7 +278,7 @@ func TestAgent_AbortDuringCompletion(t *testing.T) {
 		abortCh: abortCh,
 	}
 
-	agent := NewAgent(client)
+	agent := NewAgent(client, nil)
 	conv := NewConversation()
 	conv.Messages = append(conv.Messages, userMessage("hello"))
 	orch := newMockOrchestrator()
@@ -316,7 +316,7 @@ func TestAgent_AbortDuringToolExecution(t *testing.T) {
 		abortCh: abortCh,
 	}
 
-	agent := NewAgent(client)
+	agent := NewAgent(client, nil)
 	conv := NewConversation()
 	conv.Messages = append(conv.Messages, userMessage("start"))
 	orch := &mockOrchestratorWithAbort{
@@ -352,7 +352,7 @@ func TestAgent_AbortNoActiveCompletion(t *testing.T) {
 		responses: []CompletionResponse{
 			{Content: "ok", FinishReason: "stop"},
 		},
-	})
+	}, nil)
 	conv := NewConversation()
 	conv.Messages = append(conv.Messages, userMessage("hi"))
 	orch := newMockOrchestrator()

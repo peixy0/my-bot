@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"my-bot/internal/api"
 	"my-bot/internal/config"
@@ -18,6 +19,8 @@ import (
 	"my-bot/internal/messaging/wechat"
 	"my-bot/internal/runtime"
 	"my-bot/internal/tools"
+
+	"golang.org/x/time/rate"
 )
 
 func main() {
@@ -55,11 +58,12 @@ func main() {
 	skills := tools.NewSkillLoader(cfg.Workspace.SkillsDir)
 
 	llmClient := buildLLMClient(cfg)
-	agent := llm.NewAgent(llmClient)
+	limiter := buildLimiter(cfg)
+	agent := llm.NewAgent(llmClient, limiter)
 
 	mainInbox := inbox.NewMemory[events.AgentEvent](256)
 
-	if cfg.Feishu.AppID != "" {
+	if cfg.Feishu != nil {
 		feishuCfg := feishu.Config{
 			AppID:             cfg.Feishu.AppID,
 			AppSecret:         cfg.Feishu.AppSecret,
@@ -74,7 +78,7 @@ func main() {
 		}()
 	}
 
-	if cfg.WeChat.Enabled {
+	if cfg.WeChat != nil {
 		wcCfg := wechat.Config{
 			BotToken: cfg.WeChat.BotToken,
 			BaseURL:  cfg.WeChat.BaseURL,
@@ -111,7 +115,7 @@ func main() {
 }
 
 func buildRuntime(cfg *config.Config) runtime.Runtime {
-	if cfg.Container.Enabled {
+	if cfg.Container != nil {
 		rt, err := runtime.NewContainerRuntime(cfg.Container.Name, cfg.Container.Runtime, "/workspace", cfg.Tool.MaxOutputChars)
 		if err != nil {
 			slog.Error("container runtime unavailable", "err", err)
@@ -126,4 +130,11 @@ func buildRuntime(cfg *config.Config) runtime.Runtime {
 
 func buildLLMClient(cfg *config.Config) llm.CompletionClient {
 	return llm.NewOpenAIProvider(cfg.LLM.BaseURL, cfg.LLM.APIKey)
+}
+
+func buildLimiter(cfg *config.Config) *rate.Limiter {
+	if cfg.Limiter == nil {
+		return nil
+	}
+	return rate.NewLimiter(rate.Every(time.Minute/time.Duration(cfg.Limiter.RPM)), cfg.Limiter.Burst)
 }
