@@ -309,6 +309,14 @@ func TestRetryExponential_NonRetryableError(t *testing.T) {
 }
 
 func TestRetryExponential_RetriesOnServerError(t *testing.T) {
+	originalRetryAfter := retryAfter
+	retryAfter = func(time.Duration) <-chan time.Time {
+		ch := make(chan time.Time, 1)
+		ch <- time.Now()
+		return ch
+	}
+	defer func() { retryAfter = originalRetryAfter }()
+
 	calls := 0
 	err := retryExponential(context.Background(), 3, func() error {
 		calls++
