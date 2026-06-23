@@ -79,7 +79,7 @@ func newChatSession(
 func (s *chatSession) run(ctx context.Context) {
 	defer s.shutdown()
 	if err := s.worker.Run(ctx); err != nil && err != context.Canceled {
-		slog.Error("worker exited", "chat", s.chatID, "err", err)
+		slog.Error("worker exited", "chat_id", s.chatID, "err", err)
 	}
 }
 
@@ -93,7 +93,7 @@ func (s *chatSession) publishEvent(ev events.WorkerEvent) bool {
 	if s.worker.Events.TryPublish(ev) {
 		return true
 	}
-	slog.Error("worker event dropped: channel full", "chat", s.chatID, "event", fmt.Sprintf("%T", ev))
+	slog.Error("worker event dropped: channel full", "chat_id", s.chatID, "event", fmt.Sprintf("%T", ev))
 	return false
 }
 
@@ -101,7 +101,7 @@ func (s *chatSession) publishMessage(ev events.MessageEvent) bool {
 	if s.worker.MessageInbox.TryPublish(ev) {
 		return true
 	}
-	slog.Error("message event dropped: channel full", "chat", s.chatID, "event", fmt.Sprintf("%T", ev))
+	slog.Error("message event dropped: channel full", "chat_id", s.chatID, "event", fmt.Sprintf("%T", ev))
 	return false
 }
 
@@ -128,6 +128,6 @@ func (s *chatSession) shutdown() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := s.tools.Shutdown(ctx); err != nil {
-		slog.Error("shutdown", "chat", s.chatID, "err", err)
+		slog.Error("shutdown", "chat_id", s.chatID, "err", err)
 	}
 }

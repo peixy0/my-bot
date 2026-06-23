@@ -5,10 +5,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand"
+	rand "math/rand/v2"
 	"net/http"
 	"time"
 )
@@ -40,9 +41,9 @@ func newBaseInfo() baseInfo {
 
 func randomWechatUIN() string {
 	var b [4]byte
-	_, _ = rand.Read(b[:])
-	n := binary.BigEndian.Uint32(b[:])
-	return base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%d", n)))
+	randUint := rand.Uint32()
+	binary.BigEndian.PutUint32(b[:], randUint)
+	return base64.StdEncoding.EncodeToString([]byte(hex.EncodeToString(b[:])))
 }
 
 type httpClient struct {
@@ -80,7 +81,10 @@ func (h *httpClient) post(ctx context.Context, path string, reqBody, respBody an
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("read error response (HTTP %d): %w", resp.StatusCode, err)
+		}
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, body)
 	}
 	if respBody != nil {

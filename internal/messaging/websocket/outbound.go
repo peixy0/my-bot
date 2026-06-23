@@ -32,7 +32,7 @@ func (o *Outbound) Connected(ctx context.Context) {
 		"type":    "connected",
 		"chat_id": o.chatID,
 	}); err != nil {
-		slog.Warn("websocket send connected failed", "chat", o.chatID, "err", err)
+		slog.Warn("websocket send connected failed", "chat_id", o.chatID, "err", err)
 	}
 }
 
@@ -42,7 +42,7 @@ func (o *Outbound) Send(ctx context.Context, text string) {
 		"chat_id": o.chatID,
 		"text":    text,
 	}); err != nil {
-		slog.Warn("websocket send message failed", "chat", o.chatID, "err", err)
+		slog.Warn("websocket send message failed", "chat_id", o.chatID, "err", err)
 	}
 }
 
@@ -52,7 +52,7 @@ func (o *Outbound) SendDelta(ctx context.Context, text string) {
 		"chat_id": o.chatID,
 		"text":    text,
 	}); err != nil {
-		slog.Warn("websocket send message_stream_delta failed", "chat", o.chatID, "err", err)
+		slog.Warn("websocket send message_stream_delta failed", "chat_id", o.chatID, "err", err)
 	}
 }
 
@@ -61,19 +61,19 @@ func (o *Outbound) SendFinal(ctx context.Context) {
 		"type":    "message_stream_end",
 		"chat_id": o.chatID,
 	}); err != nil {
-		slog.Warn("websocket send message_stream_end failed", "chat", o.chatID, "err", err)
+		slog.Warn("websocket send message_stream_end failed", "chat_id", o.chatID, "err", err)
 	}
 }
 
 func (o *Outbound) StartThinking(ctx context.Context) {
 	if err := o.writeJSON(map[string]any{"type": "thinking_start", "chat_id": o.chatID}); err != nil {
-		slog.Warn("websocket send thinking_start failed", "chat", o.chatID, "err", err)
+		slog.Warn("websocket send thinking_start failed", "chat_id", o.chatID, "err", err)
 	}
 }
 
 func (o *Outbound) EndThinking(ctx context.Context) {
 	if err := o.writeJSON(map[string]any{"type": "thinking_end", "chat_id": o.chatID}); err != nil {
-		slog.Warn("websocket send thinking_end failed", "chat", o.chatID, "err", err)
+		slog.Warn("websocket send thinking_end failed", "chat_id", o.chatID, "err", err)
 	}
 }
 

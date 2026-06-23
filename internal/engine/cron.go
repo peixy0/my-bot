@@ -116,7 +116,7 @@ func (cw *CronWorker) Load(jobName string, sender events.Outbound) ([]CronJobDef
 				Sender:   sender,
 			}
 			if !cw.workerBox.TryPublish(ev) {
-				slog.Warn("cron event dropped: worker inbox full", "chat", cw.chatID, "task", def.TaskName)
+				slog.Warn("cron event dropped: worker inbox full", "chat_id", cw.chatID, "task", def.TaskName)
 			}
 		})
 		if err != nil {
@@ -173,7 +173,7 @@ func (cw *CronWorker) Trigger(jobName string, sender events.Outbound) error {
 			Sender:   sender,
 		}
 		if !cw.workerBox.TryPublish(ev) {
-			slog.Warn("cron event dropped: worker inbox full", "chat", cw.chatID, "task", def.TaskName)
+			slog.Warn("cron event dropped: worker inbox full", "chat_id", cw.chatID, "task", def.TaskName)
 			return fmt.Errorf("worker inbox full")
 		}
 	}

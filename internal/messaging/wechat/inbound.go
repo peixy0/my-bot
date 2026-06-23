@@ -155,17 +155,21 @@ func (i *Inbound) pollQRStatus(ctx context.Context, baseURL, qrCode string) (*qr
 		resp, err := client.Do(req)
 		if err != nil {
 			slog.Warn("wechat qr poll error, retrying", "err", err)
-			time.Sleep(2 * time.Second)
+			if !sleepCtx(ctx, 2*time.Second) {
+				return nil, ctx.Err()
+			}
 			continue
 		}
 		var status qrStatusResp
-		if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-			resp.Body.Close()
-			slog.Warn("wechat qr decode error, retrying", "err", err)
-			time.Sleep(2 * time.Second)
+		decodeErr := json.NewDecoder(resp.Body).Decode(&status)
+		resp.Body.Close()
+		if decodeErr != nil {
+			slog.Warn("wechat qr decode error, retrying", "err", decodeErr)
+			if !sleepCtx(ctx, 2*time.Second) {
+				return nil, ctx.Err()
+			}
 			continue
 		}
-		resp.Body.Close()
 
 		switch status.Status {
 		case "confirmed":
@@ -180,9 +184,13 @@ func (i *Inbound) pollQRStatus(ctx context.Context, baseURL, qrCode string) (*qr
 			url = baseURL + pathGetQRCodeStatus + "?qrcode=" + newQR.QRCode
 		case "scaned":
 			slog.Info("wechat QR scanned, waiting for confirmation")
-			time.Sleep(1 * time.Second)
+			if !sleepCtx(ctx, 1*time.Second) {
+				return nil, ctx.Err()
+			}
 		default: // "wait" or unknown — keep polling
-			time.Sleep(2 * time.Second)
+			if !sleepCtx(ctx, 2*time.Second) {
+				return nil, ctx.Err()
+			}
 		}
 	}
 }
@@ -281,6 +289,17 @@ func (i *Inbound) enqueue(ctx context.Context, ev events.AgentEvent) {
 	err := i.inbox.Publish(ctx, ev)
 	if err != nil {
 		slog.Warn("wechat enqueue failed", "err", err)
+	}
+}
+
+// sleepCtx waits for d or until ctx is cancelled. Returns true if the wait
+// completed normally, false if ctx was cancelled.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-time.After(d):
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 
