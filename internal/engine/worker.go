@@ -25,10 +25,10 @@ const (
 type ConversationWorker struct {
 	chatID string
 	cfg    *config.Config
-	agent  *llm.Agent
+	agent  *Agent
 	rt     runtime.Runtime
 	skills *tools.SkillLoader
-	loop   *llm.AgentLoop
+	loop   *AgentLoop
 
 	tools *sessionTools
 
@@ -44,7 +44,7 @@ type ConversationWorker struct {
 func newConversationWorker(
 	chatID string,
 	cfg *config.Config,
-	agent *llm.Agent,
+	agent *Agent,
 	rt runtime.Runtime,
 	skills *tools.SkillLoader,
 	tools *sessionTools,
@@ -60,7 +60,7 @@ func newConversationWorker(
 		MessageInbox: inbox.NewMemory[events.MessageEvent](messageInboxBuf),
 		abortCh:      make(chan struct{}),
 	}
-	w.loop = llm.NewAgentLoop(w.cfg, agent)
+	w.loop = NewAgentLoop(w.cfg, agent)
 	return w
 }
 
@@ -194,7 +194,7 @@ func (w *ConversationWorker) processText(ctx context.Context, ev events.TextInpu
 		slog.Error("compress", "chat_id", w.chatID, "err", err)
 	}
 	reg := w.tools.BuildRegistry(ev.Sender)
-	orch := llm.NewHumanInputOrchestrator(reg, ev.Sender, w.MessageInbox).WithVision(w.VisionSupported())
+	orch := NewHumanInputOrchestrator(reg, ev.Sender, w.MessageInbox).WithVision(w.VisionSupported())
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
 	err := w.loop.Run(ctx, w.abortCh, reg, orch, prompt, wrapUserMessage(ev.Message))
@@ -225,7 +225,7 @@ func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageIn
 		},
 	}
 	reg := w.tools.BuildRegistry(ev.Sender)
-	orch := llm.NewHumanInputOrchestrator(reg, ev.Sender, w.MessageInbox).WithVision(true)
+	orch := NewHumanInputOrchestrator(reg, ev.Sender, w.MessageInbox).WithVision(true)
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
 	err := w.loop.Run(ctx, w.abortCh, reg, orch, prompt, content)
@@ -362,7 +362,7 @@ func (w *ConversationWorker) processConfigChange(ctx context.Context, ev events.
 
 func (w *ConversationWorker) runBackground(ctx context.Context, sender events.Outbound, prompt llm.SystemPrompt, content any) error {
 	reg := w.tools.BuildRegistry(sender)
-	orch := llm.NewBackgroundOrchestrator(reg, sender)
+	orch := NewBackgroundOrchestrator(reg, sender)
 	return w.loop.Run(ctx, nil, reg, orch, prompt, content)
 }
 
@@ -399,7 +399,7 @@ func (w *ConversationWorker) stopHeartbeat() {
 }
 
 func errorMessage(err error) string {
-	if err == llm.ErrAborted {
+	if err == ErrAborted {
 		return "session aborted"
 	}
 	return fmt.Sprintf("error: %v", err)

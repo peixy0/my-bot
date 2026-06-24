@@ -33,7 +33,7 @@ func (o *captureOutbound) StartThinking(context.Context) {}
 func (o *captureOutbound) EndThinking(context.Context)   {}
 
 func newConfigTestWorker(cfg *config.Config) *ConversationWorker {
-	return newConversationWorker("chat-1", cfg, llm.NewAgent(nil, nil), nil, nil, nil)
+	return newConversationWorker("chat-1", cfg, NewAgent(nil, nil), nil, nil, nil)
 }
 
 func newStubSession(worker *ConversationWorker) *chatSession {

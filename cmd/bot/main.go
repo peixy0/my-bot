@@ -59,7 +59,7 @@ func main() {
 
 	llmClient := buildLLMClient(cfg)
 	limiter := buildLimiter(cfg)
-	agent := llm.NewAgent(llmClient, limiter)
+	agent := engine.NewAgent(llmClient, limiter)
 
 	mainInbox := inbox.NewMemory[events.AgentEvent](256)
 

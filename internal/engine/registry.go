@@ -1,4 +1,4 @@
-package llm
+package engine
 
 import (
 	"my-bot/internal/config"

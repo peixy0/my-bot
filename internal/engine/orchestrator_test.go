@@ -1,4 +1,4 @@
-package llm
+package engine
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"my-bot/internal/config"
 	"my-bot/internal/events"
 	"my-bot/internal/inbox"
+	"my-bot/internal/llm"
 	"my-bot/internal/runtime"
 	"my-bot/internal/tasks"
 	"my-bot/internal/tools"
@@ -43,7 +44,7 @@ func TestHumanInputOrchestrator_DrainInLoopInputTextOnly(t *testing.T) {
 	inLoopInbox.TryPublish(events.TextInputEvent{ChatID: "chat", Message: "stop doing that"})
 	inLoopInbox.TryPublish(events.TextInputEvent{ChatID: "chat", Message: "do this instead"})
 
-	calls := []ToolCall{{ID: "c1", Name: "unknown_tool", Args: []byte(`{}`)}}
+	calls := []llm.ToolCall{{ID: "c1", Name: "unknown_tool", Args: []byte(`{}`)}}
 	msgs, err := orch.DispatchTools(context.Background(), calls)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -75,7 +76,7 @@ func TestHumanInputOrchestrator_DrainInLoopInputWithImageUsesMultipart(t *testin
 	inLoopInbox.TryPublish(events.TextInputEvent{ChatID: "chat", Message: "stop doing that"})
 	inLoopInbox.TryPublish(events.ImageInputEvent{ChatID: "chat", Message: "see image", MIMEType: "image/png", ImageData: []byte{1, 2, 3}})
 
-	calls := []ToolCall{{ID: "c1", Name: "unknown_tool", Args: []byte(`{}`)}}
+	calls := []llm.ToolCall{{ID: "c1", Name: "unknown_tool", Args: []byte(`{}`)}}
 	msgs, err := orch.DispatchTools(context.Background(), calls)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -181,13 +182,65 @@ func TestSubagentOrchestrator_DoesNotForwardToolContent(t *testing.T) {
 	}
 }
 
+type orchMockClient struct {
+	responses []llm.CompletionResponse
+	calls     []orchMockCompletionCall
+	callCount int
+}
+
+type orchMockCompletionCall struct {
+	model       string
+	messages    []llm.ChatMessage
+	tools       []map[string]any
+	maxTokens   int64
+	temperature float64
+}
+
+func (m *orchMockClient) Complete(ctx context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
+	m.calls = append(m.calls, orchMockCompletionCall{
+		model:       req.Model,
+		messages:    cloneOrchMessages(req.Messages),
+		tools:       cloneOrchTools(req.Tools),
+		maxTokens:   req.MaxTokens,
+		temperature: req.Temperature,
+	})
+	idx := m.callCount
+	m.callCount++
+	if idx >= len(m.responses) {
+		return llm.CompletionResponse{FinishReason: "stop"}, nil
+	}
+	resp := m.responses[idx]
+	if req.OnContentDelta != nil && resp.Content != "" {
+		req.OnContentDelta(ctx, resp.Content)
+	}
+	return resp, nil
+}
+
+func cloneOrchMessages(messages []llm.ChatMessage) []llm.ChatMessage {
+	out := make([]llm.ChatMessage, len(messages))
+	copy(out, messages)
+	return out
+}
+
+func cloneOrchTools(t []map[string]any) []map[string]any {
+	out := make([]map[string]any, len(t))
+	for i, tool := range t {
+		c := make(map[string]any, len(tool))
+		for k, v := range tool {
+			c[k] = v
+		}
+		out[i] = c
+	}
+	return out
+}
+
 func TestSubagentToolset_DoesNotForwardSubagentToolContent(t *testing.T) {
-	client := &mockClient{
-		responses: []CompletionResponse{
+	client := &orchMockClient{
+		responses: []llm.CompletionResponse{
 			{
 				Content:      "using tool",
 				FinishReason: "tool_calls",
-				ToolCalls:    []ToolCall{{ID: "c1", Name: "missing", Args: []byte(`{}`)}},
+				ToolCalls:    []llm.ToolCall{{ID: "c1", Name: "missing", Args: []byte(`{}`)}},
 				TotalTokens:  10,
 			},
 			{Content: "subagent result", FinishReason: "stop", TotalTokens: 20},
@@ -293,19 +346,19 @@ func TestFleetToolset_ReturnsAllChildTaskIDs(t *testing.T) {
 
 type echoTaskClient struct{}
 
-func (c *echoTaskClient) Complete(ctx context.Context, req CompletionRequest) (CompletionResponse, error) {
+func (c *echoTaskClient) Complete(ctx context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
 	content := ""
 	if len(req.Messages) > 0 {
 		content, _ = req.Messages[len(req.Messages)-1].Content.(string)
 	}
 	result := "result:" + content
 	req.OnContentDelta(ctx, result)
-	return CompletionResponse{Content: result, FinishReason: "stop", TotalTokens: 10}, nil
+	return llm.CompletionResponse{Content: result, FinishReason: "stop", TotalTokens: 10}, nil
 }
 
 func TestRunDispatch_UnknownTool(t *testing.T) {
 	reg := tools.NewRegistry()
-	calls := []ToolCall{{ID: "c1", Name: "nonexistent", Args: []byte(`{}`)}}
+	calls := []llm.ToolCall{{ID: "c1", Name: "nonexistent", Args: []byte(`{}`)}}
 
 	msgs, err := runDispatch(context.Background(), reg, calls)
 	if err != nil {
@@ -334,7 +387,7 @@ func TestRunDispatch_ImageToolInjectsMultimodalUserMessage(t *testing.T) {
 		}), nil
 	})
 
-	msgs, err := runDispatch(context.Background(), reg, []ToolCall{{ID: "c1", Name: "read_image", Args: []byte(`{}`)}})
+	msgs, err := runDispatch(context.Background(), reg, []llm.ToolCall{{ID: "c1", Name: "read_image", Args: []byte(`{}`)}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -380,7 +433,7 @@ func TestRunDispatch_MultipleToolsAppendFollowupsAfterAllToolReplies(t *testing.
 		return tools.TextResult("file contents"), nil
 	})
 
-	msgs, err := runDispatch(context.Background(), reg, []ToolCall{
+	msgs, err := runDispatch(context.Background(), reg, []llm.ToolCall{
 		{ID: "c1", Name: "read_image", Args: []byte(`{}`)},
 		{ID: "c2", Name: "read_file", Args: []byte(`{}`)},
 	})

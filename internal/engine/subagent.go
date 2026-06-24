@@ -1,4 +1,4 @@
-package llm
+package engine
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"my-bot/internal/config"
+	"my-bot/internal/llm"
 	"my-bot/internal/runtime"
 	"my-bot/internal/tasks"
 	"my-bot/internal/tools"
@@ -74,7 +75,7 @@ func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task 
 			reg := NewSubagentRegistry(r.rt, r.skills, &cfg, cmdTools)
 			orch := NewSubagentOrchestrator(reg, emit, input)
 			loop := NewAgentLoop(&cfg, r.agent)
-			err := loop.Run(innerCtx, nil, reg, orch, NewSubagentPrompt(r.skills, r.rt, systemPrompt), task)
+			err := loop.Run(innerCtx, nil, reg, orch, llm.NewSubagentPrompt(r.skills, r.rt, systemPrompt), task)
 			if err != nil {
 				emit.Output(err.Error())
 				emit.Complete(tasks.TaskResult{Error: err.Error()})

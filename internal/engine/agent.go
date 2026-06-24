@@ -1,26 +1,32 @@
-package llm
+package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"my-bot/internal/config"
+	"my-bot/internal/llm"
 	"my-bot/internal/tools"
+	"my-bot/internal/util"
 
 	"golang.org/x/time/rate"
 )
 
+// ErrAborted is returned when the agent loop is aborted via the abort channel.
 var ErrAborted = errors.New("aborted")
 
 type Agent struct {
-	client  CompletionClient
+	client  llm.CompletionClient
 	limiter *rate.Limiter
 }
 
-func NewAgent(client CompletionClient, limiter *rate.Limiter) *Agent {
+func NewAgent(client llm.CompletionClient, limiter *rate.Limiter) *Agent {
 	return &Agent{client: client, limiter: limiter}
 }
 
@@ -29,8 +35,8 @@ func (a *Agent) Run(
 	abortCh <-chan struct{},
 	cfg *config.Config,
 	systemPrompt string,
-	conv *Conversation,
-	orch Orchestrator,
+	conv *llm.Conversation,
+	orch llm.Orchestrator,
 	reg *tools.Registry,
 ) error {
 	abortCtx, abortCancel := context.WithCancel(ctx)
@@ -46,7 +52,7 @@ func (a *Agent) Run(
 		}()
 	}
 
-	systemMessages := []ChatMessage{
+	systemMessages := []llm.ChatMessage{
 		{Role: "system", Content: systemPrompt},
 	}
 
@@ -67,7 +73,7 @@ func (a *Agent) Run(
 				return err
 			}
 		}
-		resp, err := a.client.Complete(abortCtx, CompletionRequest{
+		resp, err := a.client.Complete(abortCtx, llm.CompletionRequest{
 			Model:          model,
 			Messages:       allMessages,
 			Tools:          reg.Schemas(),
@@ -93,13 +99,13 @@ func (a *Agent) Run(
 			"content", resp.Content,
 		)
 
-		assistantMsg := assistantMessage(resp.Content, resp.ReasoningContent, resp.ToolCalls)
+		assistantMsg := llm.AssistantMessage(resp.Content, resp.ReasoningContent, resp.ToolCalls)
 		conv.Messages = append(conv.Messages, assistantMsg)
 		orch.OnContentFinal(ctx, resp.Content)
 
 		if len(resp.ToolCalls) == 0 {
 			if resp.Content == "" {
-				conv.Messages = append(conv.Messages, userMessage("continue"))
+				conv.Messages = append(conv.Messages, llm.UserMessage("continue"))
 				continue
 			}
 			orch.OnFinalResponse(ctx, resp.Content)
@@ -126,7 +132,7 @@ func (a *Agent) Run(
 	}
 }
 
-func (a *Agent) Compress(ctx context.Context, cfg *config.Config, systemPrompt string, conv *Conversation) error {
+func (a *Agent) Compress(ctx context.Context, cfg *config.Config, systemPrompt string, conv *llm.Conversation) error {
 	if len(conv.Messages) < 2 {
 		return nil
 	}
@@ -135,7 +141,7 @@ func (a *Agent) Compress(ctx context.Context, cfg *config.Config, systemPrompt s
 	retained := conv.Messages[len(conv.Messages)-1]
 
 	compressMessages := buildCompressionMessages(systemPrompt, toEvict)
-	resp, err := a.client.Complete(ctx, CompletionRequest{
+	resp, err := a.client.Complete(ctx, llm.CompletionRequest{
 		Model:       cfg.LLM.Model,
 		Messages:    compressMessages,
 		MaxTokens:   cfg.Context.MaxOutputTokens,
@@ -149,7 +155,7 @@ func (a *Agent) Compress(ctx context.Context, cfg *config.Config, systemPrompt s
 	}
 
 	anchor := strings.TrimSpace(resp.Content)
-	conv.Messages = []ChatMessage{
+	conv.Messages = []llm.ChatMessage{
 		{Role: "user", Content: "[CONTEXT ANCHOR]\n" + anchor},
 		retained,
 	}
@@ -188,10 +194,62 @@ const compressionInstruction = "You are compressing context for an autonomous AI
 	"## Pending Issues\n" +
 	"Unresolved errors, blockers, or open questions."
 
-func buildCompressionMessages(systemPrompt string, messages []ChatMessage) []ChatMessage {
-	out := make([]ChatMessage, 0, len(messages)+2)
-	out = append(out, ChatMessage{Role: "system", Content: systemPrompt})
+func buildCompressionMessages(systemPrompt string, messages []llm.ChatMessage) []llm.ChatMessage {
+	out := make([]llm.ChatMessage, 0, len(messages)+2)
+	out = append(out, llm.ChatMessage{Role: "system", Content: systemPrompt})
 	out = append(out, messages...)
-	out = append(out, userMessage(compressionInstruction))
+	out = append(out, llm.UserMessage(compressionInstruction))
 	return out
+}
+
+// AgentLoop manages a per-session conversation loop.
+type AgentLoop struct {
+	cfg   *config.Config
+	agent *Agent
+	conv  *llm.Conversation
+}
+
+func NewAgentLoop(cfg *config.Config, agent *Agent) *AgentLoop {
+	return &AgentLoop{
+		cfg:   cfg,
+		agent: agent,
+		conv:  llm.NewConversation(),
+	}
+}
+
+func (l *AgentLoop) TotalTokens() int64 { return l.conv.TotalTokens }
+
+func (l *AgentLoop) ResetConv() { l.conv = llm.NewConversation() }
+
+func (l *AgentLoop) Run(ctx context.Context, abortCh <-chan struct{}, reg *tools.Registry, orch llm.Orchestrator, prompt llm.SystemPrompt, content any) error {
+	l.conv.Messages = append(l.conv.Messages, llm.ChatMessage{Role: "user", Content: content})
+	return l.agent.Run(ctx, abortCh, l.cfg, prompt.Build(ctx), l.conv, orch, reg)
+}
+
+func (l *AgentLoop) Compress(ctx context.Context, prompt llm.SystemPrompt) error {
+	return l.agent.Compress(ctx, l.cfg, prompt.Build(ctx), l.conv)
+}
+
+func (l *AgentLoop) DumpConversation(path string) error {
+	data, err := util.ToJSON(l.conv.Messages)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0600)
+}
+
+func (l *AgentLoop) LoadConversation(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var messages []llm.ChatMessage
+	if err := json.Unmarshal(data, &messages); err != nil {
+		return fmt.Errorf("unmarshal conversation: %w", err)
+	}
+	l.conv = &llm.Conversation{Messages: messages}
+	return nil
 }

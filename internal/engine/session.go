@@ -8,7 +8,6 @@ import (
 
 	"my-bot/internal/config"
 	"my-bot/internal/events"
-	"my-bot/internal/llm"
 	"my-bot/internal/runtime"
 	"my-bot/internal/tasks"
 	"my-bot/internal/tools"
@@ -18,12 +17,12 @@ type sessionTools struct {
 	rt          runtime.Runtime
 	skills      *tools.SkillLoader
 	cfg         *config.Config
-	agent       *llm.Agent
+	agent       *Agent
 	taskManager *tasks.Manager
 	cmdTools    *tools.CommandToolset
 }
 
-func newSessionTools(rt runtime.Runtime, skills *tools.SkillLoader, cfg *config.Config, agent *llm.Agent) *sessionTools {
+func newSessionTools(rt runtime.Runtime, skills *tools.SkillLoader, cfg *config.Config, agent *Agent) *sessionTools {
 	taskManager := tasks.NewManager(cfg.Tool.MaxOutputChars)
 	return &sessionTools{
 		rt:          rt,
@@ -36,7 +35,7 @@ func newSessionTools(rt runtime.Runtime, skills *tools.SkillLoader, cfg *config.
 }
 
 func (t *sessionTools) BuildRegistry(sender events.Outbound) *tools.Registry {
-	return llm.NewSessionRegistry(t.rt, t.skills, t.cfg, t.agent, t.taskManager, t.cmdTools, sender)
+	return NewSessionRegistry(t.rt, t.skills, t.cfg, t.agent, t.taskManager, t.cmdTools, sender)
 }
 
 func (t *sessionTools) Shutdown(ctx context.Context) error {
@@ -55,7 +54,7 @@ func newChatSession(
 	parent context.Context,
 	chatID string,
 	cfg *config.Config,
-	agent *llm.Agent,
+	agent *Agent,
 	rt runtime.Runtime,
 	skills *tools.SkillLoader,
 	cronLoader *CronLoader,

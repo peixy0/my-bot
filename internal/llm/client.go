@@ -64,11 +64,15 @@ func NewConversation() *Conversation {
 	return &Conversation{}
 }
 
-func userMessage(content string) ChatMessage {
+func UserMessage(content string) ChatMessage {
 	return ChatMessage{Role: "user", Content: content}
 }
 
-func assistantMessage(content, reasoningContent string, toolCalls []ToolCall) ChatMessage {
+func userMessage(content string) ChatMessage {
+	return UserMessage(content)
+}
+
+func AssistantMessage(content, reasoningContent string, toolCalls []ToolCall) ChatMessage {
 	msg := ChatMessage{Role: "assistant"}
 	if content != "" {
 		msg.Content = content
@@ -93,7 +97,11 @@ func assistantMessage(content, reasoningContent string, toolCalls []ToolCall) Ch
 	return msg
 }
 
-func toolResultMessage(callID, content string) ChatMessage {
+func assistantMessage(content, reasoningContent string, toolCalls []ToolCall) ChatMessage {
+	return AssistantMessage(content, reasoningContent, toolCalls)
+}
+
+func ToolResultMessage(callID, content string) ChatMessage {
 	return ChatMessage{
 		Role:       "tool",
 		ToolCallID: callID,
@@ -101,11 +109,29 @@ func toolResultMessage(callID, content string) ChatMessage {
 	}
 }
 
-func userBlocksMessage(text string, blocks []ContentPart) ChatMessage {
+func toolResultMessage(callID, content string) ChatMessage {
+	return ToolResultMessage(callID, content)
+}
+
+func UserBlocksMessage(text string, blocks []ContentPart) ChatMessage {
 	parts := make([]ContentPart, 0, len(blocks)+1)
 	if text != "" {
 		parts = append(parts, ContentPart{"type": "text", "text": text})
 	}
 	parts = append(parts, blocks...)
 	return ChatMessage{Role: "user", Content: parts}
+}
+
+func userBlocksMessage(text string, blocks []ContentPart) ChatMessage {
+	return UserBlocksMessage(text, blocks)
+}
+
+// Orchestrator controls the interaction between the LLM and the outside world.
+// Implementations handle content streaming, tool dispatch, and user injection.
+type Orchestrator interface {
+	OnContentDelta(ctx context.Context, delta string)
+	OnContentFinal(ctx context.Context, content string)
+	OnFinalResponse(ctx context.Context, content string)
+	BeforeToolUse(ctx context.Context, content string)
+	DispatchTools(ctx context.Context, calls []ToolCall) ([]ChatMessage, error)
 }

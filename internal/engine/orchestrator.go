@@ -1,4 +1,4 @@
-package llm
+package engine
 
 import (
 	"context"
@@ -10,19 +10,12 @@ import (
 
 	"my-bot/internal/events"
 	"my-bot/internal/inbox"
+	"my-bot/internal/llm"
 	"my-bot/internal/tasks"
 	"my-bot/internal/tools"
 
 	"golang.org/x/sync/errgroup"
 )
-
-type Orchestrator interface {
-	OnContentDelta(ctx context.Context, delta string)
-	OnContentFinal(ctx context.Context, content string)
-	OnFinalResponse(ctx context.Context, content string)
-	BeforeToolUse(ctx context.Context, content string)
-	DispatchTools(ctx context.Context, calls []ToolCall) ([]ChatMessage, error)
-}
 
 type HumanInputOrchestrator struct {
 	registry      *tools.Registry
@@ -58,7 +51,7 @@ func (o *HumanInputOrchestrator) OnFinalResponse(_ context.Context, _ string) {}
 
 func (o *HumanInputOrchestrator) BeforeToolUse(_ context.Context, _ string) {}
 
-func (o *HumanInputOrchestrator) DispatchTools(ctx context.Context, calls []ToolCall) ([]ChatMessage, error) {
+func (o *HumanInputOrchestrator) DispatchTools(ctx context.Context, calls []llm.ToolCall) ([]llm.ChatMessage, error) {
 	toolMsgs, err := runDispatch(ctx, o.registry, calls)
 	if err != nil {
 		return nil, err
@@ -70,7 +63,7 @@ func (o *HumanInputOrchestrator) DispatchTools(ctx context.Context, calls []Tool
 	return toolMsgs, nil
 }
 
-func (o *HumanInputOrchestrator) drainInLoopInput() *ChatMessage {
+func (o *HumanInputOrchestrator) drainInLoopInput() *llm.ChatMessage {
 	var items []events.MessageEvent
 	for {
 		msg, ok := o.inLoopInbox.TryReceive()
@@ -104,10 +97,10 @@ func (o *HumanInputOrchestrator) drainInLoopInput() *ChatMessage {
 	}
 	text := strings.TrimSpace(sb.String())
 	if len(imageParts) == 0 {
-		msg := userMessage(text)
+		msg := llm.UserMessage(text)
 		return &msg
 	}
-	msg := userBlocksMessage(text, imageParts)
+	msg := llm.UserBlocksMessage(text, imageParts)
 	return &msg
 }
 
@@ -134,7 +127,7 @@ func (o *BackgroundOrchestrator) OnFinalResponse(ctx context.Context, content st
 
 func (o *BackgroundOrchestrator) BeforeToolUse(_ context.Context, _ string) {}
 
-func (o *BackgroundOrchestrator) DispatchTools(ctx context.Context, calls []ToolCall) ([]ChatMessage, error) {
+func (o *BackgroundOrchestrator) DispatchTools(ctx context.Context, calls []llm.ToolCall) ([]llm.ChatMessage, error) {
 	return runDispatch(ctx, o.registry, calls)
 }
 
@@ -160,7 +153,7 @@ func (o *SubagentOrchestrator) OnFinalResponse(_ context.Context, content string
 
 func (o *SubagentOrchestrator) BeforeToolUse(_ context.Context, _ string) {}
 
-func (o *SubagentOrchestrator) DispatchTools(ctx context.Context, calls []ToolCall) ([]ChatMessage, error) {
+func (o *SubagentOrchestrator) DispatchTools(ctx context.Context, calls []llm.ToolCall) ([]llm.ChatMessage, error) {
 	toolMsgs, err := runDispatch(ctx, o.registry, calls)
 	if err != nil {
 		return nil, err
@@ -171,7 +164,7 @@ func (o *SubagentOrchestrator) DispatchTools(ctx context.Context, calls []ToolCa
 	return toolMsgs, nil
 }
 
-func (o *SubagentOrchestrator) drainInput() *ChatMessage {
+func (o *SubagentOrchestrator) drainInput() *llm.ChatMessage {
 	if o.input == nil {
 		return nil
 	}
@@ -186,7 +179,7 @@ func (o *SubagentOrchestrator) drainInput() *ChatMessage {
 			if len(items) == 0 {
 				return nil
 			}
-			msg := userMessage(strings.Join(items, "\n\n"))
+			msg := llm.UserMessage(strings.Join(items, "\n\n"))
 			return &msg
 		}
 	}
@@ -203,20 +196,20 @@ func appendVisionImagePart(parts []map[string]any, ev events.ImageInputEvent) []
 }
 
 type dispatchResult struct {
-	toolMsg  ChatMessage
-	followup *ChatMessage
+	toolMsg  llm.ChatMessage
+	followup *llm.ChatMessage
 }
 
-func execOne(ctx context.Context, r *tools.Registry, tc ToolCall) dispatchResult {
+func execOne(ctx context.Context, r *tools.Registry, tc llm.ToolCall) dispatchResult {
 	handler, ok := r.Handler(tc.Name)
 	if !ok {
-		return dispatchResult{toolMsg: toolResultMessage(tc.ID, fmt.Sprintf("unknown tool %q", tc.Name))}
+		return dispatchResult{toolMsg: llm.ToolResultMessage(tc.ID, fmt.Sprintf("unknown tool %q", tc.Name))}
 	}
 	slog.Debug("tool call start", "tool", tc.Name, "id", tc.ID, "args", string(tc.Args))
 	result, err := handler(ctx, tc.Args)
 	if err != nil {
 		slog.Debug("tool call error", "tool", tc.Name, "id", tc.ID, "err", err)
-		return dispatchResult{toolMsg: toolResultMessage(tc.ID, fmt.Sprintf("error: %v", err))}
+		return dispatchResult{toolMsg: llm.ToolResultMessage(tc.ID, fmt.Sprintf("error: %v", err))}
 	}
 	slog.Debug("tool call done", "tool", tc.Name, "id", tc.ID, "result", result.Text)
 	if result.Blocks != nil {
@@ -224,24 +217,24 @@ func execOne(ctx context.Context, r *tools.Registry, tc ToolCall) dispatchResult
 		if strings.TrimSpace(toolText) == "" {
 			toolText = fmt.Sprintf("%s returned non-text content. A follow-up user message contains the multimodal payload.", tc.Name)
 		}
-		followup := userBlocksMessage(
+		followup := llm.UserBlocksMessage(
 			fmt.Sprintf("[TOOL OUTPUT FROM %s]\nInspect the attached content and continue with the task.", tc.ID),
 			result.Blocks,
 		)
 		return dispatchResult{
-			toolMsg:  toolResultMessage(tc.ID, toolText),
+			toolMsg:  llm.ToolResultMessage(tc.ID, toolText),
 			followup: &followup,
 		}
 	}
-	return dispatchResult{toolMsg: toolResultMessage(tc.ID, result.Text)}
+	return dispatchResult{toolMsg: llm.ToolResultMessage(tc.ID, result.Text)}
 }
 
-func runDispatch(ctx context.Context, r *tools.Registry, calls []ToolCall) ([]ChatMessage, error) {
+func runDispatch(ctx context.Context, r *tools.Registry, calls []llm.ToolCall) ([]llm.ChatMessage, error) {
 	results := make([]dispatchResult, len(calls))
 
 	if len(calls) == 1 {
 		res := execOne(ctx, r, calls[0])
-		msgs := []ChatMessage{res.toolMsg}
+		msgs := []llm.ChatMessage{res.toolMsg}
 		if res.followup != nil {
 			msgs = append(msgs, *res.followup)
 		}
@@ -266,7 +259,7 @@ func runDispatch(ctx context.Context, r *tools.Registry, calls []ToolCall) ([]Ch
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
-	msgs := make([]ChatMessage, 0, len(calls)*2)
+	msgs := make([]llm.ChatMessage, 0, len(calls)*2)
 	for _, res := range results {
 		msgs = append(msgs, res.toolMsg)
 	}

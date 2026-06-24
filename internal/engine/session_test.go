@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"my-bot/internal/config"
-	"my-bot/internal/llm"
 )
 
 func TestNewChatSessionOwnsWorkerResources(t *testing.T) {
@@ -16,7 +15,7 @@ func TestNewChatSessionOwnsWorkerResources(t *testing.T) {
 		ctx,
 		"chat-1",
 		&config.Config{Tool: config.ToolConfig{MaxOutputChars: 1000}},
-		llm.NewAgent(nil, nil),
+		NewAgent(nil, nil),
 		nil,
 		nil,
 		nil,

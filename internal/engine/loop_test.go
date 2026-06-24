@@ -1,4 +1,4 @@
-package llm
+package engine
 
 import (
 	"os"
@@ -6,11 +6,12 @@ import (
 	"testing"
 
 	"my-bot/internal/config"
+	"my-bot/internal/llm"
 )
 
 func TestAgentLoopDumpAndLoadConversation(t *testing.T) {
 	loop := NewAgentLoop(&config.Config{}, NewAgent(nil, nil))
-	loop.conv.Messages = []ChatMessage{
+	loop.conv.Messages = []llm.ChatMessage{
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "hi"},
 	}
@@ -38,7 +39,7 @@ func TestAgentLoopDumpAndLoadConversation(t *testing.T) {
 
 func TestAgentLoopLoadConversationInvalidJSONDoesNotOverwrite(t *testing.T) {
 	loop := NewAgentLoop(&config.Config{}, NewAgent(nil, nil))
-	loop.conv.Messages = []ChatMessage{{Role: "user", Content: "keep me"}}
+	loop.conv.Messages = []llm.ChatMessage{{Role: "user", Content: "keep me"}}
 
 	path := filepath.Join(t.TempDir(), "bad.json")
 	if err := os.WriteFile(path, []byte(`{"not":"a message array"}`), 0600); err != nil {

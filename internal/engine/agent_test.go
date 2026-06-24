@@ -1,4 +1,4 @@
-package llm
+package engine
 
 import (
 	"context"
@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"my-bot/internal/config"
+	"my-bot/internal/llm"
 	"my-bot/internal/tools"
 )
 
 type mockClient struct {
-	responses []CompletionResponse
+	responses []llm.CompletionResponse
 	calls     []mockCompletionCall
 	callCount int
 	abortCh   chan struct{}
@@ -19,13 +20,13 @@ type mockClient struct {
 
 type mockCompletionCall struct {
 	model       string
-	messages    []ChatMessage
+	messages    []llm.ChatMessage
 	tools       []map[string]any
 	maxTokens   int64
 	temperature float64
 }
 
-func (m *mockClient) Complete(ctx context.Context, req CompletionRequest) (CompletionResponse, error) {
+func (m *mockClient) Complete(ctx context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
 	m.calls = append(m.calls, mockCompletionCall{
 		model:       req.Model,
 		messages:    cloneMessages(req.Messages),
@@ -36,7 +37,7 @@ func (m *mockClient) Complete(ctx context.Context, req CompletionRequest) (Compl
 	idx := m.callCount
 	m.callCount++
 	if idx >= len(m.responses) {
-		return CompletionResponse{FinishReason: "stop"}, nil
+		return llm.CompletionResponse{FinishReason: "stop"}, nil
 	}
 	resp := m.responses[idx]
 	if req.OnContentDelta != nil && resp.Content != "" {
@@ -51,8 +52,8 @@ func (m *mockClient) Complete(ctx context.Context, req CompletionRequest) (Compl
 	return resp, nil
 }
 
-func cloneMessages(messages []ChatMessage) []ChatMessage {
-	out := make([]ChatMessage, len(messages))
+func cloneMessages(messages []llm.ChatMessage) []llm.ChatMessage {
+	out := make([]llm.ChatMessage, len(messages))
 	copy(out, messages)
 	return out
 }
@@ -91,23 +92,23 @@ func (o *mockOrchestrator) OnFinalResponse(_ context.Context, content string) {
 func (o *mockOrchestrator) BeforeToolUse(_ context.Context, _ string) {
 	o.beforeToolCalls++
 }
-func (o *mockOrchestrator) DispatchTools(_ context.Context, calls []ToolCall) ([]ChatMessage, error) {
+func (o *mockOrchestrator) DispatchTools(_ context.Context, calls []llm.ToolCall) ([]llm.ChatMessage, error) {
 	o.dispatches++
-	msgs := make([]ChatMessage, len(calls))
+	msgs := make([]llm.ChatMessage, len(calls))
 	for i, tc := range calls {
-		msgs[i] = toolResultMessage(tc.ID, "result")
+		msgs[i] = llm.ToolResultMessage(tc.ID, "result")
 	}
 	return msgs, nil
 }
 
 func TestAgent_ToolCallDispatch(t *testing.T) {
 	client := &mockClient{
-		responses: []CompletionResponse{
+		responses: []llm.CompletionResponse{
 			{
 				Content:          "thinking",
 				ReasoningContent: "private chain",
 				FinishReason:     "tool_calls",
-				ToolCalls:        []ToolCall{{ID: "call1", Name: "test", Args: []byte(`{}`)}},
+				ToolCalls:        []llm.ToolCall{{ID: "call1", Name: "test", Args: []byte(`{}`)}},
 				TotalTokens:      50,
 			},
 			{Content: "final", FinishReason: "stop", TotalTokens: 100},
@@ -115,8 +116,8 @@ func TestAgent_ToolCallDispatch(t *testing.T) {
 	}
 
 	agent := NewAgent(client, nil)
-	conv := NewConversation()
-	conv.Messages = append(conv.Messages, userMessage("do something"))
+	conv := llm.NewConversation()
+	conv.Messages = append(conv.Messages, llm.UserMessage("do something"))
 	orch := newMockOrchestrator()
 
 	cfg := &config.Config{LLM: config.LLMConfig{Model: "test-model"}, Context: config.ContextConfig{MaxOutputTokens: 16384}}
@@ -145,11 +146,11 @@ func TestAgent_ToolCallDispatch(t *testing.T) {
 
 func TestAgent_BeforeToolUseErrorNonFatal(t *testing.T) {
 	client := &mockClient{
-		responses: []CompletionResponse{
+		responses: []llm.CompletionResponse{
 			{
 				Content:      "msg",
 				FinishReason: "tool_calls",
-				ToolCalls:    []ToolCall{{ID: "c1", Name: "t", Args: []byte(`{}`)}},
+				ToolCalls:    []llm.ToolCall{{ID: "c1", Name: "t", Args: []byte(`{}`)}},
 				TotalTokens:  10,
 			},
 			{Content: "ok", FinishReason: "stop", TotalTokens: 20},
@@ -157,8 +158,8 @@ func TestAgent_BeforeToolUseErrorNonFatal(t *testing.T) {
 	}
 
 	agent := NewAgent(client, nil)
-	conv := NewConversation()
-	conv.Messages = append(conv.Messages, userMessage("hi"))
+	conv := llm.NewConversation()
+	conv.Messages = append(conv.Messages, llm.UserMessage("hi"))
 	orch := newMockOrchestrator()
 
 	err := agent.Run(context.Background(), nil, &config.Config{LLM: config.LLMConfig{Model: "test-model"}, Context: config.ContextConfig{MaxOutputTokens: 16384}}, "sys", conv, orch, tools.NewRegistry())
@@ -173,11 +174,11 @@ func TestAgent_BeforeToolUseErrorNonFatal(t *testing.T) {
 
 func TestAgent_CompressionOnHighTokens(t *testing.T) {
 	client := &mockClient{
-		responses: []CompletionResponse{
+		responses: []llm.CompletionResponse{
 			{
 				Content:      "big response",
 				FinishReason: "tool_calls",
-				ToolCalls:    []ToolCall{{ID: "c1", Name: "x", Args: []byte(`{}`)}},
+				ToolCalls:    []llm.ToolCall{{ID: "c1", Name: "x", Args: []byte(`{}`)}},
 				TotalTokens:  9000,
 			},
 			{Content: "compressed result", FinishReason: "stop", TotalTokens: 500},
@@ -185,13 +186,13 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 	}
 
 	agent := NewAgent(client, nil)
-	conv := NewConversation()
-	conv.Messages = append(conv.Messages, userMessage("start"))
+	conv := llm.NewConversation()
+	conv.Messages = append(conv.Messages, llm.UserMessage("start"))
 	orch := newMockOrchestrator()
 
 	client.responses = append(client.responses[:1],
-		CompletionResponse{Content: "anchor summary", FinishReason: "stop", TotalTokens: 200},
-		CompletionResponse{Content: "final", FinishReason: "stop", TotalTokens: 300},
+		llm.CompletionResponse{Content: "anchor summary", FinishReason: "stop", TotalTokens: 200},
+		llm.CompletionResponse{Content: "final", FinishReason: "stop", TotalTokens: 300},
 	)
 
 	cfg := &config.Config{
@@ -272,15 +273,15 @@ func TestAgent_AbortDuringCompletion(t *testing.T) {
 	abortCh := make(chan struct{})
 
 	client := &mockClient{
-		responses: []CompletionResponse{
+		responses: []llm.CompletionResponse{
 			{Content: "aborted", FinishReason: "stop"},
 		},
 		abortCh: abortCh,
 	}
 
 	agent := NewAgent(client, nil)
-	conv := NewConversation()
-	conv.Messages = append(conv.Messages, userMessage("hello"))
+	conv := llm.NewConversation()
+	conv.Messages = append(conv.Messages, llm.UserMessage("hello"))
 	orch := newMockOrchestrator()
 
 	wg := &sync.WaitGroup{}
@@ -305,11 +306,11 @@ func TestAgent_AbortDuringToolExecution(t *testing.T) {
 	abortCh := make(chan struct{})
 
 	client := &mockClient{
-		responses: []CompletionResponse{
+		responses: []llm.CompletionResponse{
 			{
 				Content:      "call tool",
 				FinishReason: "tool_calls",
-				ToolCalls:    []ToolCall{{ID: "c1", Name: "t", Args: []byte(`{}`)}},
+				ToolCalls:    []llm.ToolCall{{ID: "c1", Name: "t", Args: []byte(`{}`)}},
 			},
 			{Content: "should not reach", FinishReason: "stop"},
 		},
@@ -317,8 +318,8 @@ func TestAgent_AbortDuringToolExecution(t *testing.T) {
 	}
 
 	agent := NewAgent(client, nil)
-	conv := NewConversation()
-	conv.Messages = append(conv.Messages, userMessage("start"))
+	conv := llm.NewConversation()
+	conv.Messages = append(conv.Messages, llm.UserMessage("start"))
 	orch := &mockOrchestratorWithAbort{
 		mockOrchestrator: mockOrchestrator{registry: tools.NewRegistry()},
 		abortCh:          abortCh,
@@ -349,12 +350,12 @@ func TestAgent_AbortDuringToolExecution(t *testing.T) {
 
 func TestAgent_AbortNoActiveCompletion(t *testing.T) {
 	agent := NewAgent(&mockClient{
-		responses: []CompletionResponse{
+		responses: []llm.CompletionResponse{
 			{Content: "ok", FinishReason: "stop"},
 		},
 	}, nil)
-	conv := NewConversation()
-	conv.Messages = append(conv.Messages, userMessage("hi"))
+	conv := llm.NewConversation()
+	conv.Messages = append(conv.Messages, llm.UserMessage("hi"))
 	orch := newMockOrchestrator()
 
 	err := agent.Run(context.Background(), nil, &config.Config{
@@ -372,7 +373,7 @@ type mockOrchestratorWithAbort struct {
 	abortCh chan struct{}
 }
 
-func (o *mockOrchestratorWithAbort) DispatchTools(_ context.Context, calls []ToolCall) ([]ChatMessage, error) {
+func (o *mockOrchestratorWithAbort) DispatchTools(_ context.Context, calls []llm.ToolCall) ([]llm.ChatMessage, error) {
 	result, err := o.mockOrchestrator.DispatchTools(context.Background(), calls)
 	go func() {
 		select {

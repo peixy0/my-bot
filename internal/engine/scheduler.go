@@ -12,14 +12,13 @@ import (
 	"my-bot/internal/config"
 	"my-bot/internal/events"
 	"my-bot/internal/inbox"
-	"my-bot/internal/llm"
 	"my-bot/internal/runtime"
 	"my-bot/internal/tools"
 )
 
 type Scheduler struct {
 	cfg        *config.Config
-	agent      *llm.Agent
+	agent      *Agent
 	rt         runtime.Runtime
 	skills     *tools.SkillLoader
 	inbox      inbox.Inbox[events.AgentEvent]
@@ -30,7 +29,7 @@ type Scheduler struct {
 
 func NewScheduler(
 	cfg *config.Config,
-	agent *llm.Agent,
+	agent *Agent,
 	rt runtime.Runtime,
 	skills *tools.SkillLoader,
 	agentInbox inbox.Inbox[events.AgentEvent],
