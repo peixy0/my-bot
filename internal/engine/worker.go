@@ -411,7 +411,7 @@ func (w *ConversationWorker) conversationPath(id string) string {
 
 func wrapUserMessage(msg string) string {
 	now := time.Now()
-	return fmt.Sprintf("message time: %s\n\n%s",
+	return fmt.Sprintf("MESSAGE TIME: %s\n\n%s",
 		now.Format("2006-01-02 15:04:05 MST-0700"),
 		msg)
 }
