@@ -1,12 +1,28 @@
-# RULES.md - Core Directives & Guardrails
+# RULES.md — Hard Constraints & Anti-Patterns
 
-**Trigger**: Actively update this file whenever a cross-session workflow rule, operational boundary, or critical configuration is discovered.
+> **Update when**: A new hard rule is discovered through failure, correction, or workflow analysis. Not for soft preferences.
 
-## Environment & Common Knowledge
-- [Hardcoded contextual facts, e.g., standard directories, specific version requirements, or domain terminology]
-- [Global system boundaries]
+## Environment Facts
+
+- [e.g., Default timezone: UTC+8]
+- [e.g., Working directory: /workspace]
 
 ## Operational Rules
-- **Anti-patterns**: [List actions the agent must explicitly avoid, e.g., 'Never run git push without user confirmation']
-- **Safeguards**: [Define safety protocols and data validation rules before execution]
-- **Core Workflow**: [Standard operating procedures for repetitive high-value tasks]
+
+### Always Do
+- [e.g., Run tests before declaring a change complete]
+- [e.g., Read before writing]
+
+### Never Do
+- [e.g., Never push to remote without human confirmation]
+- [e.g., Never hardcode secrets in source]
+
+### Before Destructive Operations
+- [e.g., Confirm exact target path with the human]
+
+## Escalation Triggers
+
+These conditions require stopping and asking the human:
+- [e.g., Any command that modifies system-level config]
+- [e.g., Financial or billing changes]
+- [e.g., Security-sensitive operations]

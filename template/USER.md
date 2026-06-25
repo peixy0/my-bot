@@ -1,46 +1,27 @@
-# USER.md
+# USER.md — Human Profile
 
-This file is used to maintain the user's long-term profile (User Profile), including habits, preferences, working styles, communication preferences, and other stable characteristics learned throughout conversations.
+> **Update when**: A stable preference emerges from conversation. Explicit human statements override your inferences.
 
-## Core Principles
+## Communication Style
 
-### 1. Record Only Long-Term Relevant Information
+- [e.g., Prefers Chinese for casual, English for technical [confirmed]]
+- [e.g., Likes concise answers — expand only when asked [confirmed]]
 
-Only store information that is likely to remain useful across future interactions, such as:
+## Work Patterns
 
-* Learning interests
-* Communication preferences
-* Preferred output formats
-* Decision-making style
-* Long-term interests and hobbies
-* Language preferences
+- [e.g., Active hours: 10:00–01:00 [inferred]]
+- [e.g., Prefers no interruptions during deep work [inferred]]
 
-Do **not** record one-time, temporary, or event-specific information.
+## Technical Preferences
 
-### 2. Keep It Updated
+- [e.g., Go for backend, TypeScript for frontend [confirmed]]
+- [e.g., Integration tests over unit tests [inferred]]
 
-Whenever a new stable preference or characteristic is identified, update `USER.md` immediately.
+## Decision-Making Style
 
-Update priorities:
+- [e.g., Wants options with trade-offs, then makes the call [inferred]]
 
-* Newer information overrides older information.
-* Explicit user statements take precedence over inferred preferences.
-* Repeated patterns are more reliable than single observations.
-* User corrections should immediately replace previous records.
+## Anti-Patterns (What NOT to Do)
 
-### 3. Keep It Concise and Structured
-
-Store information in a structured format whenever possible.
-
-Prefer:
-
-* Categories
-* Tags
-* Bullet points
-
-Avoid:
-
-* Raw conversation logs
-* Full chat transcripts
-* Excessively detailed narratives
-
+- [e.g., Don't over-explain basics [inferred]]
+- [e.g., Don't hedge — pick a recommendation and justify it [confirmed]]

@@ -1,15 +1,28 @@
-# INSIGHTS.md - Strategic Archival & Macro Observations
+# INSIGHTS.md — Long-Term Strategic Memory
 
-This document serves as the long-term memory vault for macro trends, architectural milestones, and structural shifts. Do NOT pollute this file with short-form daily logs.
+> **Update when**: A pattern is confirmed across multiple observations. Promote from journal only when confident.
+> **Do NOT put here**: Daily notes, debugging logs, one-time findings.
 
----
+## Active Trends
 
-## 🚀 Active Trends Watch
-- **[Domain / Tech Stack]**:
-  - [High-level evaluation of a shifting trend, e.g., The shift from monolithic REST to edge-deployed microservices]
+- **[Domain]**: [One-line assessment]
+  - Updated: YYYY-MM-DD | Confidence: [inferred/confirmed]
 
-## 📝 Hypothesis & Watchlist
-- [Metrics, upcoming releases, or hypotheses that require ongoing verification over the next 1-3 months]
+## Hypotheses Under Verification
 
-## 📅 Historical Milestones (Archived)
-- [Historically significant pivots or decisions that continuously inform current architectural approaches]
+- **[Hypothesis]**: [What you expect and by when]
+  - Status: [open/confirmed/disproved]
+
+## Architecture Decisions
+
+- **[Decision]**: [What was chosen and why]
+  - Date: YYYY-MM-DD
+  - Alternatives considered: [What was rejected]
+
+## Historical Milestones
+
+- **YYYY-MM-DD**: [What happened and why it matters]
+
+## Accumulated Lessons
+
+- [Generalized knowledge from repeated experience]
