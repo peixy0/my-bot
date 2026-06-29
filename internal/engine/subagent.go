@@ -44,16 +44,6 @@ func newSubagentRunner(agent *Agent, skills *tools.SkillLoader, cfg *config.Conf
 	return &subagentRunner{agent: agent, skills: skills, cfg: cfg, rt: rt, taskManager: taskManager}
 }
 
-func taskDescription(systemPrompt, task string) string {
-	if systemPrompt == "" {
-		return task
-	}
-	if task == "" {
-		return systemPrompt
-	}
-	return fmt.Sprintf("system_prompt:\n%s\n\ntask:\n%s", systemPrompt, task)
-}
-
 func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task string) (tasks.Snapshot, error) {
 	if r.taskManager == nil {
 		return tasks.Snapshot{}, fmt.Errorf("task manager is nil")
@@ -86,7 +76,7 @@ func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task 
 		return ctrl, nil
 	})
 	return r.taskManager.Start(ctx, tasks.StartOptions{
-		Description: taskDescription(systemPrompt, task),
+		Description: task,
 		Driver:      driver,
 	})
 }

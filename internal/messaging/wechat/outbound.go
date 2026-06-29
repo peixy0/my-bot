@@ -2,11 +2,16 @@ package wechat
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	rand "math/rand/v2"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"my-bot/internal/runtime"
 )
 
 const maxChunkLen = 2000
@@ -16,13 +21,15 @@ type Outbound struct {
 	fromUserID   string
 	contextToken string
 	partial      strings.Builder
+	rt           runtime.Runtime
 }
 
-func NewOutbound(hc *httpClient, fromUserID, contextToken string) *Outbound {
+func NewOutbound(hc *httpClient, fromUserID, contextToken string, rt runtime.Runtime) *Outbound {
 	return &Outbound{
 		hc:           hc,
 		fromUserID:   fromUserID,
 		contextToken: contextToken,
+		rt:           rt,
 	}
 }
 
@@ -93,6 +100,125 @@ func (o *Outbound) sendText(ctx context.Context, text string) error {
 
 func newClientID() string {
 	return fmt.Sprintf("mybot:%d-%08x", time.Now().UnixMilli(), rand.Uint32())
+}
+
+type getUploadURLReq struct {
+	FileKey     string   `json:"filekey"`
+	MediaType   int      `json:"media_type"`
+	ToUserID    string   `json:"to_user_id"`
+	RawSize     int64    `json:"rawsize"`
+	RawFileMD5  string   `json:"rawfilemd5"`
+	FileSize    int64    `json:"filesize"`
+	AESKey      string   `json:"aeskey"`
+	NoNeedThumb bool     `json:"no_need_thumb"`
+	BaseInfo    baseInfo `json:"base_info"`
+}
+
+type uploadParam struct {
+	EncryptedQueryParam string `json:"encrypted_query_param"`
+	FileKey             string `json:"filekey"`
+	AESKey              string `json:"aes_key"`
+}
+
+type getUploadURLResp struct {
+	UploadParam   uploadParam `json:"upload_param"`
+	UploadFullURL string      `json:"upload_full_url"`
+}
+
+const (
+	mediaTypeImage = 1
+	mediaTypeFile  = 3
+)
+
+func rawMD5(data []byte) string {
+	sum := md5.Sum(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func (o *Outbound) uploadMedia(ctx context.Context, mediaType int, fileKey string, data []byte) (CDNMedia, error) {
+	aesKey, err := generateAESKey()
+	if err != nil {
+		return CDNMedia{}, fmt.Errorf("generate AES key: %w", err)
+	}
+	encData, err := encryptAES128ECB(aesKey, data)
+	if err != nil {
+		return CDNMedia{}, fmt.Errorf("encrypt: %w", err)
+	}
+
+	uploadReq := getUploadURLReq{
+		FileKey:     fileKey,
+		MediaType:   mediaType,
+		ToUserID:    o.fromUserID,
+		RawSize:     int64(len(data)),
+		RawFileMD5:  rawMD5(data),
+		FileSize:    int64(len(encData)),
+		AESKey:      hex.EncodeToString(aesKey),
+		NoNeedThumb: true,
+		BaseInfo:    newBaseInfo(),
+	}
+	var uploadResp getUploadURLResp
+	if err := o.hc.post(ctx, pathGetUploadURL, uploadReq, &uploadResp); err != nil {
+		return CDNMedia{}, fmt.Errorf("getuploadurl: %w", err)
+	}
+
+	encQueryParam, err := cdnUpload(ctx, uploadResp.UploadFullURL, encData)
+	if err != nil {
+		return CDNMedia{}, fmt.Errorf("cdn upload: %w", err)
+	}
+
+	return CDNMedia{
+		EncryptQueryParam: encQueryParam,
+		AESKey:            hex.EncodeToString(aesKey),
+		EncryptType:       1,
+	}, nil
+}
+
+func (o *Outbound) sendImage(ctx context.Context, data []byte) error {
+	media, err := o.uploadMedia(ctx, mediaTypeImage, newClientID(), data)
+	if err != nil {
+		return err
+	}
+	req := sendMessageReq{
+		Msg: wxSendMsg{
+			ToUserID:     o.fromUserID,
+			ClientID:     newClientID(),
+			MessageType:  msgTypeBot,
+			MessageState: msgStateFinish,
+			ContextToken: o.contextToken,
+			ItemList: []wxItem{
+				{Type: itemTypeImage, ImageItem: &wxImageItem{Media: media}},
+			},
+		},
+		BaseInfo: newBaseInfo(),
+	}
+	return o.hc.post(ctx, pathSendMessage, req, nil)
+}
+
+func (o *Outbound) sendFile(ctx context.Context, filename string, data []byte) error {
+	fileKey := filepath.Base(filename) + "-" + newClientID()
+	media, err := o.uploadMedia(ctx, mediaTypeFile, fileKey, data)
+	if err != nil {
+		return err
+	}
+	req := sendMessageReq{
+		Msg: wxSendMsg{
+			ToUserID:     o.fromUserID,
+			ClientID:     newClientID(),
+			MessageType:  msgTypeBot,
+			MessageState: msgStateFinish,
+			ContextToken: o.contextToken,
+			ItemList: []wxItem{
+				{Type: itemTypeFile, FileItem: &wxFileItem{
+					Media:    media,
+					FileName: filename,
+					MD5:      rawMD5(data),
+					Len:      fmt.Sprintf("%d", len(data)),
+				}},
+			},
+		},
+		BaseInfo: newBaseInfo(),
+	}
+	return o.hc.post(ctx, pathSendMessage, req, nil)
 }
 
 func splitText(text string, maxLen int) []string {

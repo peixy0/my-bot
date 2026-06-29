@@ -29,6 +29,7 @@ const (
 	pathGetQRCodeStatus = "/ilink/bot/get_qrcode_status"
 	pathGetUpdates      = "/ilink/bot/getupdates"
 	pathSendMessage     = "/ilink/bot/sendmessage"
+	pathGetUploadURL    = "/ilink/bot/getuploadurl"
 )
 
 type baseInfo struct {

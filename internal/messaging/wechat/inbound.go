@@ -11,6 +11,7 @@ import (
 	"my-bot/internal/events"
 	"my-bot/internal/inbox"
 	"my-bot/internal/messaging/dedup"
+	"my-bot/internal/runtime"
 )
 
 const enqueueTimeout = 5 * time.Second
@@ -21,12 +22,14 @@ type Inbound struct {
 	hc     *httpClient
 	cursor string
 	dedup  *dedup.Dedup
+	rt     runtime.Runtime
 }
 
-func NewInbound(cfg Config, agentInbox inbox.Inbox[events.AgentEvent]) *Inbound {
+func NewInbound(cfg Config, agentInbox inbox.Inbox[events.AgentEvent], rt runtime.Runtime) *Inbound {
 	return &Inbound{
 		cfg:   cfg,
 		inbox: agentInbox,
+		rt:    rt,
 	}
 }
 
@@ -220,17 +223,42 @@ type wxMsg struct {
 }
 
 type wxItem struct {
-	Type     int         `json:"type"`
-	TextItem *wxTextItem `json:"text_item,omitempty"`
+	Type      int          `json:"type"`
+	TextItem  *wxTextItem  `json:"text_item,omitempty"`
+	ImageItem *wxImageItem `json:"image_item,omitempty"`
+	FileItem  *wxFileItem  `json:"file_item,omitempty"`
 }
 
 type wxTextItem struct {
 	Text string `json:"text"`
 }
 
+type CDNMedia struct {
+	EncryptQueryParam string `json:"encrypt_query_param"`
+	AESKey            string `json:"aes_key"`
+	EncryptType       int    `json:"encrypt_type"`
+	FullURL           string `json:"full_url"`
+}
+
+type wxImageItem struct {
+	Media      CDNMedia `json:"media"`
+	ThumbMedia CDNMedia `json:"thumb_media"`
+	AESKey     string   `json:"aeskey"` // alternate key field (hex format)
+	URL        string   `json:"url"`
+}
+
+type wxFileItem struct {
+	Media    CDNMedia `json:"media"`
+	FileName string   `json:"file_name"`
+	MD5      string   `json:"md5"`
+	Len      string   `json:"len"`
+}
+
 const (
-	msgTypeUser  = 1
-	itemTypeText = 1
+	msgTypeUser   = 1
+	itemTypeText  = 1
+	itemTypeImage = 2
+	itemTypeFile  = 4
 )
 
 func (i *Inbound) poll(ctx context.Context) error {
@@ -261,17 +289,70 @@ func (i *Inbound) poll(ctx context.Context) error {
 }
 
 func (i *Inbound) processMessage(ctx context.Context, msg wxMsg, hc *httpClient) {
+	outbound := NewOutbound(hc, msg.FromUserID, msg.ContextToken, i.rt)
+
+	if imgData, ok := extractImage(ctx, msg); ok {
+		i.enqueue(ctx, events.ImageInputEvent{
+			ChatID:    msg.FromUserID,
+			MessageID: msg.ClientID,
+			ImageData: imgData,
+			MIMEType:  "image/jpeg",
+			Sender:    outbound,
+		})
+		return
+	}
+
 	text := extractText(msg)
 	if text == "" {
 		return
 	}
-	outbound := NewOutbound(hc, msg.FromUserID, msg.ContextToken)
 	i.enqueue(ctx, events.TextInputEvent{
 		ChatID:    msg.FromUserID,
 		MessageID: msg.ClientID,
 		Message:   text,
 		Sender:    outbound,
 	})
+}
+
+func extractImage(ctx context.Context, msg wxMsg) ([]byte, bool) {
+	for _, item := range msg.ItemList {
+		if item.Type != itemTypeImage || item.ImageItem == nil {
+			continue
+		}
+		img := item.ImageItem
+
+		// Prefer media.full_url with media.aes_key; fall back to top-level url/aeskey.
+		fullURL := img.Media.FullURL
+		rawKey := img.Media.AESKey
+		if fullURL == "" {
+			fullURL = img.URL
+		}
+		if rawKey == "" {
+			rawKey = img.AESKey
+		}
+		if fullURL == "" || rawKey == "" {
+			slog.Warn("wechat image item missing url or key")
+			return nil, false
+		}
+
+		key, err := parseAESKey(rawKey)
+		if err != nil {
+			slog.Warn("wechat image: failed to parse AES key", "err", err)
+			return nil, false
+		}
+		encData, err := cdnDownload(ctx, fullURL)
+		if err != nil {
+			slog.Warn("wechat image: cdn download failed", "err", err)
+			return nil, false
+		}
+		data, err := decryptAES128ECB(key, encData)
+		if err != nil {
+			slog.Warn("wechat image: decrypt failed", "err", err)
+			return nil, false
+		}
+		return data, true
+	}
+	return nil, false
 }
 
 func extractText(msg wxMsg) string {

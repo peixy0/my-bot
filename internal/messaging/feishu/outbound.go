@@ -20,7 +20,7 @@ import (
 
 const (
 	streamingElementID = "agent_markdown"
-	streamingMinPush   = 250 * time.Millisecond
+	streamingMinPush   = 500 * time.Millisecond
 )
 
 type Outbound struct {
@@ -93,25 +93,20 @@ func (o *Outbound) SendFinal(ctx context.Context) {
 	o.partial.Reset()
 	stream := o.stream
 	o.stream = nil
+	hasText := strings.TrimSpace(text) != ""
 
-	if strings.TrimSpace(text) == "" {
-		if stream != nil && !stream.failed {
-			if err := o.closeStreamingCard(ctx, stream); err != nil {
-				slog.Warn("feishu streaming card close failed", "err", err, "chat_id", o.chatID, "card_id", stream.cardID)
-			}
-		}
-		return
-	}
 	if stream != nil && !stream.failed {
-		if err := o.updateStreamingCard(ctx, stream, text); err != nil {
-			slog.Warn("feishu streaming card final update failed", "err", err, "chat_id", o.chatID, "card_id", stream.cardID)
-			stream.failed = true
+		if hasText {
+			if err := o.updateStreamingCard(ctx, stream, text); err != nil {
+				slog.Warn("feishu streaming card final update failed", "err", err, "chat_id", o.chatID, "card_id", stream.cardID)
+				stream.failed = true
+			}
 		}
 		if err := o.closeStreamingCard(ctx, stream); err != nil {
 			slog.Warn("feishu streaming card close failed", "err", err, "chat_id", o.chatID, "card_id", stream.cardID)
 		}
 	}
-	if stream.failed {
+	if hasText && (stream == nil || stream.failed) {
 		o.Send(ctx, text)
 	}
 }

@@ -83,7 +83,7 @@ func main() {
 			BotToken: cfg.WeChat.BotToken,
 			BaseURL:  cfg.WeChat.BaseURL,
 		}
-		wcInbound := wechat.NewInbound(wcCfg, mainInbox)
+		wcInbound := wechat.NewInbound(wcCfg, mainInbox, rt)
 		go func() {
 			if err := wcInbound.Run(ctx); err != nil && err != context.Canceled {
 				slog.Error("wechat inbound", "err", err)
