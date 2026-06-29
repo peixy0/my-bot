@@ -114,15 +114,10 @@ type getUploadURLReq struct {
 	BaseInfo    baseInfo `json:"base_info"`
 }
 
-type uploadParam struct {
-	EncryptedQueryParam string `json:"encrypted_query_param"`
-	FileKey             string `json:"filekey"`
-	AESKey              string `json:"aes_key"`
-}
-
 type getUploadURLResp struct {
-	UploadParam   uploadParam `json:"upload_param"`
-	UploadFullURL string      `json:"upload_full_url"`
+	UploadParam      string `json:"upload_param"`
+	ThumbUploadParam string `json:"thumb_upload_param,omitempty"`
+	UploadFullURL    string `json:"upload_full_url"`
 }
 
 const (
