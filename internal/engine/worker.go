@@ -363,7 +363,7 @@ func (w *ConversationWorker) processConfigChange(ctx context.Context, ev events.
 func (w *ConversationWorker) runBackground(ctx context.Context, sender events.Outbound, prompt llm.SystemPrompt, content any) error {
 	reg := w.tools.BuildRegistry(sender)
 	orch := NewBackgroundOrchestrator(reg, sender)
-	return w.loop.Run(ctx, nil, reg, orch, prompt, content)
+	return w.loop.Run(ctx, w.abortCh, reg, orch, prompt, content)
 }
 
 func (w *ConversationWorker) maybeCompress(ctx context.Context, prompt llm.SystemPrompt) error {
