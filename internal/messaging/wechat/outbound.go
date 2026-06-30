@@ -156,7 +156,15 @@ func (o *Outbound) uploadMedia(ctx context.Context, mediaType int, fileKey strin
 		return CDNMedia{}, fmt.Errorf("getuploadurl: %w", err)
 	}
 
-	encQueryParam, err := cdnUpload(ctx, uploadResp.UploadFullURL, encData)
+	uploadURL := strings.TrimSpace(uploadResp.UploadFullURL)
+	if uploadURL == "" {
+		if uploadResp.UploadParam == "" {
+			return CDNMedia{}, fmt.Errorf("getuploadurl returned neither upload_full_url nor upload_param")
+		}
+		uploadURL = buildCDNUploadURL(uploadResp.UploadParam, fileKey)
+	}
+
+	encQueryParam, err := cdnUpload(ctx, uploadURL, encData)
 	if err != nil {
 		return CDNMedia{}, fmt.Errorf("cdn upload: %w", err)
 	}

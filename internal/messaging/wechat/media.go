@@ -10,7 +10,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 )
+
+func buildCDNUploadURL(uploadParam, fileKey string) string {
+	return cdnBaseURL + "/upload?encrypted_query_param=" + url.QueryEscape(uploadParam) + "&filekey=" + url.QueryEscape(fileKey)
+}
 
 func generateAESKey() ([]byte, error) {
 	key := make([]byte, 16)

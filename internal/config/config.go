@@ -45,6 +45,14 @@ type Config struct {
 	WebUI     WebUIConfig                `yaml:"webui"`
 	Heartbeat HeartbeatConfig            `yaml:"heartbeat"`
 	Sessions  map[string]SessionOverride `yaml:"sessions"`
+	baseLLM   *LLMConfig
+}
+
+func (c *Config) BaseLLM() LLMConfig {
+	if c.baseLLM != nil {
+		return *c.baseLLM
+	}
+	return c.LLM
 }
 
 type LimiterConfig struct {
@@ -224,6 +232,9 @@ func (c *Config) ForSession(chatID string) *Config {
 			override.Vision.ApplyTo(&merged.Vision)
 		}
 	}
+
+	base := merged.LLM
+	merged.baseLLM = &base
 
 	if preset, ok := merged.Models[merged.LLM.Model]; ok {
 		preset.ApplyTo(&merged.LLM)

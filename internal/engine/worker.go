@@ -23,12 +23,13 @@ const (
 )
 
 type ConversationWorker struct {
-	chatID string
-	cfg    *config.Config
-	agent  *Agent
-	rt     runtime.Runtime
-	skills *tools.SkillLoader
-	loop   *AgentLoop
+	chatID  string
+	cfg     *config.Config
+	baseLLM config.LLMConfig
+	agent   *Agent
+	rt      runtime.Runtime
+	skills  *tools.SkillLoader
+	loop    *AgentLoop
 
 	tools *sessionTools
 
@@ -52,6 +53,7 @@ func newConversationWorker(
 	w := &ConversationWorker{
 		chatID:       chatID,
 		cfg:          cfg,
+		baseLLM:      cfg.BaseLLM(),
 		agent:        agent,
 		rt:           rt,
 		skills:       skills,
@@ -69,6 +71,7 @@ func (w *ConversationWorker) Model() string {
 }
 
 func (w *ConversationWorker) SetModel(model string) {
+	w.cfg.LLM = w.baseLLM
 	w.cfg.LLM.Model = model
 	if preset, ok := w.cfg.Models[model]; ok {
 		preset.ApplyTo(&w.cfg.LLM)

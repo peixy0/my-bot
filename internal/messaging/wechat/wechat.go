@@ -21,6 +21,7 @@ type Config struct {
 
 const (
 	defaultBaseURL = "https://ilinkai.weixin.qq.com"
+	cdnBaseURL     = "https://novac2c.cdn.weixin.qq.com/c2c"
 	channelVersion = "2.0.0"
 	dedupCapacity  = 1024
 	dedupTTL       = 5 * time.Minute
