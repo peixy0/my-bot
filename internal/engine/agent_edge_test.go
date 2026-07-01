@@ -34,18 +34,15 @@ func TestAgent_EmptyContentSendsContinue(t *testing.T) {
 		t.Fatalf("expected 2 LLM calls, got %d", len(client.calls))
 	}
 
-	if len(client.calls[1].messages) < 4 {
-		t.Fatalf("expected at least 4 messages in second call, got %d", len(client.calls[1].messages))
+	if len(client.calls[1].messages) != 2 {
+		t.Fatalf("expected only 2 messages in second call, got %d", len(client.calls[1].messages))
 	}
-	if client.calls[1].messages[2].Role != "assistant" {
-		t.Fatalf("expected assistant message before continue, got %s", client.calls[1].messages[2].Role)
+	if client.calls[1].messages[1].Role != "user" {
+		t.Fatalf("expected user message, got %s", client.calls[1].messages[1].Role)
 	}
-	if client.calls[1].messages[3].Role != "user" {
-		t.Fatalf("expected user continue message, got %s", client.calls[1].messages[3].Role)
-	}
-	continueContent, _ := client.calls[1].messages[3].Content.(string)
-	if continueContent != "continue" {
-		t.Fatalf("expected 'continue' message, got %q", continueContent)
+	continueContent, _ := client.calls[1].messages[1].Content.(string)
+	if continueContent != "hello" {
+		t.Fatalf("expected same user message 'hello', got %q", continueContent)
 	}
 
 	if len(orch.finalResponses) != 1 || orch.finalResponses[0] != "final answer" {

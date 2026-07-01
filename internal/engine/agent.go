@@ -30,6 +30,15 @@ func NewAgent(client llm.CompletionClient, limiter *rate.Limiter) *Agent {
 	return &Agent{client: client, limiter: limiter}
 }
 
+func (a *Agent) onResponse(
+	ctx context.Context,
+	conv *llm.Conversation,
+	orch llm.Orchestrator, resp *llm.CompletionResponse) {
+	assistantMsg := llm.AssistantMessage(resp.Content, resp.ReasoningContent, resp.ToolCalls)
+	conv.Messages = append(conv.Messages, assistantMsg)
+	orch.OnContentFinal(ctx, resp.Content)
+}
+
 func (a *Agent) Run(
 	ctx context.Context,
 	abortCh <-chan struct{},
@@ -99,19 +108,17 @@ func (a *Agent) Run(
 			"content", resp.Content,
 		)
 
-		assistantMsg := llm.AssistantMessage(resp.Content, resp.ReasoningContent, resp.ToolCalls)
-		conv.Messages = append(conv.Messages, assistantMsg)
-		orch.OnContentFinal(ctx, resp.Content)
-
 		if len(resp.ToolCalls) == 0 {
 			if resp.Content == "" {
-				conv.Messages = append(conv.Messages, llm.UserMessage("continue"))
+				slog.Debug("got empty llm response, will retry")
 				continue
 			}
+			a.onResponse(ctx, conv, orch, &resp)
 			orch.OnFinalResponse(ctx, resp.Content)
 			return nil
 		}
 
+		a.onResponse(ctx, conv, orch, &resp)
 		if cfg.Context.AutoCompression && int(conv.TotalTokens) >= int(float64(cfg.Context.WindowTokens)*cfg.Context.CompressionThreshold) {
 			slog.Debug("context compression triggered", "tokens", conv.TotalTokens, "context_window", cfg.Context.WindowTokens)
 			if err := a.Compress(abortCtx, cfg, systemPrompt, conv); err != nil {
