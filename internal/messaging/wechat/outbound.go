@@ -3,11 +3,11 @@ package wechat
 import (
 	"context"
 	"crypto/md5"
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	rand "math/rand/v2"
-	"path/filepath"
+	mrand "math/rand/v2"
 	"strings"
 	"time"
 
@@ -99,7 +99,15 @@ func (o *Outbound) sendText(ctx context.Context, text string) error {
 }
 
 func newClientID() string {
-	return fmt.Sprintf("mybot:%d-%08x", time.Now().UnixMilli(), rand.Uint32())
+	return fmt.Sprintf("mybot:%d-%08x", time.Now().UnixMilli(), mrand.Uint32())
+}
+
+// newFileKey generates a random hex file key for CDN upload, matching the
+// format expected by the WeChat iLink API (pure hex, no special characters).
+func newFileKey() string {
+	var buf [16]byte
+	_, _ = rand.Read(buf[:])
+	return hex.EncodeToString(buf[:])
 }
 
 type getUploadURLReq struct {
@@ -130,14 +138,14 @@ func rawMD5(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (o *Outbound) uploadMedia(ctx context.Context, mediaType int, fileKey string, data []byte) (CDNMedia, error) {
+func (o *Outbound) uploadMedia(ctx context.Context, mediaType int, fileKey string, data []byte) (CDNMedia, int, error) {
 	aesKey, err := generateAESKey()
 	if err != nil {
-		return CDNMedia{}, fmt.Errorf("generate AES key: %w", err)
+		return CDNMedia{}, 0, fmt.Errorf("generate AES key: %w", err)
 	}
 	encData, err := encryptAES128ECB(aesKey, data)
 	if err != nil {
-		return CDNMedia{}, fmt.Errorf("encrypt: %w", err)
+		return CDNMedia{}, 0, fmt.Errorf("encrypt: %w", err)
 	}
 
 	uploadReq := getUploadURLReq{
@@ -153,31 +161,31 @@ func (o *Outbound) uploadMedia(ctx context.Context, mediaType int, fileKey strin
 	}
 	var uploadResp getUploadURLResp
 	if err := o.hc.post(ctx, pathGetUploadURL, uploadReq, &uploadResp); err != nil {
-		return CDNMedia{}, fmt.Errorf("getuploadurl: %w", err)
+		return CDNMedia{}, 0, fmt.Errorf("getuploadurl: %w", err)
 	}
 
 	uploadURL := strings.TrimSpace(uploadResp.UploadFullURL)
 	if uploadURL == "" {
 		if uploadResp.UploadParam == "" {
-			return CDNMedia{}, fmt.Errorf("getuploadurl returned neither upload_full_url nor upload_param")
+			return CDNMedia{}, 0, fmt.Errorf("getuploadurl returned neither upload_full_url nor upload_param")
 		}
 		uploadURL = buildCDNUploadURL(uploadResp.UploadParam, fileKey)
 	}
 
 	encQueryParam, err := cdnUpload(ctx, uploadURL, encData)
 	if err != nil {
-		return CDNMedia{}, fmt.Errorf("cdn upload: %w", err)
+		return CDNMedia{}, 0, fmt.Errorf("cdn upload: %w", err)
 	}
 
 	return CDNMedia{
 		EncryptQueryParam: encQueryParam,
 		AESKey:            hex.EncodeToString(aesKey),
 		EncryptType:       1,
-	}, nil
+	}, len(encData), nil
 }
 
 func (o *Outbound) sendImage(ctx context.Context, data []byte) error {
-	media, err := o.uploadMedia(ctx, mediaTypeImage, newClientID(), data)
+	media, encSize, err := o.uploadMedia(ctx, mediaTypeImage, newFileKey(), data)
 	if err != nil {
 		return err
 	}
@@ -189,7 +197,10 @@ func (o *Outbound) sendImage(ctx context.Context, data []byte) error {
 			MessageState: msgStateFinish,
 			ContextToken: o.contextToken,
 			ItemList: []wxItem{
-				{Type: itemTypeImage, ImageItem: &wxImageItem{Media: media}},
+				{Type: itemTypeImage, ImageItem: &wxImageItem{
+					Media:   media,
+					MidSize: int64(encSize),
+				}},
 			},
 		},
 		BaseInfo: newBaseInfo(),
@@ -198,8 +209,7 @@ func (o *Outbound) sendImage(ctx context.Context, data []byte) error {
 }
 
 func (o *Outbound) sendFile(ctx context.Context, filename string, data []byte) error {
-	fileKey := filepath.Base(filename) + "-" + newClientID()
-	media, err := o.uploadMedia(ctx, mediaTypeFile, fileKey, data)
+	media, _, err := o.uploadMedia(ctx, mediaTypeFile, newFileKey(), data)
 	if err != nil {
 		return err
 	}
@@ -214,7 +224,6 @@ func (o *Outbound) sendFile(ctx context.Context, filename string, data []byte) e
 				{Type: itemTypeFile, FileItem: &wxFileItem{
 					Media:    media,
 					FileName: filename,
-					MD5:      rawMD5(data),
 					Len:      fmt.Sprintf("%d", len(data)),
 				}},
 			},

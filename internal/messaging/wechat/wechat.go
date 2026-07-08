@@ -4,13 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	rand "math/rand/v2"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -42,10 +41,7 @@ func newBaseInfo() baseInfo {
 }
 
 func randomWechatUIN() string {
-	var b [4]byte
-	randUint := rand.Uint32()
-	binary.BigEndian.PutUint32(b[:], randUint)
-	return base64.StdEncoding.EncodeToString([]byte(hex.EncodeToString(b[:])))
+	return base64.StdEncoding.EncodeToString([]byte(strconv.FormatUint(uint64(rand.Uint32()), 10)))
 }
 
 type httpClient struct {

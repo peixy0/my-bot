@@ -242,16 +242,17 @@ type CDNMedia struct {
 
 type wxImageItem struct {
 	Media      CDNMedia `json:"media"`
-	ThumbMedia CDNMedia `json:"thumb_media"`
-	AESKey     string   `json:"aeskey"` // alternate key field (hex format)
-	URL        string   `json:"url"`
+	ThumbMedia CDNMedia `json:"thumb_media,omitempty"`
+	AESKey     string   `json:"aeskey,omitempty"` // alternate key field (hex format)
+	URL        string   `json:"url,omitempty"`
+	MidSize    int64    `json:"mid_size,omitempty"`
 }
 
 type wxFileItem struct {
 	Media    CDNMedia `json:"media"`
-	FileName string   `json:"file_name"`
-	MD5      string   `json:"md5"`
-	Len      string   `json:"len"`
+	FileName string   `json:"file_name,omitempty"`
+	MD5      string   `json:"md5,omitempty"`
+	Len      string   `json:"len,omitempty"`
 }
 
 const (
@@ -296,7 +297,7 @@ func (i *Inbound) processMessage(ctx context.Context, msg wxMsg, hc *httpClient)
 			ChatID:    msg.FromUserID,
 			MessageID: msg.ClientID,
 			ImageData: imgData,
-			MIMEType:  "image/jpeg",
+			MIMEType:  http.DetectContentType(imgData),
 			Sender:    outbound,
 		})
 		return

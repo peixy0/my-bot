@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 func buildCDNUploadURL(uploadParam, fileKey string) string {
@@ -90,12 +91,14 @@ func decryptAES128ECB(key, data []byte) ([]byte, error) {
 	return pkcs7Unpad(out)
 }
 
+var cdnHTTPClient = &http.Client{Timeout: 60 * time.Second}
+
 func cdnDownload(ctx context.Context, fullURL string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("cdnDownload: build request: %w", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := cdnHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("cdnDownload: %w", err)
 	}
@@ -114,7 +117,7 @@ func cdnUpload(ctx context.Context, uploadURL string, encData []byte) (string, e
 		return "", fmt.Errorf("cdnUpload: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := cdnHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("cdnUpload: %w", err)
 	}
