@@ -80,7 +80,7 @@ func (o *Outbound) EndThinking(ctx context.Context) {
 func (o *Outbound) Register(r *tools.Registry) {
 	r.Register(tools.ToolSchema{
 		Name:        "send_image",
-		Description: "Send an image file to the WebSocket client.",
+		Description: "Send an image file to the current chat.",
 		ParameterDesc: (map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -97,7 +97,7 @@ func (o *Outbound) Register(r *tools.Registry) {
 		}
 		data, err := o.rt.ReadRawBytes(ctx, p.ImagePath)
 		if err != nil {
-			return tools.ToolResult{}, err
+			return tools.ErrorResult(fmt.Errorf("read image %s for send_image: %w", p.ImagePath, err)), nil
 		}
 		mimeType := http.DetectContentType(data)
 		b64 := base64.StdEncoding.EncodeToString(data)
@@ -107,7 +107,7 @@ func (o *Outbound) Register(r *tools.Registry) {
 			"data":      b64,
 			"mime_type": mimeType,
 		}); err != nil {
-			return tools.ToolResult{}, err
+			return tools.ErrorResult(fmt.Errorf("send image %s to current chat: %w", p.ImagePath, err)), nil
 		}
 		return tools.TextResult(fmt.Sprintf("sent %s", p.ImagePath)), nil
 	})

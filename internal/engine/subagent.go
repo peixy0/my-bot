@@ -51,7 +51,7 @@ func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task 
 	cfg := *r.cfg
 	driver := tasks.FuncDriver(func(taskCtx context.Context, info tasks.TaskInfo, emit *tasks.Emitter) (tasks.Controller, error) {
 		input := make(chan string, 32)
-		innerCtx, cancel := context.WithCancel(taskCtx)
+		agentCtx, cancel := context.WithCancel(taskCtx)
 		ctrl := newAgentTaskController(input, cancel)
 		go func() {
 			defer cancel()
@@ -65,7 +65,7 @@ func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task 
 			reg := NewSubagentRegistry(r.rt, r.skills, &cfg, cmdTools)
 			orch := NewSubagentOrchestrator(reg, emit, input)
 			loop := NewAgentLoop(&cfg, r.agent)
-			err := loop.Run(innerCtx, nil, reg, orch, llm.NewSubagentPrompt(r.skills, r.rt, systemPrompt), task)
+			err := loop.Run(agentCtx, nil, reg, orch, llm.NewSubagentPrompt(r.skills, r.rt, systemPrompt), task)
 			if err != nil {
 				emit.Output(err.Error())
 				emit.Complete(tasks.TaskResult{Error: err.Error()})
@@ -126,11 +126,10 @@ func (s *SubagentToolset) Register(r *tools.Registry) {
 		if err := json.Unmarshal(args, &p); err != nil {
 			return tools.ToolResult{}, fmt.Errorf("parse agent args: %w", err)
 		}
-		slog.Debug("subagent start", "task_len", len(p.Task))
+		slog.Debug("subagent start")
 		snap, err := s.runner.startAgentTask(ctx, p.SystemPrompt, p.Task)
 		if err != nil {
-			slog.Debug("subagent error", "err", err)
-			return tools.ToolResult{}, err
+			return tools.ErrorResult(fmt.Errorf("start subagent task: %w", err)), nil
 		}
 		return tools.TextResult(tools.MarshalResult(map[string]any{"task_id": snap.TaskID})), nil
 	})
@@ -166,7 +165,7 @@ func (s *FleetToolset) Register(r *tools.Registry) {
 		slog.Debug("fleet start", "tasks", len(p.Tasks))
 		taskIDs, err := s.runner.startFleetTask(ctx, p.SystemPrompt, p.Tasks)
 		if err != nil {
-			return tools.ToolResult{}, err
+			return tools.ErrorResult(fmt.Errorf("start fleet tasks: %w", err)), nil
 		}
 		return tools.TextResult(tools.MarshalResult(map[string]any{"task_ids": taskIDs})), nil
 	})

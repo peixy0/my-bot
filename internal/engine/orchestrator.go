@@ -51,16 +51,16 @@ func (o *HumanInputOrchestrator) OnFinalResponse(_ context.Context, _ string) {}
 
 func (o *HumanInputOrchestrator) BeforeToolUse(_ context.Context, _ string) {}
 
-func (o *HumanInputOrchestrator) DispatchTools(ctx context.Context, calls []llm.ToolCall) ([]llm.ChatMessage, error) {
-	toolMsgs, err := runDispatch(ctx, o.registry, calls)
-	if err != nil {
-		return nil, err
-	}
+func (o *HumanInputOrchestrator) DispatchTools(ctx context.Context, calls []llm.ToolCall) ([]llm.CallOutcome, error) {
+	return runDispatch(ctx, o.registry, calls)
+}
+
+func (o *HumanInputOrchestrator) MaybeInterrupt(ctx context.Context) *llm.ChatMessage {
 	if inject := o.drainInLoopInput(); inject != nil {
-		slog.Debug("in-loop user input injected after tool dispatch", "tools", len(calls))
-		toolMsgs = append(toolMsgs, *inject)
+		slog.Debug("in-loop user input injected after tool dispatch")
+		return inject
 	}
-	return toolMsgs, nil
+	return nil
 }
 
 func (o *HumanInputOrchestrator) drainInLoopInput() *llm.ChatMessage {
@@ -127,8 +127,12 @@ func (o *BackgroundOrchestrator) OnFinalResponse(ctx context.Context, content st
 
 func (o *BackgroundOrchestrator) BeforeToolUse(_ context.Context, _ string) {}
 
-func (o *BackgroundOrchestrator) DispatchTools(ctx context.Context, calls []llm.ToolCall) ([]llm.ChatMessage, error) {
+func (o *BackgroundOrchestrator) DispatchTools(ctx context.Context, calls []llm.ToolCall) ([]llm.CallOutcome, error) {
 	return runDispatch(ctx, o.registry, calls)
+}
+
+func (o *BackgroundOrchestrator) MaybeInterrupt(_ context.Context) *llm.ChatMessage {
+	return nil
 }
 
 type SubagentOrchestrator struct {
@@ -153,15 +157,12 @@ func (o *SubagentOrchestrator) OnFinalResponse(_ context.Context, content string
 
 func (o *SubagentOrchestrator) BeforeToolUse(_ context.Context, _ string) {}
 
-func (o *SubagentOrchestrator) DispatchTools(ctx context.Context, calls []llm.ToolCall) ([]llm.ChatMessage, error) {
-	toolMsgs, err := runDispatch(ctx, o.registry, calls)
-	if err != nil {
-		return nil, err
-	}
-	if inject := o.drainInput(); inject != nil {
-		toolMsgs = append(toolMsgs, *inject)
-	}
-	return toolMsgs, nil
+func (o *SubagentOrchestrator) DispatchTools(ctx context.Context, calls []llm.ToolCall) ([]llm.CallOutcome, error) {
+	return runDispatch(ctx, o.registry, calls)
+}
+
+func (o *SubagentOrchestrator) MaybeInterrupt(ctx context.Context) *llm.ChatMessage {
+	return o.drainInput()
 }
 
 func (o *SubagentOrchestrator) drainInput() *llm.ChatMessage {
@@ -195,21 +196,16 @@ func appendVisionImagePart(parts []map[string]any, ev events.ImageInputEvent) []
 	})
 }
 
-type dispatchResult struct {
-	toolMsg  llm.ChatMessage
-	followup *llm.ChatMessage
-}
-
-func execOne(ctx context.Context, r *tools.Registry, tc llm.ToolCall) dispatchResult {
+func execOne(ctx context.Context, r *tools.Registry, tc llm.ToolCall) llm.CallOutcome {
 	handler, ok := r.Handler(tc.Name)
 	if !ok {
-		return dispatchResult{toolMsg: llm.ToolResultMessage(tc.ID, fmt.Sprintf("unknown tool %q", tc.Name))}
+		return llm.CallOutcome{ToolMsg: llm.ToolResultMessage(tc.ID, fmt.Sprintf("unknown tool %q", tc.Name))}
 	}
 	slog.Debug("tool call start", "tool", tc.Name, "id", tc.ID, "args", string(tc.Args))
 	result, err := handler(ctx, tc.Args)
 	if err != nil {
 		slog.Debug("tool call error", "tool", tc.Name, "id", tc.ID, "err", err)
-		return dispatchResult{toolMsg: llm.ToolResultMessage(tc.ID, fmt.Sprintf("error: %v", err))}
+		return llm.CallOutcome{Err: err}
 	}
 	slog.Debug("tool call done", "tool", tc.Name, "id", tc.ID, "result", result.Text)
 	if result.Blocks != nil {
@@ -221,24 +217,20 @@ func execOne(ctx context.Context, r *tools.Registry, tc llm.ToolCall) dispatchRe
 			fmt.Sprintf("[TOOL OUTPUT FROM %s]\nInspect the attached content and continue with the task.", tc.ID),
 			result.Blocks,
 		)
-		return dispatchResult{
-			toolMsg:  llm.ToolResultMessage(tc.ID, toolText),
-			followup: &followup,
+		return llm.CallOutcome{
+			ToolMsg:  llm.ToolResultMessage(tc.ID, toolText),
+			Followup: &followup,
 		}
 	}
-	return dispatchResult{toolMsg: llm.ToolResultMessage(tc.ID, result.Text)}
+	return llm.CallOutcome{ToolMsg: llm.ToolResultMessage(tc.ID, result.Text)}
 }
 
-func runDispatch(ctx context.Context, r *tools.Registry, calls []llm.ToolCall) ([]llm.ChatMessage, error) {
-	results := make([]dispatchResult, len(calls))
+func runDispatch(ctx context.Context, r *tools.Registry, calls []llm.ToolCall) ([]llm.CallOutcome, error) {
+	results := make([]llm.CallOutcome, len(calls))
 
 	if len(calls) == 1 {
-		res := execOne(ctx, r, calls[0])
-		msgs := []llm.ChatMessage{res.toolMsg}
-		if res.followup != nil {
-			msgs = append(msgs, *res.followup)
-		}
-		return msgs, nil
+		results[0] = execOne(ctx, r, calls[0])
+		return results, nil
 	}
 
 	var seqMu sync.Mutex
@@ -259,14 +251,5 @@ func runDispatch(ctx context.Context, r *tools.Registry, calls []llm.ToolCall) (
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
-	msgs := make([]llm.ChatMessage, 0, len(calls)*2)
-	for _, res := range results {
-		msgs = append(msgs, res.toolMsg)
-	}
-	for _, res := range results {
-		if res.followup != nil {
-			msgs = append(msgs, *res.followup)
-		}
-	}
-	return msgs, nil
+	return results, nil
 }

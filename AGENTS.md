@@ -33,12 +33,12 @@ internal/
     session.go           ← per-chat session owner for tools, cron, and shutdown
     worker.go            ← per-chat conversation logic and event loop
     cron.go              ← cron job loading & scheduling
-  llm/
     agent.go             ← LLM agent loop, abort, context compression
     loop.go              ← AgentLoop (owns Conversation only)
     orchestrator.go      ← tool dispatch, response strategies, in-loop input drain
     subagent.go          ← agent/fleet subagent toolset + task controller
     registry.go          ← NewSessionRegistry / NewSubagentRegistry helpers
+  llm/
     prompt.go            ← composable system prompt builders (Main/Heartbeat/Cron/Subagent)
     client.go            ← shared types: ChatMessage, ToolCall, CompletionRequest/Response, Conversation
     openai.go            ← OpenAI-compatible provider (raw net/http, retry, streaming)
@@ -122,7 +122,7 @@ Every long-lived goroutine and what it owns. This is the single source of truth 
 | Interface | Package | Purpose |
 |-----------|---------|---------|
 | `CompletionClient` | `llm` | LLM provider contract: `Complete(ctx, CompletionRequest) (CompletionResponse, error)` |
-| `Orchestrator` | `llm` | 6 methods: `OnContentDelta`, `OnContentFinal`, `OnFinalResponse`, `BeforeToolUse`, `DispatchTools` |
+| `Orchestrator` | `llm` | 6 methods: `OnContentDelta`, `OnContentFinal`, `OnFinalResponse`, `BeforeToolUse`, `DispatchTools`, `MaybeInterrupt` |
 | `SystemPrompt` | `llm` | Composable prompt builder (`Build(ctx) string`) |
 | `Runtime` | `runtime` | Execution environment abstraction (Execute, Spawn, ReadFile, EditFile, Glob, OSInfo, ...) |
 | `Outbound` | `events` | `Send`, `SendDelta`, `SendFinal`, `StartThinking`, `EndThinking` |
@@ -135,9 +135,9 @@ Platform-specific tools are not a separate interface — each `Outbound` simply 
 
 ### Orchestrator Variants
 
-- **HumanInputOrchestrator** — Interactive conversation; sends deltas via `SendDelta`, drains in-loop user input after each tool dispatch and re-injects as a `user` message (with optional image parts). Vision is opted in per-call via `.WithVision(...)`.
-- **BackgroundOrchestrator** — Heartbeat / cron; suppresses output ending with `NO_REPORT` (the `Send` is skipped entirely, no fallback message).
-- **SubagentOrchestrator** — Isolated execution; streams content deltas to a `tasks.Emitter` (which become the task's captured output) and drains a private input channel between tool dispatches.
+- **HumanInputOrchestrator** (`engine/orchestrator.go`) — Interactive conversation; sends deltas via `SendDelta`, drains in-loop user input via `MaybeInterrupt` after each tool dispatch and re-injects it as a `user` message after all tool results and tool followups. Vision is opted in per-call via `.WithVision(...)`.
+- **BackgroundOrchestrator** (`engine/orchestrator.go`) — Heartbeat / cron; suppresses output ending with `NO_REPORT` (the `Send` is skipped entirely, no fallback message).
+- **SubagentOrchestrator** (`engine/orchestrator.go`) — Isolated execution; streams content deltas to a `tasks.Emitter` (which become the task's captured output) and drains a private input channel via `MaybeInterrupt` between tool dispatches.
 
 ## Intentional Design Choices
 
@@ -152,14 +152,15 @@ These are non-obvious decisions worth preserving. If you're tempted to "fix" one
 - **Live user input uses a separate in-loop inbox, not the worker queue.** While an agent loop is running, ordinary text/images are published into `ConversationWorker.MessageInbox` via `TryPublish` and drained by `HumanInputOrchestrator` after each tool dispatch — non-blocking with no fallthrough. `/queue` wraps the input in `QueuedInputEvent` and dispatches it as a `WorkerEvent` on `Events` for handling after the current loop finishes.
 - **Three orchestrator variants instead of mode flags.** Strategy pattern keeps each orchestrator's responsibility crisp; we'd rather grow a fourth variant than feature-flag an existing one. Some methods are empty (e.g. `BackgroundOrchestrator.OnContentDelta`) — this is an acceptable trade-off for the clarity of one-type-per-mode over a shared struct with behavior flags.
 - **Raw `net/http` for LLM calls, no SDK.** The OpenAI-compatible provider serializes messages and tools as `map[string]any`, consumes streaming chat-completion events directly, applies exponential-backoff retry on transient errors (HTTP > 403 and `io.ErrUnexpectedEOF` up to 99 attempts), and exposes `reasoning_content` and `extra_body` passthrough fields. Don't reintroduce `openai-go`.
-- **`parallel_tool_calls: true` is enabled in every request.** The OpenAI-compatible provider opts into parallel calls at the wire level; `llm/orchestrator.go:runDispatch` further serializes non-`Parallel` tools behind a per-call mutex. All non-parallel tools in a batch share one mutex — this means unrelated non-parallel tools are unnecessarily serialized against each other, not just against their own kind. This is a known suboptimality; the correctness property (non-parallel tools never overlap) is preserved, and the performance impact is negligible in current tool sets where few tools are marked non-parallel. If this becomes a bottleneck, restructure into per-tool-name mutexes or sequential-then-parallel group execution.
-- **Tool errors are LLM messages, not system errors.** `runDispatch`'s `errgroup` goroutines always `return nil` because tool execution errors are wrapped into `toolResultMessage` for the LLM to read — this is the correct semantics for tool-calling loops. System-breaking errors (nil registry, context cancellation) are handled before `runDispatch` is entered. Do not change `execOne` to return system errors through errgroup — that would abort the entire tool batch on a single tool's business error.
+- **`parallel_tool_calls: true` is enabled in every request.** The OpenAI-compatible provider opts into parallel calls at the wire level; `engine/orchestrator.go:runDispatch` further serializes non-`Parallel` tools behind a per-call mutex. All non-parallel tools in a batch share one mutex — this means unrelated non-parallel tools are unnecessarily serialized against each other, not just against their own kind. This is a known suboptimality; the correctness property (non-parallel tools never overlap) is preserved, and the performance impact is negligible in current tool sets where few tools are marked non-parallel. If this becomes a bottleneck, restructure into per-tool-name mutexes or sequential-then-parallel group execution.
+- **Tool errors are LLM messages; only argument-parse failures skip.** Tool handlers must wrap every business/runtime error the LLM should see into `tools.ErrorResult(err)` and return it with `nil` error. The only legitimate way to signal an error the LLM should NOT see is to return `ToolResult{}, err` for malformed tool arguments (usually `json.Unmarshal`/parse failures); `Agent.Run` skips those calls and omits them from the replayed assistant tool-call list. `runDispatch`'s `errgroup` goroutines always `return nil` because handler failures are represented as `CallOutcome` values. System-breaking errors (nil registry, context cancellation before dispatch) are handled before or around `runDispatch`. Do not change `execOne` to forward handler errors through `errgroup` — that would abort the entire tool batch on a single tool's business error.
 - **Composable system prompts.** Prompts compose workspace `.md` files (`USER.md` / `PERSONA.md` / `RULES.md` / `CONTEXT.md` / `TOOLS.md`, plus per-mode `HEARTBEAT.md` / `CRON.md`); behavior is data-driven, not code-driven. New prompts embed `promptBase` and declare their section list, not file-reading logic. `SubagentPrompt` is the exception: it only reads `TOOLS.md` plus the caller-supplied `extra` block (subagents start without the main agent's persona/rules).
 - **`Runtime` abstraction.** Lets the same tools execute on host bash or in a podman/docker container with no caller changes. Both runtimes expose the full `Runtime` interface including `OSInfo` (host: `runtime.GOOS`/`runtime.GOARCH`/`os.Getwd()`; container: `uname -sm && pwd`). The `Runtime` interface is intentionally monolithic — consumers that need only a subset (e.g. messaging outbound only needs `ReadRawBytes`) currently depend on the full interface. This couples messaging to runtime, which is a known debt (see Architecture Debt section). Do not extract smaller interfaces unless the refactoring also addresses the tool-registration boundary that necessitates `Runtime` in outbound.
 - **Messaging outbound holds `Runtime` for platform tools.** `feishu.Outbound` and `websocket.Outbound` both hold a `runtime.Runtime` field used by `send_image`/`send_file` tool handlers to call `ReadRawBytes`. This creates a `messaging → runtime` dependency that is **intentionally tolerated** for pragmatic reasons: the tool handler needs file bytes and the outbound is the natural scope for platform-specific tool registration. A cleaner design would have the tool handler receive pre-read bytes, but that would require changing the `ToolHandler` signature or adding a per-call file-reader context. Do not remove `rt` from outbound without also redesigning the outbound-tool registration mechanism.
 - **Task-first asynchronous execution.** Commands, delegated agents, and fleets all create `Task` objects (`task_id = task-<N>`) and return `task_id` immediately. Progress, output, and termination flow through `internal/tasks`. Flat namespace: every spawned unit — shell command, subagent, fleet child — is just a task with its own controller and lifecycle.
 - **Event-driven task ownership.** `tasks.Manager` is the single owner of task state, using a request/event channel rather than mutexes. Subagents construct their own private `tasks.Manager` inside the driver goroutine so they can be torn down with the rest of their work; the parent session never sees those children — they show up only as the parent task's output.
-- **Tool dispatch is selectively parallel.** `runDispatch()`: a single tool call runs inline; multiple calls run under `errgroup`, with parallel-marked tools dispatched without serialization and the rest serialized behind a per-call mutex. After dispatch, follow-up multimodal `user` messages are appended in a second pass so all tool results precede them in the conversation.
+- **Tool dispatch is selectively parallel; caller assembles conversation.** `runDispatch()`: a single tool call runs inline; multiple calls run under `errgroup`, with parallel-marked tools dispatched without serialization and the rest serialized behind a per-call mutex. The returned `[]CallOutcome` is aligned 1:1 with the input `calls`; the caller (`Agent.Run`) iterates outcomes, builds `assistantMsg.ToolCalls` from the successful ones, then appends messages in OpenAI-safe order: all tool result messages first, all multimodal tool followup `user` messages second, and any `MaybeInterrupt(ctx)` user injection last. Skipped entries (where `outcome.Err` is non-nil, currently only argument-parse failures) vanish from both the assistant message and the conversation — the LLM has no memory of the failed call.
+- **HostRuntime commands run under a login shell.** `HostRuntime.Execute` and `Spawn` intentionally use `bash -l -c` so locally configured shell environments, proxies, PATH entries, Go toolchains, and language managers are available to tools. Login profiles may change the child process's working directory (for example by `cd`-ing to `/workspace`), so runtime tests and tools that require a precise search root must pass explicit absolute paths/patterns instead of relying only on `os.Chdir` in the parent Go process. `OSInfo` reports the parent process working directory; shell commands may still observe a profile-adjusted directory.
 - **Generic `Inbox[T]`.** `internal/inbox` is a tiny type-parametric channel wrapper. All event queues (`Scheduler`'s `agentInbox`, `ConversationWorker.Events`, `ConversationWorker.MessageInbox`, `CronWorker`'s inbox, etc.) flow through it. The `ErrFull`/`ErrClosed` sentinels and `TryPublish`/`TryReceive` shape every drop-on-full back-pressure decision.
 - **Platform tools piggyback on `Outbound` as `Toolset`.** `feishu.Outbound` and `websocket.Outbound` both implement `tools.Toolset.Register(*Registry)`. The session registry does a type assertion in `registerOutboundTools` and calls it; no separate `ToolRegistrar` interface. Adding platform tools means adding methods to the existing `Outbound` impl, not introducing a new abstraction.
 - **`Registry.Register` silently overwrites duplicate names.** The current system avoids conflicts because each registry is built per-arrival with a unique sender. Conflicting names from different Toolsets (e.g. two Toolsets both registering `read_file`) would silently overwrite. This is acceptable in the current architecture but fragile — if Toolset proliferation makes duplicate registration plausible, add a `panic` on duplicate names at `Register` time.
@@ -209,6 +210,8 @@ These are the load-bearing invariants that an earlier draft expressed via inline
 - Implement `tools.Toolset`, call `r.Register(schema, handler)` in `Register()`.
 - Tool schemas use OpenAI function-calling format (JSON Schema).
 - Tool handlers: `func(ctx context.Context, args []byte) (ToolResult, error)`.
+- Return `ToolResult{}, fmt.Errorf("parse <tool> args: %w", err)` only for malformed model-supplied arguments. Return `tools.ErrorResult(err), nil` for runtime failures the model should react to (missing files, HTTP status failures, size limits, platform send failures, task-manager errors, etc.).
+- If a tool returns `ToolResult.Blocks`, `Agent.Run` will send a placeholder `tool` message plus a follow-up multimodal `user` message after every tool result in that batch. Keep `Text` meaningful when possible so text-only models still receive useful context.
 - Platform-specific tools: implement `tools.Toolset` on the platform's `Outbound` (the session registry auto-discovers this via type assertion).
 - New tools must be safe under serial dispatch. Document any state they share with `tasks.Manager`.
 
@@ -286,9 +289,11 @@ Highest-value untested seams:
 3. Document who stops it (context cancellation, explicit Stop, etc.).
 
 ### Testing Guidelines
-- Existing tests: `api/server_test.go`, `config/config_test.go`, `engine/cron_test.go`, `engine/session_test.go`, `engine/scheduler_test.go`, `inbox/inbox_test.go`, `llm/agent_test.go`, `llm/loop_test.go`, `llm/openai_test.go`, `llm/orchestrator_test.go`, `messaging/dedup/dedup_test.go`, `messaging/feishu/outbound_test.go`, `runtime/runtime_test.go`, `tasks/manager_test.go`, `tools/command_test.go`, `tools/format_test.go`.
+- Existing tests: `api/server_test.go`, `config/config_test.go`, `engine/agent_test.go`, `engine/agent_edge_test.go`, `engine/cron_test.go`, `engine/loop_test.go`, `engine/orchestrator_test.go`, `engine/session_test.go`, `engine/scheduler_test.go`, `engine/worker_config_test.go`, `inbox/inbox_test.go`, `llm/openai_test.go`, `messaging/dedup/dedup_test.go`, `messaging/feishu/outbound_test.go`, `messaging/wechat/media_test.go`, `runtime/runtime_test.go`, `tasks/manager_test.go`, `tasks/manager_lifecycle_test.go`, `tools/command_test.go`, `tools/format_test.go`, `tools/registry_test.go`.
 - Highest-value untested seams: see the "Test coverage gaps" entry in Known Issues above.
 - Mock `CompletionClient`, `Runtime`, and `Outbound` interfaces — they're the natural seams.
+- When testing `HostRuntime` behavior that depends on filesystem scope, prefer absolute temp-dir paths/patterns over relying on `os.Chdir`; `Execute`/`Spawn` run through a login shell whose profile may change the child process cwd.
+- When testing tool-call loops, assert the exact replayed message order sent to the second LLM request: assistant tool calls, all matching `tool` messages, then any multimodal followups, then any in-loop user interrupt.
 - Always run `go test ./... -race -count=1` before merging changes that touch concurrency.
 
 ### Dependency Injection
@@ -318,8 +323,8 @@ go build -o bot ./cmd/bot
 | Add a tool | `internal/tools/toolbox.go` or new toolset file |
 | Add a background-task tool | `internal/tools/command.go` + `internal/tasks/` |
 | Add an event type | `internal/events/events.go` |
-| Change LLM behavior | `internal/llm/agent.go` (loop), `internal/llm/openai.go` (provider) |
-| Change the agent loop / context compression | `internal/llm/loop.go`, `internal/llm/agent.go` |
+| Change LLM behavior | `internal/engine/agent.go` (loop), `internal/llm/openai.go` (provider) |
+| Change the agent loop / context compression | `internal/engine/agent.go` |
 | Change prompt content | `internal/llm/prompt.go` + workspace `.md` files |
 | Change message routing | `internal/engine/scheduler.go` |
 | Change worker behavior | `internal/engine/worker.go` |
@@ -328,7 +333,7 @@ go build -o bot ./cmd/bot
 | Add messaging platform | `internal/messaging/<platform>/` (own subpackage) + `cmd/bot/main.go` |
 | Sandbox tool execution | `internal/runtime/container.go` |
 | Touch the shared event channel | `internal/inbox/inbox.go` (interface) / `Memory[T]` (impl) |
-| Add subagent/fleet tool | `internal/llm/subagent.go` |
+| Add subagent/fleet tool | `internal/engine/subagent.go` |
 | Tune LLM HTTP behavior | `internal/llm/openai.go` (retry, streaming, extra_body passthrough) |
 | Adjust dedup TTL / capacity | `internal/messaging/dedup/dedup.go` |
 | Frontend chat UI | `chat.html` + `internal/api/server.go` |

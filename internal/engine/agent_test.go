@@ -76,6 +76,8 @@ type mockOrchestrator struct {
 	finalContent    []string
 	finalResponses  []string
 	dispatches      int
+	outcomes        []llm.CallOutcome
+	interrupt       *llm.ChatMessage
 }
 
 func newMockOrchestrator() *mockOrchestrator {
@@ -92,13 +94,20 @@ func (o *mockOrchestrator) OnFinalResponse(_ context.Context, content string) {
 func (o *mockOrchestrator) BeforeToolUse(_ context.Context, _ string) {
 	o.beforeToolCalls++
 }
-func (o *mockOrchestrator) DispatchTools(_ context.Context, calls []llm.ToolCall) ([]llm.ChatMessage, error) {
+func (o *mockOrchestrator) DispatchTools(_ context.Context, calls []llm.ToolCall) ([]llm.CallOutcome, error) {
 	o.dispatches++
-	msgs := make([]llm.ChatMessage, len(calls))
-	for i, tc := range calls {
-		msgs[i] = llm.ToolResultMessage(tc.ID, "result")
+	if o.outcomes != nil {
+		return o.outcomes, nil
 	}
-	return msgs, nil
+	out := make([]llm.CallOutcome, len(calls))
+	for i, tc := range calls {
+		out[i] = llm.CallOutcome{ToolMsg: llm.ToolResultMessage(tc.ID, "result")}
+	}
+	return out, nil
+}
+
+func (o *mockOrchestrator) MaybeInterrupt(_ context.Context) *llm.ChatMessage {
+	return o.interrupt
 }
 
 func TestAgent_ToolCallDispatch(t *testing.T) {
@@ -141,6 +150,98 @@ func TestAgent_ToolCallDispatch(t *testing.T) {
 	assistantMsg := client.calls[1].messages[2]
 	if assistantMsg.ReasoningContent != "private chain" {
 		t.Fatalf("expected reasoning_content in replayed assistant message, got %#v", assistantMsg)
+	}
+}
+
+func TestAgent_AppendsToolMessagesBeforeFollowupsAndInterrupts(t *testing.T) {
+	client := &mockClient{
+		responses: []llm.CompletionResponse{
+			{
+				Content:      "thinking",
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{ID: "c1", Name: "read_image", Args: []byte(`{}`)},
+					{ID: "c2", Name: "read_file", Args: []byte(`{}`)},
+				},
+				TotalTokens: 10,
+			},
+			{Content: "final", FinishReason: "stop", TotalTokens: 20},
+		},
+	}
+	followup := llm.UserMessage("image payload")
+	interrupt := llm.UserMessage("user interrupt")
+	orch := newMockOrchestrator()
+	orch.outcomes = []llm.CallOutcome{
+		{ToolMsg: llm.ToolResultMessage("c1", "image placeholder"), Followup: &followup},
+		{ToolMsg: llm.ToolResultMessage("c2", "file contents")},
+	}
+	orch.interrupt = &interrupt
+	conv := llm.NewConversation()
+	conv.Messages = append(conv.Messages, llm.UserMessage("inspect files"))
+
+	err := NewAgent(client, nil).Run(context.Background(), nil, &config.Config{LLM: config.LLMConfig{Model: "test-model"}, Context: config.ContextConfig{MaxOutputTokens: 16384}}, "sys", conv, orch, tools.NewRegistry())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(client.calls) < 2 {
+		t.Fatalf("expected second LLM call, got %d calls", len(client.calls))
+	}
+	messages := client.calls[1].messages
+	if len(messages) < 7 {
+		t.Fatalf("expected system, user, assistant, two tools, followup, interrupt; got %+v", messages)
+	}
+	if messages[2].Role != "assistant" || len(messages[2].ToolCalls) != 2 {
+		t.Fatalf("expected assistant with two tool calls, got %#v", messages[2])
+	}
+	if messages[3].Role != "tool" || messages[3].ToolCallID != "c1" {
+		t.Fatalf("expected first tool result for c1, got %#v", messages[3])
+	}
+	if messages[4].Role != "tool" || messages[4].ToolCallID != "c2" {
+		t.Fatalf("expected second tool result for c2, got %#v", messages[4])
+	}
+	if messages[5].Role != "user" || messages[5].Content != "image payload" {
+		t.Fatalf("expected followup after all tool results, got %#v", messages[5])
+	}
+	if messages[6].Role != "user" || messages[6].Content != "user interrupt" {
+		t.Fatalf("expected interrupt after followup, got %#v", messages[6])
+	}
+}
+
+func TestAgent_SkipsOnlyFailedToolOutcomes(t *testing.T) {
+	client := &mockClient{
+		responses: []llm.CompletionResponse{
+			{
+				Content:      "thinking",
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{ID: "c1", Name: "bad", Args: []byte(`{}`)},
+					{ID: "c2", Name: "good", Args: []byte(`{}`)},
+				},
+				TotalTokens: 10,
+			},
+			{Content: "final", FinishReason: "stop", TotalTokens: 20},
+		},
+	}
+	orch := newMockOrchestrator()
+	orch.outcomes = []llm.CallOutcome{
+		{Err: context.Canceled},
+		{ToolMsg: llm.ToolResultMessage("c2", "ok")},
+	}
+	conv := llm.NewConversation()
+	conv.Messages = append(conv.Messages, llm.UserMessage("run tools"))
+
+	err := NewAgent(client, nil).Run(context.Background(), nil, &config.Config{LLM: config.LLMConfig{Model: "test-model"}, Context: config.ContextConfig{MaxOutputTokens: 16384}}, "sys", conv, orch, tools.NewRegistry())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	messages := client.calls[1].messages
+	if len(messages[2].ToolCalls) != 1 || messages[2].ToolCalls[0].ID != "c2" {
+		t.Fatalf("expected assistant replay to include only successful c2 tool call, got %#v", messages[2].ToolCalls)
+	}
+	if messages[3].Role != "tool" || messages[3].ToolCallID != "c2" {
+		t.Fatalf("expected only c2 tool result, got %#v", messages[3])
 	}
 }
 
@@ -373,7 +474,7 @@ type mockOrchestratorWithAbort struct {
 	abortCh chan struct{}
 }
 
-func (o *mockOrchestratorWithAbort) DispatchTools(_ context.Context, calls []llm.ToolCall) ([]llm.ChatMessage, error) {
+func (o *mockOrchestratorWithAbort) DispatchTools(_ context.Context, calls []llm.ToolCall) ([]llm.CallOutcome, error) {
 	result, err := o.mockOrchestrator.DispatchTools(context.Background(), calls)
 	go func() {
 		select {
@@ -382,4 +483,8 @@ func (o *mockOrchestratorWithAbort) DispatchTools(_ context.Context, calls []llm
 		}
 	}()
 	return result, err
+}
+
+func (o *mockOrchestratorWithAbort) MaybeInterrupt(_ context.Context) *llm.ChatMessage {
+	return nil
 }

@@ -133,5 +133,12 @@ type Orchestrator interface {
 	OnContentFinal(ctx context.Context, content string)
 	OnFinalResponse(ctx context.Context, content string)
 	BeforeToolUse(ctx context.Context, content string)
-	DispatchTools(ctx context.Context, calls []ToolCall) ([]ChatMessage, error)
+	DispatchTools(ctx context.Context, calls []ToolCall) ([]CallOutcome, error)
+	MaybeInterrupt(ctx context.Context) *ChatMessage
+}
+
+type CallOutcome struct {
+	Err      error
+	ToolMsg  ChatMessage
+	Followup *ChatMessage
 }

@@ -24,20 +24,15 @@ func TestHostRuntimeGlobUsesPatternDirectly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldwd, err := os.Getwd()
+	pattern := filepath.Join(root, "**", "*.go")
+	got, err := NewHostRuntime(1024).Glob(context.Background(), pattern)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chdir(oldwd)
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
+	want := []string{
+		filepath.Join(root, "a.go"),
+		filepath.Join(root, "sub", "c.go"),
 	}
-
-	got, err := NewHostRuntime(1024).Glob(context.Background(), "**/*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{"a.go", "sub/c.go"}
 	if !reflect.DeepEqual(got.Items, want) {
 		t.Fatalf("glob items mismatch:\nwant %#v\ngot  %#v", want, got.Items)
 	}

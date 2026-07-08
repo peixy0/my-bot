@@ -17,7 +17,7 @@ func (o *Outbound) Register(r *tools.Registry) {
 func (o *Outbound) registerSendImage(r *tools.Registry) {
 	r.Register(tools.ToolSchema{
 		Name:        "send_image",
-		Description: "Upload and send an image file to the WeChat chat.",
+		Description: "Upload and send an image file to the current chat.",
 		ParameterDesc: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -34,13 +34,13 @@ func (o *Outbound) registerSendImage(r *tools.Registry) {
 		}
 		data, err := o.rt.ReadRawBytes(ctx, p.ImagePath)
 		if err != nil {
-			return tools.ToolResult{}, err
+			return tools.ErrorResult(fmt.Errorf("read image %s for send_image: %w", p.ImagePath, err)), nil
 		}
 		if len(data) > 10*1024*1024 {
-			return tools.ToolResult{}, fmt.Errorf("image file too large: %d bytes", len(data))
+			return tools.ErrorResult(fmt.Errorf("image file too large: %d bytes", len(data))), nil
 		}
 		if err := o.sendImage(ctx, data); err != nil {
-			return tools.ToolResult{}, err
+			return tools.ErrorResult(fmt.Errorf("send image %s to current chat: %w", p.ImagePath, err)), nil
 		}
 		return tools.TextResult(fmt.Sprintf("sent image %s", p.ImagePath)), nil
 	})
@@ -49,7 +49,7 @@ func (o *Outbound) registerSendImage(r *tools.Registry) {
 func (o *Outbound) registerSendFile(r *tools.Registry) {
 	r.Register(tools.ToolSchema{
 		Name:        "send_file",
-		Description: "Send a file to the WeChat chat. File size must be under 20 MiB. Send only when explicitly asked.",
+		Description: "Send a file to the current chat. File size must be under 20 MiB. Send only when explicitly asked.",
 		ParameterDesc: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -69,13 +69,13 @@ func (o *Outbound) registerSendFile(r *tools.Registry) {
 		}
 		data, err := o.rt.ReadRawBytes(ctx, p.FilePath)
 		if err != nil {
-			return tools.ToolResult{}, err
+			return tools.ErrorResult(fmt.Errorf("read file %s for send_file: %w", p.FilePath, err)), nil
 		}
 		if len(data) > 20*1024*1024 {
-			return tools.ToolResult{}, fmt.Errorf("file size too large: %d bytes", len(data))
+			return tools.ErrorResult(fmt.Errorf("file size too large: %d bytes", len(data))), nil
 		}
 		if err := o.sendFile(ctx, filepath.Base(p.FilePath), data); err != nil {
-			return tools.ToolResult{}, err
+			return tools.ErrorResult(fmt.Errorf("send file %s to current chat: %w", p.FilePath, err)), nil
 		}
 		return tools.TextResult(fmt.Sprintf("sent file %s", p.FilePath)), nil
 	})

@@ -7,6 +7,10 @@ type ToolResult struct {
 	Blocks []map[string]any
 }
 
+func ErrorResult(err error) ToolResult {
+	return ToolResult{Text: "error: " + err.Error()}
+}
+
 func TextResult(s string) ToolResult            { return ToolResult{Text: s} }
 func ImageResult(b []map[string]any) ToolResult { return ToolResult{Blocks: b} }
 

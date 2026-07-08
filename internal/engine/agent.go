@@ -30,15 +30,6 @@ func NewAgent(client llm.CompletionClient, limiter *rate.Limiter) *Agent {
 	return &Agent{client: client, limiter: limiter}
 }
 
-func (a *Agent) onResponse(
-	ctx context.Context,
-	conv *llm.Conversation,
-	orch llm.Orchestrator, resp *llm.CompletionResponse) {
-	assistantMsg := llm.AssistantMessage(resp.Content, resp.ReasoningContent, resp.ToolCalls)
-	conv.Messages = append(conv.Messages, assistantMsg)
-	orch.OnContentFinal(ctx, resp.Content)
-}
-
 func (a *Agent) Run(
 	ctx context.Context,
 	abortCh <-chan struct{},
@@ -110,15 +101,45 @@ func (a *Agent) Run(
 
 		if len(resp.ToolCalls) == 0 {
 			if resp.Content == "" {
-				slog.Debug("got empty llm response, will retry")
+				slog.Warn("got empty llm response, retrying")
 				continue
 			}
-			a.onResponse(ctx, conv, orch, &resp)
+			assistantMsg := llm.AssistantMessage(resp.Content, resp.ReasoningContent, resp.ToolCalls)
+			conv.Messages = append(conv.Messages, assistantMsg)
+			orch.OnContentFinal(ctx, resp.Content)
 			orch.OnFinalResponse(ctx, resp.Content)
 			return nil
 		}
 
-		a.onResponse(ctx, conv, orch, &resp)
+		orch.BeforeToolUse(ctx, resp.Content)
+		outcomes, err := orch.DispatchTools(abortCtx, resp.ToolCalls)
+		if err != nil {
+			return err
+		}
+
+		var toolCalls []llm.ToolCall
+		var toolMsgs []llm.ChatMessage
+		var followups []llm.ChatMessage
+		for i, oc := range outcomes {
+			if oc.Err != nil {
+				slog.Warn("dispatch error, skipping", "tool", resp.ToolCalls[i].Name, "id", resp.ToolCalls[i].ID, "err", oc.Err)
+				continue
+			}
+			toolCalls = append(toolCalls, resp.ToolCalls[i])
+			toolMsgs = append(toolMsgs, oc.ToolMsg)
+			if oc.Followup != nil {
+				followups = append(followups, *oc.Followup)
+			}
+		}
+		if len(toolMsgs) == 0 {
+			slog.Warn("got invalid tool call response, retrying")
+			continue
+		}
+
+		assistantMsg := llm.AssistantMessage(resp.Content, resp.ReasoningContent, toolCalls)
+		conv.Messages = append(conv.Messages, assistantMsg)
+		orch.OnContentFinal(ctx, resp.Content)
+
 		if cfg.Context.AutoCompression && int(conv.TotalTokens) >= int(float64(cfg.Context.WindowTokens)*cfg.Context.CompressionThreshold) {
 			slog.Debug("context compression triggered", "tokens", conv.TotalTokens, "context_window", cfg.Context.WindowTokens)
 			if err := a.Compress(abortCtx, cfg, systemPrompt, conv); err != nil {
@@ -130,12 +151,12 @@ func (a *Agent) Run(
 			slog.Debug("context compression done", "tokens", conv.TotalTokens)
 		}
 
-		orch.BeforeToolUse(ctx, resp.Content)
-		toolMsgs, err := orch.DispatchTools(ctx, resp.ToolCalls)
-		if err != nil {
-			return err
-		}
 		conv.Messages = append(conv.Messages, toolMsgs...)
+		conv.Messages = append(conv.Messages, followups...)
+
+		if interrupt := orch.MaybeInterrupt(ctx); interrupt != nil {
+			conv.Messages = append(conv.Messages, *interrupt)
+		}
 	}
 }
 
@@ -194,6 +215,8 @@ const compressionInstruction = "You are compressing context for an autonomous AI
 	"Finished actions and their concrete outcomes.\n\n" +
 	"## Decisions\n" +
 	"Design choices, accepted approaches, and their rationale.\n\n" +
+	"## Needed Skills\n" +
+	"Skills in-use for current tasks and should be loaded explicitly.\n\n" +
 	"## Key Files\n" +
 	"Files created, modified, or read, with their path and purpose.\n\n" +
 	"## Established Facts\n" +

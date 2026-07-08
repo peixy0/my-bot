@@ -95,7 +95,7 @@ func registerSkillTool(r *Registry, loader *SkillLoader) {
 		}
 		skill, err := loader.Load(p.SkillName)
 		if err != nil {
-			return ToolResult{}, err
+			return ErrorResult(fmt.Errorf("load skill %s: %w", p.SkillName, err)), nil
 		}
 		return TextResult(formatSkillResult(skill)), nil
 	})

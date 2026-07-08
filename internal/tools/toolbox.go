@@ -79,7 +79,7 @@ func (d *DefaultToolset) registerWebSearch(r *Registry) {
 		}
 		results, err := d.webSearch.Search(ctx, p.Query, p.Page)
 		if err != nil {
-			return ToolResult{}, err
+			return ErrorResult(fmt.Errorf("web_search query %q page %d: %w", p.Query, p.Page, err)), nil
 		}
 		return TextResult(MarshalResult(results)), nil
 	})
@@ -150,7 +150,7 @@ func (d *DefaultToolset) registerReadFile(r *Registry) {
 		}
 		res, err := d.rt.ReadFile(ctx, p.Filename, p.StartLine, p.Limit)
 		if err != nil {
-			return ToolResult{}, err
+			return ErrorResult(fmt.Errorf("read file %s: %w", p.Filename, err)), nil
 		}
 		return TextResult(formatReadFileResult(p.Filename, res)), nil
 	})
@@ -183,7 +183,7 @@ func (d *DefaultToolset) registerWriteFile(r *Registry) {
 			return ToolResult{}, fmt.Errorf("parse write_file args: %w", err)
 		}
 		if err := d.rt.WriteFile(ctx, p.Filename, p.Content); err != nil {
-			return ToolResult{}, err
+			return ErrorResult(fmt.Errorf("write file %s: %w", p.Filename, err)), nil
 		}
 		return TextResult(fmt.Sprintf("wrote %s", p.Filename)), nil
 	})
@@ -216,7 +216,7 @@ func (d *DefaultToolset) registerAppendFile(r *Registry) {
 			return ToolResult{}, fmt.Errorf("parse append_file args: %w", err)
 		}
 		if err := d.rt.AppendFile(ctx, p.Filename, p.Content); err != nil {
-			return ToolResult{}, err
+			return ErrorResult(fmt.Errorf("append file %s: %w", p.Filename, err)), nil
 		}
 		return TextResult(fmt.Sprintf("append %s", p.Filename)), nil
 	})
@@ -270,7 +270,7 @@ func (d *DefaultToolset) registerEditFile(r *Registry) {
 			edits[i] = runtime.Edit{Search: e.Search, Replace: e.Replace}
 		}
 		if err := d.rt.EditFile(ctx, p.Filename, edits); err != nil {
-			return ToolResult{}, err
+			return ErrorResult(fmt.Errorf("edit file %s: %w", p.Filename, err)), nil
 		}
 		return TextResult(fmt.Sprintf("edited %s", p.Filename)), nil
 	})
@@ -338,13 +338,13 @@ func (d *DefaultToolset) registerGrep(r *Registry) {
 		}
 		res, err := d.rt.Execute(ctx, sb.String())
 		if err != nil {
-			return ToolResult{}, err
+			return ErrorResult(fmt.Errorf("run grep command: %w", err)), nil
 		}
 		if res.ReturnCode == 1 {
 			return TextResult("no matches"), nil
 		}
 		if res.ReturnCode != 0 {
-			return ToolResult{}, fmt.Errorf("%s", res.Stderr)
+			return ErrorResult(fmt.Errorf("%s", res.Stderr)), nil
 		}
 		return TextResult(res.Stdout), nil
 	})
@@ -374,7 +374,7 @@ func (d *DefaultToolset) registerGlob(r *Registry) {
 		}
 		result, err := d.rt.Glob(ctx, p.Pattern)
 		if err != nil {
-			return ToolResult{}, err
+			return ErrorResult(fmt.Errorf("glob pattern %q: %w", p.Pattern, err)), nil
 		}
 		return TextResult(MarshalResult(result)), nil
 	})
@@ -404,10 +404,10 @@ func (d *DefaultToolset) registerReadImage(r *Registry) {
 		}
 		data, err := d.rt.ReadRawBytes(ctx, p.Filename)
 		if err != nil {
-			return ToolResult{}, err
+			return ErrorResult(fmt.Errorf("read image %s: %w", p.Filename, err)), nil
 		}
 		if len(data) > d.cfg.Vision.MaxImageBytes {
-			return ToolResult{}, fmt.Errorf("image too large: %d bytes", len(data))
+			return ErrorResult(fmt.Errorf("image too large: %d bytes", len(data))), nil
 		}
 		mimeType := detectImageMIME(data)
 		b64 := base64.StdEncoding.EncodeToString(data)

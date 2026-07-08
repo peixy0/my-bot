@@ -45,23 +45,23 @@ func NewFetcher(rt runtime.Runtime, proxyURL string, maxOutputChars int) *Fetche
 func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (ToolResult, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return ToolResult{}, err
+		return ErrorResult(fmt.Errorf("create fetch request for %s: %w", rawURL, err)), nil
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; bot/1.0)")
 
 	resp, err := f.client.Do(req)
 	if err != nil {
-		return ToolResult{}, err
+		return ErrorResult(fmt.Errorf("fetch %s: %w", rawURL, err)), nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return ToolResult{}, fmt.Errorf("request failed with status code: %d", resp.StatusCode)
+		return ErrorResult(fmt.Errorf("request failed with status code: %d", resp.StatusCode)), nil
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxHTTPBodySize))
 	if err != nil {
-		return ToolResult{}, err
+		return ErrorResult(fmt.Errorf("read response body from %s: %w", rawURL, err)), nil
 	}
 	contentType := resp.Header.Get("content-type")
 
@@ -71,7 +71,7 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (ToolResult, error) 
 	case "text/html":
 		markdown, err := htmltomarkdown.ConvertReader(bytes.NewReader(body))
 		if err != nil {
-			return ToolResult{}, fmt.Errorf("failed to convert HTML to Markdown: %w", err)
+			return ErrorResult(fmt.Errorf("failed to convert HTML to Markdown: %w", err)), nil
 		}
 		return TextResult(f.rt.Truncate(ctx, string(markdown), f.maxOutputChars)), nil
 

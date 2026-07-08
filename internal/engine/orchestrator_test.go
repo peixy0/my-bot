@@ -45,22 +45,23 @@ func TestHumanInputOrchestrator_DrainInLoopInputTextOnly(t *testing.T) {
 	inLoopInbox.TryPublish(events.TextInputEvent{ChatID: "chat", Message: "do this instead"})
 
 	calls := []llm.ToolCall{{ID: "c1", Name: "unknown_tool", Args: []byte(`{}`)}}
-	msgs, err := orch.DispatchTools(context.Background(), calls)
+	outcomes, err := orch.DispatchTools(context.Background(), calls)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	if len(msgs) < 2 {
-		t.Fatalf("expected at least 2 messages (in-loop input + tool result), got %d", len(msgs))
+	if len(outcomes) != 1 {
+		t.Fatalf("expected 1 outcome, got %d", len(outcomes))
 	}
-
-	inputMsg := msgs[1]
-	if inputMsg.Role != "user" {
-		t.Errorf("expected in-loop input role=user, got %v", inputMsg.Role)
+	interrupt := orch.MaybeInterrupt(context.Background())
+	if interrupt == nil {
+		t.Fatalf("expected in-loop interrupt message")
 	}
-	content, ok := inputMsg.Content.(string)
+	if interrupt.Role != "user" {
+		t.Errorf("expected in-loop input role=user, got %v", interrupt.Role)
+	}
+	content, ok := interrupt.Content.(string)
 	if !ok {
-		t.Fatalf("expected text content, got %T", inputMsg.Content)
+		t.Fatalf("expected text content, got %T", interrupt.Content)
 	}
 	if !strings.Contains(content, "stop doing that") || !strings.Contains(content, "do this instead") {
 		t.Fatalf("expected drained text inputs in content, got %q", content)
@@ -77,22 +78,23 @@ func TestHumanInputOrchestrator_DrainInLoopInputWithImageUsesMultipart(t *testin
 	inLoopInbox.TryPublish(events.ImageInputEvent{ChatID: "chat", Message: "see image", MIMEType: "image/png", ImageData: []byte{1, 2, 3}})
 
 	calls := []llm.ToolCall{{ID: "c1", Name: "unknown_tool", Args: []byte(`{}`)}}
-	msgs, err := orch.DispatchTools(context.Background(), calls)
+	outcomes, err := orch.DispatchTools(context.Background(), calls)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	if len(msgs) < 2 {
-		t.Fatalf("expected at least 2 messages (in-loop input + tool result), got %d", len(msgs))
+	if len(outcomes) != 1 {
+		t.Fatalf("expected 1 outcome, got %d", len(outcomes))
 	}
-
-	inputMsg := msgs[1]
-	if inputMsg.Role != "user" {
-		t.Errorf("expected in-loop input role=user, got %v", inputMsg.Role)
+	interrupt := orch.MaybeInterrupt(context.Background())
+	if interrupt == nil {
+		t.Fatalf("expected in-loop interrupt message")
 	}
-	content, ok := inputMsg.Content.([]map[string]any)
+	if interrupt.Role != "user" {
+		t.Errorf("expected in-loop input role=user, got %v", interrupt.Role)
+	}
+	content, ok := interrupt.Content.([]map[string]any)
 	if !ok {
-		t.Fatalf("expected multimodal content, got %T", inputMsg.Content)
+		t.Fatalf("expected multimodal content, got %T", interrupt.Content)
 	}
 	if len(content) != 2 {
 		t.Fatalf("expected text plus image content, got %d parts", len(content))
@@ -360,14 +362,17 @@ func TestRunDispatch_UnknownTool(t *testing.T) {
 	reg := tools.NewRegistry()
 	calls := []llm.ToolCall{{ID: "c1", Name: "nonexistent", Args: []byte(`{}`)}}
 
-	msgs, err := runDispatch(context.Background(), reg, calls)
+	outcomes, err := runDispatch(context.Background(), reg, calls)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs))
+	if len(outcomes) != 1 {
+		t.Fatalf("expected 1 outcome, got %d", len(outcomes))
 	}
-	content, _ := msgs[0].Content.(string)
+	if outcomes[0].Err != nil {
+		t.Fatalf("expected no Err for unknown tool (handled in ToolMsg), got %v", outcomes[0].Err)
+	}
+	content, _ := outcomes[0].ToolMsg.Content.(string)
 	if content == "" {
 		t.Error("expected error content for unknown tool")
 	}
@@ -387,26 +392,29 @@ func TestRunDispatch_ImageToolInjectsMultimodalUserMessage(t *testing.T) {
 		}), nil
 	})
 
-	msgs, err := runDispatch(context.Background(), reg, []llm.ToolCall{{ID: "c1", Name: "read_image", Args: []byte(`{}`)}})
+	outcomes, err := runDispatch(context.Background(), reg, []llm.ToolCall{{ID: "c1", Name: "read_image", Args: []byte(`{}`)}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(msgs) != 2 {
-		t.Fatalf("expected tool reply plus injected user multimodal message, got %d", len(msgs))
+	if len(outcomes) != 1 {
+		t.Fatalf("expected 1 outcome, got %d", len(outcomes))
 	}
-	if msgs[0].Role != "tool" {
-		t.Fatalf("expected first message role=tool, got %#v", msgs[0])
+	if outcomes[0].Followup == nil {
+		t.Fatalf("expected follow-up user multimodal message, got nil")
 	}
-	toolContent, _ := msgs[0].Content.(string)
+	if outcomes[0].ToolMsg.Role != "tool" {
+		t.Fatalf("expected tool reply role=tool, got %#v", outcomes[0].ToolMsg)
+	}
+	toolContent, _ := outcomes[0].ToolMsg.Content.(string)
 	if !strings.Contains(toolContent, "non-text content") {
 		t.Fatalf("expected tool placeholder text, got %q", toolContent)
 	}
-	if msgs[1].Role != "user" {
-		t.Fatalf("expected second message role=user, got %#v", msgs[1])
+	if outcomes[0].Followup.Role != "user" {
+		t.Fatalf("expected follow-up role=user, got %#v", outcomes[0].Followup)
 	}
-	content, ok := msgs[1].Content.([]map[string]any)
+	content, ok := outcomes[0].Followup.Content.([]map[string]any)
 	if !ok {
-		t.Fatalf("expected multimodal content, got %T", msgs[1].Content)
+		t.Fatalf("expected multimodal content, got %T", outcomes[0].Followup.Content)
 	}
 	if len(content) != 2 {
 		t.Fatalf("expected text preface plus image block, got %d parts", len(content))
@@ -433,21 +441,26 @@ func TestRunDispatch_MultipleToolsAppendFollowupsAfterAllToolReplies(t *testing.
 		return tools.TextResult("file contents"), nil
 	})
 
-	msgs, err := runDispatch(context.Background(), reg, []llm.ToolCall{
+	outcomes, err := runDispatch(context.Background(), reg, []llm.ToolCall{
 		{ID: "c1", Name: "read_image", Args: []byte(`{}`)},
 		{ID: "c2", Name: "read_file", Args: []byte(`{}`)},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(msgs) != 3 {
-		t.Fatalf("expected two tool replies and one follow-up user message, got %d", len(msgs))
+	if len(outcomes) != 2 {
+		t.Fatalf("expected 2 outcomes, got %d", len(outcomes))
 	}
-	if msgs[0].Role != "tool" || msgs[1].Role != "tool" {
-		t.Fatalf("expected tool replies first, got %#v %#v", msgs[0], msgs[1])
+	for i, oc := range outcomes {
+		if oc.ToolMsg.Role != "tool" {
+			t.Fatalf("outcome %d: expected tool reply, got %#v", i, oc.ToolMsg)
+		}
 	}
-	if msgs[2].Role != "user" {
-		t.Fatalf("expected user follow-up after all tool replies, got %#v", msgs[2])
+	if outcomes[0].Followup == nil {
+		t.Fatalf("expected follow-up user message from read_image outcome")
+	}
+	if outcomes[0].Followup.Role != "user" {
+		t.Fatalf("expected follow-up role=user, got %#v", outcomes[0].Followup)
 	}
 }
 

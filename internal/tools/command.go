@@ -52,7 +52,7 @@ func (s *CommandToolset) Register(r *Registry) {
 			Driver:      tasks.NewProcessDriver(s.rt, p.Command),
 		})
 		if err != nil {
-			return ToolResult{}, err
+			return ErrorResult(fmt.Errorf("start command %q: %w", p.Command, err)), nil
 		}
 		if p.TimeoutSeconds > 0 {
 			if p.TimeoutSeconds > 600 {
@@ -60,7 +60,7 @@ func (s *CommandToolset) Register(r *Registry) {
 			}
 			got, err := s.tasks.Await(ctx, snap.TaskID, time.Duration(p.TimeoutSeconds)*time.Second)
 			if err != nil {
-				return ToolResult{}, err
+				return ErrorResult(fmt.Errorf("await command task %s: %w", snap.TaskID, err)), nil
 			}
 			if got.Status != tasks.StatusRunning {
 				result := TextResult(formatTaskSnapshot(got))
@@ -93,7 +93,7 @@ func (s *CommandToolset) Register(r *Registry) {
 		}
 		snap, _, err := s.tasks.Get(ctx, p.TaskID, true)
 		if err != nil {
-			return ToolResult{}, err
+			return ErrorResult(fmt.Errorf("get task %s: %w", p.TaskID, err)), nil
 		}
 		return TextResult(formatTaskSnapshot(snap)), nil
 	})
@@ -130,7 +130,7 @@ func (s *CommandToolset) Register(r *Registry) {
 		}
 		snap, err := s.tasks.Await(ctx, p.TaskID, time.Duration(p.TimeoutSeconds)*time.Second)
 		if err != nil {
-			return ToolResult{}, err
+			return ErrorResult(fmt.Errorf("await task %s: %w", p.TaskID, err)), nil
 		}
 		result := TextResult(formatTaskSnapshot(snap))
 		if snap.Status != tasks.StatusRunning {
@@ -149,7 +149,7 @@ func (s *CommandToolset) Register(r *Registry) {
 	}, func(ctx context.Context, args []byte) (ToolResult, error) {
 		snaps, err := s.tasks.List(ctx)
 		if err != nil {
-			return ToolResult{}, err
+			return ErrorResult(fmt.Errorf("list tasks: %w", err)), nil
 		}
 		return TextResult(MarshalResult(snaps)), nil
 	})
@@ -177,11 +177,11 @@ func (s *CommandToolset) Register(r *Registry) {
 		if _, err := s.tasks.Kill(ctx, p.TaskID); err != nil {
 			var snapErr error
 			if _, _, snapErr = s.tasks.Get(ctx, p.TaskID, false); snapErr != nil {
-				return ToolResult{}, err
+				return ErrorResult(fmt.Errorf("kill task %s: %w", p.TaskID, err)), nil
 			}
 		}
 		if err := s.tasks.Remove(ctx, p.TaskID); err != nil {
-			return ToolResult{}, err
+			return ErrorResult(fmt.Errorf("remove task %s after kill: %w", p.TaskID, err)), nil
 		}
 		return TextResult(MarshalResult(map[string]any{"task_id": p.TaskID, "status": "killed"})), nil
 	})
@@ -212,7 +212,7 @@ func (s *CommandToolset) Register(r *Registry) {
 			return ToolResult{}, fmt.Errorf("parse write_to_task args: %w", err)
 		}
 		if err := s.tasks.WriteInput(ctx, p.TaskID, p.Input); err != nil {
-			return ToolResult{}, err
+			return ErrorResult(fmt.Errorf("write input to task %s: %w", p.TaskID, err)), nil
 		}
 		return TextResult(MarshalResult(map[string]any{"task_id": p.TaskID, "written": len(p.Input)})), nil
 	})
