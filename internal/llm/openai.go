@@ -19,6 +19,7 @@ import (
 )
 
 const maxAttempts = 99
+const maxRetryDuration = 1800
 
 var retryAfter = time.After
 
@@ -295,7 +296,7 @@ func retryExponential(ctx context.Context, maxAttempts int, fn func() error) err
 		if !isRetryable(err) {
 			return err
 		}
-		wait := min(5*math.Pow(2, float64(i)), 300)
+		wait := min(5*math.Pow(2, float64(i)), maxRetryDuration)
 		slog.Warn("retrying after error", "attempt", i+1, "wait_seconds", wait, "err", err)
 		select {
 		case <-retryAfter(time.Duration(wait) * time.Second):

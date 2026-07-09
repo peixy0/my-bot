@@ -1,6 +1,7 @@
 # Build output
 /main
 /bot
+/agent
 
 # Workspace data
 workspace/
