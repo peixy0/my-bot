@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -28,9 +29,8 @@ func main() {
 	defer stop()
 
 	configPath := "config.yaml"
-	if len(os.Args) > 1 {
-		configPath = os.Args[1]
-	}
+	flag.StringVar(&configPath, "c", configPath, "config file path")
+	flag.Parse()
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
