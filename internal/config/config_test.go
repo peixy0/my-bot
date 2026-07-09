@@ -9,9 +9,10 @@ import (
 func validConfig() *Config {
 	return &Config{
 		LLM: LLMConfig{
-			APIKey:      "key",
-			Temperature: 1,
-			TopP:        1,
+			APIKey:        "key",
+			Temperature:   1,
+			TopP:          1,
+			ContextWindow: 128000,
 		},
 		Tool: ToolConfig{
 			MaxOutputChars: 1000,
@@ -20,12 +21,9 @@ func validConfig() *Config {
 			IntervalSeconds: 60,
 		},
 		Context: ContextConfig{
-			WindowTokens:         128000,
+			MaxImageBytes:        1024,
 			MaxOutputTokens:      16384,
 			CompressionThreshold: 0.7,
-		},
-		Vision: VisionConfig{
-			MaxImageBytes: 1024,
 		},
 		WebUI: WebUIConfig{
 			Enabled: true,
@@ -56,11 +54,11 @@ func TestConfigValidateRejectsInvalidValues(t *testing.T) {
 		{"container enabled bad runtime", func(c *Config) { c.Container = &ContainerConfig{Name: "x", Runtime: "runc"} }},
 		{"tool max output chars", func(c *Config) { c.Tool.MaxOutputChars = 0 }},
 		{"heartbeat interval", func(c *Config) { c.Heartbeat.IntervalSeconds = -1 }},
-		{"context window tokens", func(c *Config) { c.Context.WindowTokens = 0 }},
+		{"llm context window", func(c *Config) { c.LLM.ContextWindow = 0 }},
 		{"max output tokens", func(c *Config) { c.Context.MaxOutputTokens = 0 }},
 		{"compression threshold low", func(c *Config) { c.Context.CompressionThreshold = 0 }},
 		{"compression threshold high", func(c *Config) { c.Context.CompressionThreshold = 1.1 }},
-		{"image size", func(c *Config) { c.Vision.MaxImageBytes = 0 }},
+		{"image size", func(c *Config) { c.Context.MaxImageBytes = 0 }},
 		{"webui host", func(c *Config) { c.WebUI.Host = "" }},
 		{"webui port", func(c *Config) { c.WebUI.Port = 70000 }},
 	}
@@ -92,8 +90,8 @@ func TestLoadYAMLDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if cfg.Context.WindowTokens != 128000 {
-		t.Fatalf("expected default window_tokens 128000, got %d", cfg.Context.WindowTokens)
+	if cfg.LLM.ContextWindow != 128000 {
+		t.Fatalf("expected default llm.context_window 128000, got %d", cfg.LLM.ContextWindow)
 	}
 	if cfg.Context.MaxOutputTokens != 16384 {
 		t.Fatalf("expected default max_output_tokens 16384, got %d", cfg.Context.MaxOutputTokens)
@@ -107,8 +105,8 @@ func TestLoadYAMLOverrides(t *testing.T) {
 	path := writeTestConfig(t, `
 llm:
   api_key: key
+  context_window: 64000
 context:
-  window_tokens: 64000
   max_output_tokens: 8192
 tool:
   max_output_chars: 50000
@@ -117,8 +115,8 @@ tool:
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if cfg.Context.WindowTokens != 64000 {
-		t.Fatalf("expected window_tokens 64000, got %d", cfg.Context.WindowTokens)
+	if cfg.LLM.ContextWindow != 64000 {
+		t.Fatalf("expected context_window 64000, got %d", cfg.LLM.ContextWindow)
 	}
 	if cfg.Context.MaxOutputTokens != 8192 {
 		t.Fatalf("expected max_output_tokens 8192, got %d", cfg.Context.MaxOutputTokens)

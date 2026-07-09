@@ -179,7 +179,8 @@ func TestAgent_AppendsToolMessagesBeforeFollowupsAndInterrupts(t *testing.T) {
 	conv := llm.NewConversation()
 	conv.Messages = append(conv.Messages, llm.UserMessage("inspect files"))
 
-	err := NewAgent(client, nil).Run(context.Background(), nil, &config.Config{LLM: config.LLMConfig{Model: "test-model"}, Context: config.ContextConfig{MaxOutputTokens: 16384}}, "sys", conv, orch, tools.NewRegistry())
+	cfg := &config.Config{LLM: config.LLMConfig{Model: "test-model"}, Context: config.ContextConfig{MaxOutputTokens: 16384}}
+	err := NewAgent(client, nil).Run(context.Background(), nil, cfg, "sys", conv, orch, tools.NewRegistry())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -231,7 +232,8 @@ func TestAgent_SkipsOnlyFailedToolOutcomes(t *testing.T) {
 	conv := llm.NewConversation()
 	conv.Messages = append(conv.Messages, llm.UserMessage("run tools"))
 
-	err := NewAgent(client, nil).Run(context.Background(), nil, &config.Config{LLM: config.LLMConfig{Model: "test-model"}, Context: config.ContextConfig{MaxOutputTokens: 16384}}, "sys", conv, orch, tools.NewRegistry())
+	cfg := &config.Config{LLM: config.LLMConfig{Model: "test-model"}, Context: config.ContextConfig{MaxOutputTokens: 16384}}
+	err := NewAgent(client, nil).Run(context.Background(), nil, cfg, "sys", conv, orch, tools.NewRegistry())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -263,7 +265,8 @@ func TestAgent_BeforeToolUseErrorNonFatal(t *testing.T) {
 	conv.Messages = append(conv.Messages, llm.UserMessage("hi"))
 	orch := newMockOrchestrator()
 
-	err := agent.Run(context.Background(), nil, &config.Config{LLM: config.LLMConfig{Model: "test-model"}, Context: config.ContextConfig{MaxOutputTokens: 16384}}, "sys", conv, orch, tools.NewRegistry())
+	cfg := &config.Config{LLM: config.LLMConfig{Model: "test-model"}, Context: config.ContextConfig{MaxOutputTokens: 16384}}
+	err := agent.Run(context.Background(), nil, cfg, "sys", conv, orch, tools.NewRegistry())
 	if err != nil {
 		t.Fatalf("error should not propagate, got: %v", err)
 	}
@@ -298,12 +301,11 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 
 	cfg := &config.Config{
 		LLM: config.LLMConfig{
-			Model:       "test-model",
-			Temperature: 1.5,
+			Model:         "test-model",
+			Temperature:   1.5,
+			ContextWindow: 8000,
 		},
 		Context: config.ContextConfig{
-			AutoCompression:      true,
-			WindowTokens:         8000,
 			MaxOutputTokens:      4096,
 			CompressionThreshold: 1.0,
 		},

@@ -92,15 +92,16 @@ workspace:
   session_dir: ./.session
 
 context:
-  auto_compression: true
-  window_tokens: 128000
+  max_image_bytes: 5242880       # 5 MiB
   max_output_tokens: 16384
-  compression_threshold: 0.7   # fraction of window_tokens that triggers compression
+  compression_threshold: 0.7   # fraction of context_window that triggers compression
 
 llm:
   temperature: 1.0
   top_p: 0.95
   top_k: 0                     # optional, non-OpenAI providers
+  context_window: 128000
+  vision: false
   # extra_body:                # passthrough for provider-specific knobs
   #   chat_template_kwargs:
   #     enable_thinking: true
@@ -108,14 +109,12 @@ llm:
 models:                        # named presets applied when the chosen model matches
   Qwen3-32B:
     temperature: 0.6
+    context_window: 131072
+    vision: true
     extra_body: {chat_template_kwargs: {enable_thinking: true}}
 
 heartbeat:
   interval_seconds: 1800
-
-vision:
-  enabled: false
-  max_image_bytes: 5242880     # 5 MiB
 
 container:                     # tool-execution sandbox
   enabled: false

@@ -174,8 +174,8 @@ func TestWorkerConfigChangeTopKRejectsZeroAndNegative(t *testing.T) {
 
 func TestWorkerConfigChangeMaxTokens(t *testing.T) {
 	cfg := &config.Config{
-		LLM:     config.LLMConfig{Temperature: 1, TopP: 1},
-		Context: config.ContextConfig{MaxOutputTokens: 16384, WindowTokens: 128000, CompressionThreshold: 0.7},
+		LLM:     config.LLMConfig{Temperature: 1, TopP: 1, ContextWindow: 128000},
+		Context: config.ContextConfig{MaxOutputTokens: 16384, CompressionThreshold: 0.7},
 		Tool:    config.ToolConfig{MaxOutputChars: 1000},
 	}
 	worker := newConfigTestWorker(cfg)
@@ -192,8 +192,8 @@ func TestWorkerConfigChangeMaxTokens(t *testing.T) {
 
 func TestWorkerConfigChangeMaxTokensRejectsZero(t *testing.T) {
 	cfg := &config.Config{
-		LLM:     config.LLMConfig{Temperature: 1, TopP: 1},
-		Context: config.ContextConfig{MaxOutputTokens: 16384, WindowTokens: 128000, CompressionThreshold: 0.7},
+		LLM:     config.LLMConfig{Temperature: 1, TopP: 1, ContextWindow: 128000},
+		Context: config.ContextConfig{MaxOutputTokens: 16384, CompressionThreshold: 0.7},
 		Tool:    config.ToolConfig{MaxOutputChars: 1000},
 	}
 	worker := newConfigTestWorker(cfg)
@@ -209,8 +209,8 @@ func TestWorkerConfigChangeMaxTokensRejectsZero(t *testing.T) {
 
 func TestWorkerConfigChangeContextWindow(t *testing.T) {
 	cfg := &config.Config{
-		LLM:     config.LLMConfig{Temperature: 1, TopP: 1},
-		Context: config.ContextConfig{MaxOutputTokens: 16384, WindowTokens: 128000, CompressionThreshold: 0.7},
+		LLM:     config.LLMConfig{Temperature: 1, TopP: 1, ContextWindow: 128000},
+		Context: config.ContextConfig{MaxOutputTokens: 16384, CompressionThreshold: 0.7},
 		Tool:    config.ToolConfig{MaxOutputChars: 1000},
 	}
 	worker := newConfigTestWorker(cfg)
@@ -227,8 +227,8 @@ func TestWorkerConfigChangeContextWindow(t *testing.T) {
 
 func TestWorkerConfigChangeContextWindowRejectsNegative(t *testing.T) {
 	cfg := &config.Config{
-		LLM:     config.LLMConfig{Temperature: 1, TopP: 1},
-		Context: config.ContextConfig{MaxOutputTokens: 16384, WindowTokens: 128000, CompressionThreshold: 0.7},
+		LLM:     config.LLMConfig{Temperature: 1, TopP: 1, ContextWindow: 128000},
+		Context: config.ContextConfig{MaxOutputTokens: 16384, CompressionThreshold: 0.7},
 		Tool:    config.ToolConfig{MaxOutputChars: 1000},
 	}
 	worker := newConfigTestWorker(cfg)
@@ -244,9 +244,8 @@ func TestWorkerConfigChangeContextWindowRejectsNegative(t *testing.T) {
 
 func TestWorkerConfigQueryAll(t *testing.T) {
 	cfg := &config.Config{
-		LLM:     config.LLMConfig{Model: "gpt-4o", Temperature: 1, TopP: 1},
-		Context: config.ContextConfig{MaxOutputTokens: 16384, WindowTokens: 128000, CompressionThreshold: 0.7},
-		Vision:  config.VisionConfig{Enabled: true},
+		LLM:     config.LLMConfig{Model: "gpt-4o", Temperature: 1, TopP: 1, ContextWindow: 128000, Vision: true},
+		Context: config.ContextConfig{MaxOutputTokens: 16384, CompressionThreshold: 0.7},
 		Tool:    config.ToolConfig{MaxOutputChars: 1000},
 	}
 	worker := newConfigTestWorker(cfg)

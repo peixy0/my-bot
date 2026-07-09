@@ -203,8 +203,8 @@ These are the load-bearing invariants that an earlier draft expressed via inline
 ### Configuration
 - All config via a single YAML file (default `./config.yaml`), loaded once in `config.Load()`.
 - Defaults in `config.go`. New settings: add field to `Config` struct with `yaml` tag, add default in `defaultConfig()`, add validation in `Validate()`.
-- `LLMConfig` exposes `top_k`, `extra_body`, and the standard `temperature`/`top_p` for non-OpenAI providers. `Config.Models` is a map of named presets (`ModelConfig`) that override `LLMConfig` fields when the chosen model name matches.
-- `ForSession(chatID)` value-copies the global config (top-level struct copy via `merged := *c`), applies the per-chat `sessions[chatID]` override (`LLMOverride` / `ContextOverride` / `VisionOverride`), then applies the matching model preset. Map fields (`Models`, `LLM.ExtraBody`) are reference-copied — they share underlying data with the global config. This is safe because these maps are read-only after startup. Sessions never mutate the global config. See Invariants for details.
+- `LLMConfig` exposes `top_k`, `context_window`, `vision`, `extra_body`, and the standard `temperature`/`top_p` for non-OpenAI providers. `Config.Models` is a map of named presets (`ModelConfig`) that override `LLMConfig` fields when the chosen model name matches.
+- `ForSession(chatID)` value-copies the global config (top-level struct copy via `merged := *c`), applies the per-chat `sessions[chatID]` override (`LLMOverride` / `ContextOverride`), then applies the matching model preset. Map fields (`Models`, `LLM.ExtraBody`) are reference-copied — they share underlying data with the global config. This is safe because these maps are read-only after startup. Sessions never mutate the global config. See Invariants for details.
 
 ### Tool Registration
 - Implement `tools.Toolset`, call `r.Register(schema, handler)` in `Register()`.

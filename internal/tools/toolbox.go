@@ -42,7 +42,7 @@ func (d *DefaultToolset) Register(r *Registry) {
 
 	d.registerGrep(r)
 	d.registerGlob(r)
-	if d.cfg.Vision.Enabled {
+	if d.cfg.LLM.Vision {
 		d.registerReadImage(r)
 	}
 	registerSkillTool(r, d.skills)
@@ -406,7 +406,7 @@ func (d *DefaultToolset) registerReadImage(r *Registry) {
 		if err != nil {
 			return ErrorResult(fmt.Errorf("read image %s: %w", p.Filename, err)), nil
 		}
-		if len(data) > d.cfg.Vision.MaxImageBytes {
+		if len(data) > d.cfg.Context.MaxImageBytes {
 			return ErrorResult(fmt.Errorf("image too large: %d bytes", len(data))), nil
 		}
 		mimeType := detectImageMIME(data)

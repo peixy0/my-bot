@@ -9,10 +9,12 @@ import (
 )
 
 type ModelConfig struct {
-	Temperature *float64       `yaml:"temperature,omitempty"`
-	TopP        *float64       `yaml:"top_p,omitempty"`
-	TopK        *int           `yaml:"top_k,omitempty"`
-	ExtraBody   map[string]any `yaml:"extra_body,omitempty"`
+	Temperature   *float64       `yaml:"temperature,omitempty"`
+	TopP          *float64       `yaml:"top_p,omitempty"`
+	TopK          *int           `yaml:"top_k,omitempty"`
+	ContextWindow *int64         `yaml:"context_window,omitempty"`
+	Vision        *bool          `yaml:"vision,omitempty"`
+	ExtraBody     map[string]any `yaml:"extra_body,omitempty"`
 }
 
 func (m *ModelConfig) ApplyTo(target *LLMConfig) {
@@ -24,6 +26,12 @@ func (m *ModelConfig) ApplyTo(target *LLMConfig) {
 	}
 	if m.TopK != nil {
 		target.TopK = *m.TopK
+	}
+	if m.ContextWindow != nil {
+		target.ContextWindow = *m.ContextWindow
+	}
+	if m.Vision != nil {
+		target.Vision = *m.Vision
 	}
 	if m.ExtraBody != nil {
 		target.ExtraBody = m.ExtraBody
@@ -41,7 +49,6 @@ type Config struct {
 	Context   ContextConfig              `yaml:"context"`
 	Feishu    *FeishuConfig              `yaml:"feishu"`
 	WeChat    *WeChatConfig              `yaml:"wechat"`
-	Vision    VisionConfig               `yaml:"vision"`
 	WebUI     WebUIConfig                `yaml:"webui"`
 	Heartbeat HeartbeatConfig            `yaml:"heartbeat"`
 	Sessions  map[string]SessionOverride `yaml:"sessions"`
@@ -61,13 +68,15 @@ type LimiterConfig struct {
 }
 
 type LLMConfig struct {
-	BaseURL     string         `yaml:"base_url"`
-	Model       string         `yaml:"model"`
-	APIKey      string         `yaml:"api_key"`
-	Temperature float64        `yaml:"temperature"`
-	TopP        float64        `yaml:"top_p"`
-	TopK        int            `yaml:"top_k"`
-	ExtraBody   map[string]any `yaml:"extra_body"`
+	BaseURL       string         `yaml:"base_url"`
+	Model         string         `yaml:"model"`
+	APIKey        string         `yaml:"api_key"`
+	Temperature   float64        `yaml:"temperature"`
+	TopP          float64        `yaml:"top_p"`
+	TopK          int            `yaml:"top_k"`
+	ContextWindow int64          `yaml:"context_window"`
+	Vision        bool           `yaml:"vision"`
+	ExtraBody     map[string]any `yaml:"extra_body"`
 }
 
 type ContainerConfig struct {
@@ -90,8 +99,7 @@ type WorkspaceConfig struct {
 }
 
 type ContextConfig struct {
-	AutoCompression      bool    `yaml:"auto_compression"`
-	WindowTokens         int64   `yaml:"window_tokens"`
+	MaxImageBytes        int     `yaml:"max_image_bytes"`
 	MaxOutputTokens      int64   `yaml:"max_output_tokens"`
 	CompressionThreshold float64 `yaml:"compression_threshold"`
 }
@@ -108,11 +116,6 @@ type WeChatConfig struct {
 	BaseURL  string `yaml:"base_url"`
 }
 
-type VisionConfig struct {
-	Enabled       bool `yaml:"enabled"`
-	MaxImageBytes int  `yaml:"max_image_bytes"`
-}
-
 type WebUIConfig struct {
 	Enabled bool   `yaml:"enabled"`
 	Host    string `yaml:"host"`
@@ -127,29 +130,24 @@ type HeartbeatConfig struct {
 type SessionOverride struct {
 	LLM     *LLMOverride     `yaml:"llm,omitempty"`
 	Context *ContextOverride `yaml:"context,omitempty"`
-	Vision  *VisionOverride  `yaml:"vision,omitempty"`
 }
 
 type LLMOverride struct {
-	BaseURL     *string        `yaml:"base_url,omitempty"`
-	Model       *string        `yaml:"model,omitempty"`
-	APIKey      *string        `yaml:"api_key,omitempty"`
-	Temperature *float64       `yaml:"temperature,omitempty"`
-	TopP        *float64       `yaml:"top_p,omitempty"`
-	TopK        *int           `yaml:"top_k,omitempty"`
-	ExtraBody   map[string]any `yaml:"extra_body,omitempty"`
+	BaseURL       *string        `yaml:"base_url,omitempty"`
+	Model         *string        `yaml:"model,omitempty"`
+	APIKey        *string        `yaml:"api_key,omitempty"`
+	Temperature   *float64       `yaml:"temperature,omitempty"`
+	TopP          *float64       `yaml:"top_p,omitempty"`
+	TopK          *int           `yaml:"top_k,omitempty"`
+	ContextWindow *int64         `yaml:"context_window,omitempty"`
+	Vision        *bool          `yaml:"vision,omitempty"`
+	ExtraBody     map[string]any `yaml:"extra_body,omitempty"`
 }
 
 type ContextOverride struct {
-	AutoCompression      *bool    `yaml:"auto_compression,omitempty"`
-	WindowTokens         *int64   `yaml:"window_tokens,omitempty"`
+	MaxImageBytes        *int     `yaml:"max_image_bytes,omitempty"`
 	MaxOutputTokens      *int64   `yaml:"max_output_tokens,omitempty"`
 	CompressionThreshold *float64 `yaml:"compression_threshold,omitempty"`
-}
-
-type VisionOverride struct {
-	Enabled       *bool `yaml:"enabled,omitempty"`
-	MaxImageBytes *int  `yaml:"max_image_bytes,omitempty"`
 }
 
 func (o *LLMOverride) ApplyTo(target *LLMConfig) {
@@ -171,32 +169,26 @@ func (o *LLMOverride) ApplyTo(target *LLMConfig) {
 	if o.TopK != nil {
 		target.TopK = *o.TopK
 	}
+	if o.ContextWindow != nil {
+		target.ContextWindow = *o.ContextWindow
+	}
+	if o.Vision != nil {
+		target.Vision = *o.Vision
+	}
 	if o.ExtraBody != nil {
 		target.ExtraBody = o.ExtraBody
 	}
 }
 
 func (o *ContextOverride) ApplyTo(target *ContextConfig) {
-	if o.AutoCompression != nil {
-		target.AutoCompression = *o.AutoCompression
-	}
-	if o.WindowTokens != nil {
-		target.WindowTokens = *o.WindowTokens
+	if o.MaxImageBytes != nil {
+		target.MaxImageBytes = *o.MaxImageBytes
 	}
 	if o.MaxOutputTokens != nil {
 		target.MaxOutputTokens = *o.MaxOutputTokens
 	}
 	if o.CompressionThreshold != nil {
 		target.CompressionThreshold = *o.CompressionThreshold
-	}
-}
-
-func (o *VisionOverride) ApplyTo(target *VisionConfig) {
-	if o.Enabled != nil {
-		target.Enabled = *o.Enabled
-	}
-	if o.MaxImageBytes != nil {
-		target.MaxImageBytes = *o.MaxImageBytes
 	}
 }
 
@@ -228,9 +220,6 @@ func (c *Config) ForSession(chatID string) *Config {
 		if override.Context != nil {
 			override.Context.ApplyTo(&merged.Context)
 		}
-		if override.Vision != nil {
-			override.Vision.ApplyTo(&merged.Vision)
-		}
 	}
 
 	base := merged.LLM
@@ -246,13 +235,7 @@ func (c *Config) ForSession(chatID string) *Config {
 func defaultConfig() *Config {
 	return &Config{
 		LogLevel: "debug",
-		LLM: LLMConfig{
-			BaseURL:     "https://api.openai.com/v1",
-			Model:       "gpt-4o",
-			Temperature: 1,
-			TopP:        0.95,
-		},
-		Limiter: nil,
+		Limiter:  nil,
 		Tool: ToolConfig{
 			MaxOutputChars: 100_000,
 		},
@@ -266,14 +249,18 @@ func defaultConfig() *Config {
 		Heartbeat: HeartbeatConfig{
 			IntervalSeconds: 1800,
 		},
+		LLM: LLMConfig{
+			BaseURL:       "https://api.openai.com/v1",
+			Model:         "gpt-4o",
+			Temperature:   1,
+			TopP:          0.95,
+			ContextWindow: 128_000,
+			Vision:        false,
+		},
 		Context: ContextConfig{
-			AutoCompression:      true,
-			WindowTokens:         128_000,
+			MaxImageBytes:        5 * 1024 * 1024,
 			MaxOutputTokens:      16_384,
 			CompressionThreshold: 0.7,
-		},
-		Vision: VisionConfig{
-			MaxImageBytes: 5 * 1024 * 1024,
 		},
 		WebUI: WebUIConfig{
 			Enabled: true,
@@ -320,8 +307,8 @@ func (cfg *Config) Validate() error {
 	if cfg.Heartbeat.IntervalSeconds <= 0 {
 		return fmt.Errorf("heartbeat.interval_seconds must be positive")
 	}
-	if cfg.Context.WindowTokens <= 0 {
-		return fmt.Errorf("context.window_tokens must be positive")
+	if cfg.LLM.ContextWindow <= 0 {
+		return fmt.Errorf("llm.context_window must be positive")
 	}
 	if cfg.Context.MaxOutputTokens <= 0 {
 		return fmt.Errorf("context.max_output_tokens must be positive")
@@ -329,8 +316,8 @@ func (cfg *Config) Validate() error {
 	if cfg.Context.CompressionThreshold <= 0 || cfg.Context.CompressionThreshold > 1 {
 		return fmt.Errorf("context.compression_threshold must be greater than 0 and at most 1")
 	}
-	if cfg.Vision.MaxImageBytes <= 0 {
-		return fmt.Errorf("vision.max_image_bytes must be positive")
+	if cfg.Context.MaxImageBytes <= 0 {
+		return fmt.Errorf("context.max_image_bytes must be positive")
 	}
 	if cfg.WebUI.Enabled {
 		if strings.TrimSpace(cfg.WebUI.Host) == "" {

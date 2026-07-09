@@ -7,6 +7,8 @@ llm:
   temperature: 1.0
   top_p: 0.95
   top_k: 0
+  context_window: 128000
+  vision: false
   # extra_body:
   #   chat_template_kwargs:
   #     enable_thinking: true
@@ -15,14 +17,18 @@ llm:
 models:
   Qwen3-32B:
     temperature: 0.6
+    context_window: 131072
+    vision: true
     extra_body:
       chat_template_kwargs:
         enable_thinking: true
   Qwen3-8B:
     temperature: 0.3
     top_p: 0.9
+    context_window: 131072
   deepseek-r1:
     temperature: 0.7
+    context_window: 65536
     extra_body:
       chat_template_kwargs:
         thinking: true
@@ -46,8 +52,7 @@ workspace:
   session_dir: "./.session"
 
 context:
-  auto_compression: true
-  window_tokens: 128000
+  max_image_bytes: 5242880
   max_output_tokens: 16384
   compression_threshold: 0.7
 
@@ -61,10 +66,6 @@ wechat:
   enabled: false
   # bot_token: ""   # optional: if set, skip QR login on startup
   # base_url: ""    # optional: override https://ilinkai.weixin.qq.com
-
-vision:
-  enabled: false
-  max_image_bytes: 5242880
 
 webui:
   enabled: true

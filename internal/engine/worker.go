@@ -79,11 +79,11 @@ func (w *ConversationWorker) SetModel(model string) {
 }
 
 func (w *ConversationWorker) VisionSupported() bool {
-	return w.cfg.Vision.Enabled
+	return w.cfg.LLM.Vision
 }
 
 func (w *ConversationWorker) SetVisionSupported(enabled bool) {
-	w.cfg.Vision.Enabled = enabled
+	w.cfg.LLM.Vision = enabled
 }
 
 func (w *ConversationWorker) Temperature() string {
@@ -122,11 +122,11 @@ func (w *ConversationWorker) SetMaxTokens(value int64) {
 }
 
 func (w *ConversationWorker) ContextWindow() string {
-	return strconv.FormatInt(w.cfg.Context.WindowTokens, 10)
+	return strconv.FormatInt(w.cfg.LLM.ContextWindow, 10)
 }
 
 func (w *ConversationWorker) SetContextWindow(value int64) {
-	w.cfg.Context.WindowTokens = value
+	w.cfg.LLM.ContextWindow = value
 }
 
 func (w *ConversationWorker) Run(ctx context.Context) error {
@@ -370,10 +370,7 @@ func (w *ConversationWorker) runBackground(ctx context.Context, sender events.Ou
 }
 
 func (w *ConversationWorker) maybeCompress(ctx context.Context, prompt llm.SystemPrompt) error {
-	if !w.cfg.Context.AutoCompression {
-		return nil
-	}
-	threshold := int(float64(w.cfg.Context.WindowTokens) * w.cfg.Context.CompressionThreshold)
+	threshold := int(float64(w.cfg.LLM.ContextWindow) * w.cfg.Context.CompressionThreshold)
 	if threshold <= 0 || int(w.loop.TotalTokens()) < threshold {
 		return nil
 	}

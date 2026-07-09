@@ -140,8 +140,8 @@ func (a *Agent) Run(
 		conv.Messages = append(conv.Messages, assistantMsg)
 		orch.OnContentFinal(ctx, resp.Content)
 
-		if cfg.Context.AutoCompression && int(conv.TotalTokens) >= int(float64(cfg.Context.WindowTokens)*cfg.Context.CompressionThreshold) {
-			slog.Debug("context compression triggered", "tokens", conv.TotalTokens, "context_window", cfg.Context.WindowTokens)
+		if threshold := int(float64(cfg.LLM.ContextWindow) * cfg.Context.CompressionThreshold); threshold > 0 && int(conv.TotalTokens) >= threshold {
+			slog.Debug("context compression triggered", "tokens", conv.TotalTokens, "context_window", cfg.LLM.ContextWindow)
 			if err := a.Compress(abortCtx, cfg, systemPrompt, conv); err != nil {
 				if abortCtx.Err() == context.Canceled {
 					return ErrAborted
