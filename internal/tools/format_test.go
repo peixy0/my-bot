@@ -70,3 +70,137 @@ func TestFormatSkillResultUsesRawInstructions(t *testing.T) {
 		t.Fatalf("expected raw instruction body, got:\n%s", got)
 	}
 }
+
+func TestFormatTaskSnapshot(t *testing.T) {
+	elapsed := 1.5
+	normal := tasks.Snapshot{
+		TaskID:      "task-1",
+		Description: "go test ./...",
+		Output:      "ok package\n",
+		Status:      tasks.StatusExited,
+	}
+	errorSnap := tasks.Snapshot{
+		TaskID:      "task-2",
+		Description: "failing cmd",
+		Status:      tasks.StatusFailed,
+		Error:       "boom",
+	}
+	errorSnap.ElapsedSeconds = &elapsed
+	noDescription := tasks.Snapshot{
+		TaskID: "task-3",
+		Status: tasks.StatusRunning,
+		Output: "running\n",
+	}
+	noOutput := tasks.Snapshot{
+		TaskID:      "task-4",
+		Description: "quiet cmd",
+		Status:      tasks.StatusExited,
+	}
+
+	tests := []struct {
+		name    string
+		snap    tasks.Snapshot
+		want    []string
+		notWant []string
+	}{
+		{
+			name: "normal case",
+			snap: normal,
+			want: []string{
+				"task_id: task-1",
+				"description: go test ./...",
+				"status: exited",
+				"output:\nok package",
+			},
+			notWant: []string{
+				"error:",
+				"elapsed_seconds:",
+				"description: (none)",
+				"output: (no output)",
+			},
+		},
+		{
+			name: "error case",
+			snap: errorSnap,
+			want: []string{
+				"task_id: task-2",
+				"description: failing cmd",
+				"status: failed",
+				"error: boom",
+				"elapsed_seconds: 1.500",
+			},
+		},
+		{
+			name: "empty description",
+			snap: noDescription,
+			want: []string{
+				"task_id: task-3",
+				"description: (none)",
+				"status: running",
+				"output:\nrunning",
+			},
+			notWant: []string{"description: \n"},
+		},
+		{
+			name: "empty output",
+			snap: noOutput,
+			want: []string{
+				"task_id: task-4",
+				"description: quiet cmd",
+				"status: exited",
+				"output: (no output)",
+			},
+			notWant: []string{"output:\n"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatTaskSnapshot(tt.snap)
+			for _, part := range tt.want {
+				if !strings.Contains(got, part) {
+					t.Fatalf("expected formatted output to contain %q, got:\n%s", part, got)
+				}
+			}
+			for _, part := range tt.notWant {
+				if strings.Contains(got, part) {
+					t.Fatalf("expected formatted output to NOT contain %q, got:\n%s", part, got)
+				}
+			}
+		})
+	}
+}
+
+func TestFormatReadFileResultEmptyContent(t *testing.T) {
+	got := formatReadFileResult("internal/empty.go", runtime.ReadFileResult{})
+
+	wantParts := []string{
+		"filename: internal/empty.go",
+		"total_lines: 0",
+		"start_line: 0",
+		"returned_lines: 0",
+		"content:\n",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(got, part) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", part, got)
+		}
+	}
+	if !strings.HasSuffix(got, "content:\n") {
+		t.Fatalf("expected output to end with empty content section, got:\n%s", got)
+	}
+}
+
+func TestFormatSkillResultEmptyFields(t *testing.T) {
+	got := formatSkillResult(&Skill{})
+
+	if !strings.Contains(got, "name: \n") {
+		t.Fatalf("expected empty name section, got:\n%s", got)
+	}
+	if !strings.Contains(got, "base_dir: \n") {
+		t.Fatalf("expected empty base_dir section, got:\n%s", got)
+	}
+	if !strings.HasSuffix(got, "instructions:\n") {
+		t.Fatalf("expected output to end with empty instructions section, got:\n%s", got)
+	}
+}

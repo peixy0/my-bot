@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"testing"
 
 	"my-bot/internal/config"
@@ -58,7 +60,7 @@ func TestWorkerConfigChangeModelWithPreset(t *testing.T) {
 	if worker.cfg.LLM.Temperature != 0.6 {
 		t.Fatalf("expected preset temperature 0.6, got %f", worker.cfg.LLM.Temperature)
 	}
-	if !containsMsg(out.messages, "model preset applied") {
+	if !slices.ContainsFunc(out.messages, func(m string) bool { return strings.Contains(m, "model preset applied") }) {
 		t.Fatalf("expected preset applied message, got %v", out.messages)
 	}
 }
@@ -94,7 +96,7 @@ func TestWorkerConfigChangeTemperatureOutOfRange(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	}
-	if !containsMsg(out.messages, "usage: /temperature <0..2>") {
+	if !slices.ContainsFunc(out.messages, func(m string) bool { return strings.Contains(m, "usage: /temperature <0..2>") }) {
 		t.Fatalf("expected rejection message, got %v", out.messages)
 	}
 	if worker.Temperature() != "1" {
@@ -130,7 +132,7 @@ func TestWorkerConfigChangeTopPOutOfRange(t *testing.T) {
 	ev := events.ConfigChangeEvent{Key: events.ConfigKeyTopP, Value: "1.5", Sender: out}
 	worker.processConfigChange(context.Background(), ev)
 
-	if !containsMsg(out.messages, "usage: /top_p <0..1>") {
+	if !slices.ContainsFunc(out.messages, func(m string) bool { return strings.Contains(m, "usage: /top_p <0..1>") }) {
 		t.Fatalf("expected rejection, got %v", out.messages)
 	}
 	if worker.TopP() != "1" {
@@ -167,7 +169,7 @@ func TestWorkerConfigChangeTopKRejectsZeroAndNegative(t *testing.T) {
 		ev := events.ConfigChangeEvent{Key: events.ConfigKeyTopK, Value: val, Sender: out}
 		worker.processConfigChange(context.Background(), ev)
 	}
-	if !containsMsg(out.messages, "usage: /top_k <positive integer>") {
+	if !slices.ContainsFunc(out.messages, func(m string) bool { return strings.Contains(m, "usage: /top_k <positive integer>") }) {
 		t.Fatalf("expected rejection, got %v", out.messages)
 	}
 }
@@ -202,7 +204,7 @@ func TestWorkerConfigChangeMaxTokensRejectsZero(t *testing.T) {
 	ev := events.ConfigChangeEvent{Key: events.ConfigKeyMaxTokens, Value: "0", Sender: out}
 	worker.processConfigChange(context.Background(), ev)
 
-	if !containsMsg(out.messages, "usage: /max_tokens <positive integer>") {
+	if !slices.ContainsFunc(out.messages, func(m string) bool { return strings.Contains(m, "usage: /max_tokens <positive integer>") }) {
 		t.Fatalf("expected rejection, got %v", out.messages)
 	}
 }
@@ -237,7 +239,7 @@ func TestWorkerConfigChangeContextWindowRejectsNegative(t *testing.T) {
 	ev := events.ConfigChangeEvent{Key: events.ConfigKeyContextWindow, Value: "-1", Sender: out}
 	worker.processConfigChange(context.Background(), ev)
 
-	if !containsMsg(out.messages, "usage: /context_window <positive integer>") {
+	if !slices.ContainsFunc(out.messages, func(m string) bool { return strings.Contains(m, "usage: /context_window <positive integer>") }) {
 		t.Fatalf("expected rejection, got %v", out.messages)
 	}
 }
@@ -269,26 +271,4 @@ func TestWorkerConfigQueryAll(t *testing.T) {
 			t.Fatalf("query %s: expected %q, got %v", key, want, out.messages)
 		}
 	}
-}
-
-func containsMsg(msgs []string, substr string) bool {
-	for _, m := range msgs {
-		if contains(m, substr) {
-			return true
-		}
-	}
-	return false
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && containsStr(s, substr)
-}
-
-func containsStr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

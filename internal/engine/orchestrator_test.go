@@ -173,71 +173,8 @@ func TestHumanInputOrchestrator_ContentFinalBeforeToolUse(t *testing.T) {
 	}
 }
 
-func TestSubagentOrchestrator_DoesNotForwardToolContent(t *testing.T) {
-	sender := &mockSender{}
-	orch := NewSubagentOrchestrator(tools.NewRegistry(), nil, nil)
-
-	orch.BeforeToolUse(context.Background(), "using tool")
-
-	if len(sender.sent) != 0 {
-		t.Fatalf("expected no outbound sends from subagent, got %v", sender.sent)
-	}
-}
-
-type orchMockClient struct {
-	responses []llm.CompletionResponse
-	calls     []orchMockCompletionCall
-	callCount int
-}
-
-type orchMockCompletionCall struct {
-	model       string
-	messages    []llm.ChatMessage
-	tools       []map[string]any
-	maxTokens   int64
-	temperature float64
-}
-
-func (m *orchMockClient) Complete(ctx context.Context, req llm.CompletionRequest) (llm.CompletionResponse, error) {
-	m.calls = append(m.calls, orchMockCompletionCall{
-		model:       req.Model,
-		messages:    cloneOrchMessages(req.Messages),
-		tools:       cloneOrchTools(req.Tools),
-		maxTokens:   req.MaxTokens,
-		temperature: req.Temperature,
-	})
-	idx := m.callCount
-	m.callCount++
-	if idx >= len(m.responses) {
-		return llm.CompletionResponse{FinishReason: "stop"}, nil
-	}
-	resp := m.responses[idx]
-	if req.OnContentDelta != nil && resp.Content != "" {
-		req.OnContentDelta(ctx, resp.Content)
-	}
-	return resp, nil
-}
-
-func cloneOrchMessages(messages []llm.ChatMessage) []llm.ChatMessage {
-	out := make([]llm.ChatMessage, len(messages))
-	copy(out, messages)
-	return out
-}
-
-func cloneOrchTools(t []map[string]any) []map[string]any {
-	out := make([]map[string]any, len(t))
-	for i, tool := range t {
-		c := make(map[string]any, len(tool))
-		for k, v := range tool {
-			c[k] = v
-		}
-		out[i] = c
-	}
-	return out
-}
-
 func TestSubagentToolset_DoesNotForwardSubagentToolContent(t *testing.T) {
-	client := &orchMockClient{
+	client := &mockClient{
 		responses: []llm.CompletionResponse{
 			{
 				Content:      "using tool",

@@ -239,12 +239,6 @@ func TestParseChatCompletionStream_PreservesThinkTagsInDeltas(t *testing.T) {
 	}
 }
 
-func TestIsRetryable_UnexpectedEOF(t *testing.T) {
-	if !isRetryable(io.ErrUnexpectedEOF) {
-		t.Fatal("expected unexpected EOF to be retryable")
-	}
-}
-
 func TestRetryExponential_RetriesOnUnexpectedEOF(t *testing.T) {
 	originalRetryAfter := retryAfter
 	retryAfter = func(time.Duration) <-chan time.Time {
@@ -277,20 +271,6 @@ func writeSSE(t *testing.T, w http.ResponseWriter, v any) {
 		t.Fatalf("marshal SSE: %v", err)
 	}
 	fmt.Fprintf(w, "data: %s\n\n", data)
-}
-
-func TestRetryExponential_SucceedsOnFirstTry(t *testing.T) {
-	calls := 0
-	err := retryExponential(context.Background(), 5, func() error {
-		calls++
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if calls != 1 {
-		t.Errorf("expected 1 call, got %d", calls)
-	}
 }
 
 func TestRetryExponential_NonRetryableError(t *testing.T) {
@@ -361,6 +341,7 @@ func TestIsRetryable(t *testing.T) {
 		{&APIError{StatusCode: 500, Message: ""}, true},
 		{&APIError{StatusCode: 503, Message: ""}, true},
 		{errors.New("network timeout"), false},
+		{io.ErrUnexpectedEOF, true},
 	}
 
 	for _, tt := range tests {

@@ -63,31 +63,6 @@ func TestSchedulerHeartbeatInterval(t *testing.T) {
 	}
 }
 
-func TestSendWorkerEventPublishesEnvelope(t *testing.T) {
-	workerInbox := inbox.NewMemory[events.WorkerEvent](1)
-	if !workerInbox.TryPublish(events.HeartbeatEvent{ChatID: "chat-1"}) {
-		t.Fatal("expected worker event publish to succeed")
-	}
-
-	msg, err := workerInbox.Receive(context.Background())
-	if err != nil {
-		t.Fatalf("receive worker event: %v", err)
-	}
-	if _, ok := msg.(events.HeartbeatEvent); !ok {
-		t.Fatalf("unexpected payload type: %T", msg)
-	}
-}
-
-func TestSendWorkerEventDropsWhenInboxFull(t *testing.T) {
-	workerInbox := inbox.NewMemory[events.WorkerEvent](1)
-	if !workerInbox.TryPublish(events.HeartbeatEvent{ChatID: "chat-1"}) {
-		t.Fatal("expected first publish to succeed")
-	}
-	if workerInbox.TryPublish(events.HeartbeatEvent{ChatID: "chat-1"}) {
-		t.Fatal("expected second publish to fail when inbox is full")
-	}
-}
-
 func TestSchedulerDispatchTextInputPublishesToExistingWorkerMessageInbox(t *testing.T) {
 	worker := &ConversationWorker{
 		Events:       inbox.NewMemory[events.WorkerEvent](1),
