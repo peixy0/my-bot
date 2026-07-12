@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"my-bot/internal/messaging"
 	"my-bot/internal/runtime"
 	"my-bot/internal/util"
 
@@ -49,15 +50,11 @@ func NewOutbound(client *lark.Client, rt runtime.Runtime, chatID, messageID stri
 }
 
 func (o *Outbound) Send(ctx context.Context, text string) {
-	const maxRetry = 3
-	var err error
-	for attempt := 1; attempt <= maxRetry; attempt++ {
-		err = o.SendText(ctx, text)
-		if err == nil {
-			return
-		}
+	if err := messaging.CallWithTimeoutAndRetry(ctx, 10*time.Second, func(ctx context.Context) error {
+		return o.SendText(ctx, text)
+	}); err != nil {
+		slog.Warn("feishu send failed", "err", err, "chat_id", o.chatID)
 	}
-	slog.Error("feishu send failed after retries", "err", err, "chat_id", o.chatID, "attempts", maxRetry)
 }
 
 func (o *Outbound) SendDelta(ctx context.Context, text string) {
@@ -70,7 +67,12 @@ func (o *Outbound) SendDelta(ctx context.Context, text string) {
 		return
 	}
 	if o.stream == nil {
-		stream, err := o.openStreamingCard(ctx, o.partial.String())
+		var stream *streamingCard
+		err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
+			var err error
+			stream, err = o.openStreamingCard(ctx, o.partial.String())
+			return err
+		})
 		if err != nil {
 			slog.Warn("feishu streaming card open failed; falling back to batch send", "err", err, "chat_id", o.chatID)
 			o.stream = &streamingCard{failed: true}
@@ -82,7 +84,9 @@ func (o *Outbound) SendDelta(ctx context.Context, text string) {
 	if time.Since(o.stream.lastPush) < streamingMinPush {
 		return
 	}
-	if err := o.updateStreamingCard(ctx, o.stream, o.partial.String()); err != nil {
+	if err := messaging.CallWithTimeoutAndRetry(ctx, 10*time.Second, func(ctx context.Context) error {
+		return o.updateStreamingCard(ctx, o.stream, o.partial.String())
+	}); err != nil {
 		slog.Warn("feishu streaming card update failed", "err", err, "chat_id", o.chatID, "card_id", o.stream.cardID)
 		o.stream.failed = true
 	}
@@ -97,13 +101,19 @@ func (o *Outbound) SendFinal(ctx context.Context) {
 
 	if stream != nil && !stream.failed {
 		if hasText {
-			if err := o.updateStreamingCard(ctx, stream, text); err != nil {
+			if err := messaging.CallWithTimeoutAndRetry(ctx, 10*time.Second, func(ctx context.Context) error {
+				return o.updateStreamingCard(ctx, stream, text)
+			}); err != nil {
 				slog.Warn("feishu streaming card final update failed", "err", err, "chat_id", o.chatID, "card_id", stream.cardID)
 				stream.failed = true
 			}
 		}
-		if err := o.closeStreamingCard(ctx, stream); err != nil {
-			slog.Warn("feishu streaming card close failed", "err", err, "chat_id", o.chatID, "card_id", stream.cardID)
+		if !stream.failed {
+			if err := messaging.CallWithTimeoutAndRetry(ctx, 10*time.Second, func(ctx context.Context) error {
+				return o.closeStreamingCard(ctx, stream)
+			}); err != nil {
+				slog.Warn("feishu streaming card close failed", "err", err, "chat_id", o.chatID, "card_id", stream.cardID)
+			}
 		}
 	}
 	if hasText && (stream == nil || stream.failed) {
@@ -134,13 +144,7 @@ func (o *Outbound) SendText(ctx context.Context, text string) error {
 			Build()).
 		Build()
 	_, err := o.client.Im.Message.Create(ctx, req)
-	if err != nil {
-		slog.Error("feishu send error", "err", err, "chat_id", o.chatID)
-		return err
-	}
-
-	slog.Debug("feishu message sent", "chat_id", o.chatID)
-	return nil
+	return err
 }
 
 func (o *Outbound) openStreamingCard(ctx context.Context, text string) (*streamingCard, error) {
@@ -204,13 +208,13 @@ func (o *Outbound) updateStreamingCard(ctx context.Context, stream *streamingCar
 }
 
 func (o *Outbound) closeStreamingCard(ctx context.Context, stream *streamingCard) error {
+	stream.sequence++
 	settings, err := util.ToJSON(map[string]any{
 		"config": map[string]any{"streaming_mode": false},
 	})
 	if err != nil {
 		return fmt.Errorf("marshal streaming card settings: %w", err)
 	}
-	stream.sequence++
 	req := larkcardkit.NewSettingsCardReqBuilder().
 		CardId(stream.cardID).
 		Body(larkcardkit.NewSettingsCardReqBodyBuilder().
@@ -265,13 +269,14 @@ func (o *Outbound) sendImage(ctx context.Context, data []byte) (string, error) {
 		Build()
 	uploadResp, err := o.client.Im.Image.Create(ctx, uploadReq)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("upload image: %w", err)
 	}
 	if uploadResp.Data == nil || uploadResp.Data.ImageKey == nil {
 		return "", errors.New("failed to upload image: no image key returned")
 	}
-	imageKey := uploadResp.Data.ImageKey
-	content, _ := util.ToJSON(map[string]any{"image_key": *imageKey})
+
+	imageKey := *uploadResp.Data.ImageKey
+	content, _ := util.ToJSON(map[string]any{"image_key": imageKey})
 	req := larkim.NewCreateMessageReqBuilder().
 		ReceiveIdType("chat_id").
 		Body(larkim.NewCreateMessageReqBodyBuilder().
@@ -280,8 +285,10 @@ func (o *Outbound) sendImage(ctx context.Context, data []byte) (string, error) {
 			Content(string(content)).
 			Build()).
 		Build()
-	_, err = o.client.Im.Message.Create(ctx, req)
-	return *imageKey, err
+	if _, err := o.client.Im.Message.Create(ctx, req); err != nil {
+		return "", fmt.Errorf("send image message: %w", err)
+	}
+	return imageKey, nil
 }
 
 func (o *Outbound) sendFile(ctx context.Context, name string, data []byte) error {
@@ -294,10 +301,11 @@ func (o *Outbound) sendFile(ctx context.Context, name string, data []byte) error
 		Build()
 	uploadResp, err := o.client.Im.File.Create(ctx, uploadReq)
 	if err != nil {
-		return err
+		return fmt.Errorf("upload file: %w", err)
 	}
-	fileKey := uploadResp.Data.FileKey
-	content, _ := util.ToJSON(map[string]any{"file_key": *fileKey})
+
+	fileKey := *uploadResp.Data.FileKey
+	content, _ := util.ToJSON(map[string]any{"file_key": fileKey})
 	req := larkim.NewCreateMessageReqBuilder().
 		ReceiveIdType("chat_id").
 		Body(larkim.NewCreateMessageReqBodyBuilder().
@@ -306,8 +314,10 @@ func (o *Outbound) sendFile(ctx context.Context, name string, data []byte) error
 			Content(string(content)).
 			Build()).
 		Build()
-	_, err = o.client.Im.Message.Create(ctx, req)
-	return err
+	if _, err := o.client.Im.Message.Create(ctx, req); err != nil {
+		return fmt.Errorf("send file message: %w", err)
+	}
+	return nil
 }
 
 func (o *Outbound) addReaction(ctx context.Context, emoji string) error {

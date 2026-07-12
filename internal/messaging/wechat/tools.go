@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"path/filepath"
+	"time"
 
+	"my-bot/internal/messaging"
 	"my-bot/internal/tools"
 )
 
@@ -39,8 +42,10 @@ func (o *Outbound) registerSendImage(r *tools.Registry) {
 		if len(data) > 10*1024*1024 {
 			return tools.ErrorResult(fmt.Errorf("image file too large: %d bytes", len(data))), nil
 		}
-		if err := o.sendImage(ctx, data); err != nil {
-			return tools.ErrorResult(fmt.Errorf("send image %s to current chat: %w", p.ImagePath, err)), nil
+		if err := messaging.CallWithTimeoutAndRetry(ctx, 10*time.Second, func(ctx context.Context) error {
+			return o.sendImage(ctx, data)
+		}); err != nil {
+			slog.Warn("wechat send image failed", "err", err, "user", o.fromUserID)
 		}
 		return tools.TextResult(fmt.Sprintf("sent image %s", p.ImagePath)), nil
 	})
@@ -74,8 +79,10 @@ func (o *Outbound) registerSendFile(r *tools.Registry) {
 		if len(data) > 20*1024*1024 {
 			return tools.ErrorResult(fmt.Errorf("file size too large: %d bytes", len(data))), nil
 		}
-		if err := o.sendFile(ctx, filepath.Base(p.FilePath), data); err != nil {
-			return tools.ErrorResult(fmt.Errorf("send file %s to current chat: %w", p.FilePath, err)), nil
+		if err := messaging.CallWithTimeoutAndRetry(ctx, 10*time.Second, func(ctx context.Context) error {
+			return o.sendFile(ctx, filepath.Base(p.FilePath), data)
+		}); err != nil {
+			slog.Warn("wechat send file failed", "err", err, "user", o.fromUserID)
 		}
 		return tools.TextResult(fmt.Sprintf("sent file %s", p.FilePath)), nil
 	})

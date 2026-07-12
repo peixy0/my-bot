@@ -11,6 +11,7 @@ import (
 
 	"my-bot/internal/events"
 	"my-bot/internal/inbox"
+	"my-bot/internal/messaging"
 	"my-bot/internal/messaging/dedup"
 	"my-bot/internal/runtime"
 
@@ -71,9 +72,9 @@ func (i *Inbound) onMessageReceive(ctx context.Context, event *larkim.P2MessageR
 	outbound := NewOutbound(i.client, i.rt, chatID, msgID)
 	switch *msg.MessageType {
 	case "text":
-		go i.processTextMessage(ctx, chatID, msgID, msg, outbound)
+		go i.processTextMessage(context.WithoutCancel(ctx), chatID, msgID, msg, outbound)
 	case "image":
-		go i.processImageMessage(ctx, chatID, msgID, msg, outbound)
+		go i.processImageMessage(context.WithoutCancel(ctx), chatID, msgID, msg, outbound)
 	}
 	return nil
 }
@@ -90,16 +91,24 @@ func (i *Inbound) readImageData(ctx context.Context, msgID, msgBody string) ([]b
 	if err := json.Unmarshal([]byte(msgBody), &body); err != nil {
 		return nil, fmt.Errorf("unmarshal image msg body: %w", err)
 	}
-	req := larkim.NewGetMessageResourceReqBuilder().
-		MessageId(msgID).
-		FileKey(body.ImageKey).
-		Type("image").
-		Build()
-	resp, err := i.client.Im.MessageResource.Get(ctx, req)
+	var data []byte
+	err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
+		req := larkim.NewGetMessageResourceReqBuilder().
+			MessageId(msgID).
+			FileKey(body.ImageKey).
+			Type("image").
+			Build()
+		resp, err := i.client.Im.MessageResource.Get(ctx, req)
+		if err != nil {
+			return err
+		}
+		data, err = io.ReadAll(resp.File)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-	return io.ReadAll(resp.File)
+	return data, nil
 }
 
 func (i *Inbound) processTextMessage(
@@ -115,8 +124,16 @@ func (i *Inbound) processTextMessage(
 		return
 	}
 	if msg.ParentId != nil {
-		parentMsgReq := larkim.NewGetMessageReqBuilder().MessageId(*msg.ParentId).Build()
-		parentMsgResp, err := i.client.Im.Message.Get(ctx, parentMsgReq)
+		var parentMsgResp *larkim.GetMessageResp
+		err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
+			parentMsgReq := larkim.NewGetMessageReqBuilder().MessageId(*msg.ParentId).Build()
+			resp, err := i.client.Im.Message.Get(ctx, parentMsgReq)
+			if err != nil {
+				return err
+			}
+			parentMsgResp = resp
+			return nil
+		})
 		if err == nil {
 			i.processBasedOnParentMessage(ctx, chatID, msgID, parentMsgResp.Data.Items, body.Text, outbound)
 			return

@@ -52,7 +52,7 @@ type httpClient struct {
 
 func newHTTPClient(botToken, baseURL string) *httpClient {
 	return &httpClient{
-		inner:    &http.Client{Timeout: 45 * time.Second},
+		inner:    &http.Client{},
 		botToken: botToken,
 		baseURL:  baseURL,
 	}

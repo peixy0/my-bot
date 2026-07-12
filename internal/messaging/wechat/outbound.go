@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"my-bot/internal/messaging"
 	"my-bot/internal/runtime"
 )
 
@@ -35,8 +36,10 @@ func NewOutbound(hc *httpClient, fromUserID, contextToken string, rt runtime.Run
 
 func (o *Outbound) Send(ctx context.Context, text string) {
 	for _, chunk := range splitText(text, maxChunkLen) {
-		if err := o.sendText(ctx, chunk); err != nil {
-			slog.Error("wechat send failed", "err", err, "user", o.fromUserID)
+		if err := messaging.CallWithTimeoutAndRetry(ctx, 10*time.Second, func(ctx context.Context) error {
+			return o.sendText(ctx, chunk)
+		}); err != nil {
+			slog.Warn("wechat send failed", "err", err, "user", o.fromUserID)
 		}
 	}
 }
@@ -78,32 +81,32 @@ const (
 )
 
 func (o *Outbound) sendText(ctx context.Context, text string) error {
-	req := sendMessageReq{
-		Msg: wxSendMsg{
-			FromUserID:   "",
-			ToUserID:     o.fromUserID,
-			ClientID:     newClientID(),
-			MessageType:  msgTypeBot,
-			MessageState: msgStateFinish,
-			ContextToken: o.contextToken,
-			ItemList: []wxItem{
-				{
-					Type:     itemTypeText,
-					TextItem: &wxTextItem{Text: text},
+	return messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
+		req := sendMessageReq{
+			Msg: wxSendMsg{
+				FromUserID:   "",
+				ToUserID:     o.fromUserID,
+				ClientID:     newClientID(),
+				MessageType:  msgTypeBot,
+				MessageState: msgStateFinish,
+				ContextToken: o.contextToken,
+				ItemList: []wxItem{
+					{
+						Type:     itemTypeText,
+						TextItem: &wxTextItem{Text: text},
+					},
 				},
 			},
-		},
-		BaseInfo: newBaseInfo(),
-	}
-	return o.hc.post(ctx, pathSendMessage, req, nil)
+			BaseInfo: newBaseInfo(),
+		}
+		return o.hc.post(ctx, pathSendMessage, req, nil)
+	})
 }
 
 func newClientID() string {
 	return fmt.Sprintf("mybot:%d-%08x", time.Now().UnixMilli(), mrand.Uint32())
 }
 
-// newFileKey generates a random hex file key for CDN upload, matching the
-// format expected by the WeChat iLink API (pure hex, no special characters).
 func newFileKey() string {
 	var buf [16]byte
 	_, _ = rand.Read(buf[:])
@@ -160,7 +163,10 @@ func (o *Outbound) uploadMedia(ctx context.Context, mediaType int, fileKey strin
 		BaseInfo:    newBaseInfo(),
 	}
 	var uploadResp getUploadURLResp
-	if err := o.hc.post(ctx, pathGetUploadURL, uploadReq, &uploadResp); err != nil {
+	err = messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
+		return o.hc.post(ctx, pathGetUploadURL, uploadReq, &uploadResp)
+	})
+	if err != nil {
 		return CDNMedia{}, 0, fmt.Errorf("getuploadurl: %w", err)
 	}
 
@@ -189,23 +195,25 @@ func (o *Outbound) sendImage(ctx context.Context, data []byte) error {
 	if err != nil {
 		return err
 	}
-	req := sendMessageReq{
-		Msg: wxSendMsg{
-			ToUserID:     o.fromUserID,
-			ClientID:     newClientID(),
-			MessageType:  msgTypeBot,
-			MessageState: msgStateFinish,
-			ContextToken: o.contextToken,
-			ItemList: []wxItem{
-				{Type: itemTypeImage, ImageItem: &wxImageItem{
-					Media:   media,
-					MidSize: int64(encSize),
-				}},
+	return messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
+		req := sendMessageReq{
+			Msg: wxSendMsg{
+				ToUserID:     o.fromUserID,
+				ClientID:     newClientID(),
+				MessageType:  msgTypeBot,
+				MessageState: msgStateFinish,
+				ContextToken: o.contextToken,
+				ItemList: []wxItem{
+					{Type: itemTypeImage, ImageItem: &wxImageItem{
+						Media:   media,
+						MidSize: int64(encSize),
+					}},
+				},
 			},
-		},
-		BaseInfo: newBaseInfo(),
-	}
-	return o.hc.post(ctx, pathSendMessage, req, nil)
+			BaseInfo: newBaseInfo(),
+		}
+		return o.hc.post(ctx, pathSendMessage, req, nil)
+	})
 }
 
 func (o *Outbound) sendFile(ctx context.Context, filename string, data []byte) error {
@@ -213,24 +221,26 @@ func (o *Outbound) sendFile(ctx context.Context, filename string, data []byte) e
 	if err != nil {
 		return err
 	}
-	req := sendMessageReq{
-		Msg: wxSendMsg{
-			ToUserID:     o.fromUserID,
-			ClientID:     newClientID(),
-			MessageType:  msgTypeBot,
-			MessageState: msgStateFinish,
-			ContextToken: o.contextToken,
-			ItemList: []wxItem{
-				{Type: itemTypeFile, FileItem: &wxFileItem{
-					Media:    media,
-					FileName: filename,
-					Len:      fmt.Sprintf("%d", len(data)),
-				}},
+	return messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
+		req := sendMessageReq{
+			Msg: wxSendMsg{
+				ToUserID:     o.fromUserID,
+				ClientID:     newClientID(),
+				MessageType:  msgTypeBot,
+				MessageState: msgStateFinish,
+				ContextToken: o.contextToken,
+				ItemList: []wxItem{
+					{Type: itemTypeFile, FileItem: &wxFileItem{
+						Media:    media,
+						FileName: filename,
+						Len:      fmt.Sprintf("%d", len(data)),
+					}},
+				},
 			},
-		},
-		BaseInfo: newBaseInfo(),
-	}
-	return o.hc.post(ctx, pathSendMessage, req, nil)
+			BaseInfo: newBaseInfo(),
+		}
+		return o.hc.post(ctx, pathSendMessage, req, nil)
+	})
 }
 
 func splitText(text string, maxLen int) []string {
