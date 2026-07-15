@@ -67,18 +67,6 @@ func (o *Outbound) SendBegin(ctx context.Context) {
 		o.stream.lastPush = time.Time{}
 		return
 	}
-
-	var stream *streamingCard
-	if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
-		var err error
-		stream, err = o.openStreamingCard(ctx, "")
-		return err
-	}); err != nil {
-		slog.Warn("feishu streaming card open failed; falling back to batch send", "err", err, "chat_id", o.chatID)
-		return
-	}
-	stream.lastPush = time.Time{}
-	o.stream = stream
 }
 
 func (o *Outbound) SendDelta(ctx context.Context, text string) {
@@ -88,7 +76,17 @@ func (o *Outbound) SendDelta(ctx context.Context, text string) {
 		return
 	}
 	if o.stream == nil {
-		return
+		var stream *streamingCard
+		if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
+			var err error
+			stream, err = o.openStreamingCard(ctx, "")
+			return err
+		}); err != nil {
+			slog.Warn("feishu streaming card open failed; falling back to batch send", "err", err, "chat_id", o.chatID)
+			return
+		}
+		stream.lastPush = time.Time{}
+		o.stream = stream
 	}
 	if time.Since(o.stream.lastPush) < streamingMinPush {
 		return
