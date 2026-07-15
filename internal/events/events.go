@@ -90,6 +90,10 @@ type ResumeCommand struct {
 	Sender Outbound
 }
 
+type CompressCommand struct {
+	Sender Outbound
+}
+
 func (TextInputEvent) agentEvent()   {}
 func (ImageInputEvent) agentEvent()  {}
 func (DropSessionEvent) agentEvent() {}
@@ -103,6 +107,7 @@ func (ConfigQueryEvent) workerEvent()  {}
 func (ConfigChangeEvent) workerEvent() {}
 func (DumpCommand) workerEvent()       {}
 func (ResumeCommand) workerEvent()     {}
+func (CompressCommand) workerEvent()   {}
 
 // QueuedInputEvent is used by the /queue command to wrap user input
 // into a worker event that will be processed when the current work completes.

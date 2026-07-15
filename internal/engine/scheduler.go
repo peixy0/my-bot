@@ -127,6 +127,8 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 			return
 		}
 		s.getOrCreateSession(ctx, e.ChatID).publishEvent(events.ResumeCommand{ID: id, Sender: e.Sender})
+	case "compress":
+		s.getOrCreateSession(ctx, e.ChatID).publishEvent(events.CompressCommand{Sender: e.Sender})
 	case "session":
 		e.Sender.Send(ctx, fmt.Sprintf("current session: %s", e.ChatID))
 		return

@@ -184,6 +184,9 @@ func (a *Agent) Compress(ctx context.Context, cfg *config.Config, systemPrompt s
 	}
 
 	anchor := strings.TrimSpace(resp.Content)
+	if anchor == "" {
+		return fmt.Errorf("got empty anchor")
+	}
 	conv.Messages = []llm.ChatMessage{
 		{Role: "user", Content: "[CONTEXT ANCHOR]\n" + anchor},
 		retained,

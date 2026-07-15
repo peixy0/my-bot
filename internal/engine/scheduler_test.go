@@ -249,6 +249,36 @@ func TestSchedulerDumpCommandRequiresActiveSession(t *testing.T) {
 	}
 }
 
+func TestSchedulerCompressCommandQueuesCompression(t *testing.T) {
+	worker := &ConversationWorker{
+		Events:       inbox.NewMemory[events.WorkerEvent](1),
+		MessageInbox: inbox.NewMemory[events.MessageEvent](1),
+	}
+	out := &captureOutbound{}
+	s := &Scheduler{
+		sessions: map[string]*chatSession{
+			"chat-1": newStubSession(worker),
+		},
+	}
+
+	s.handleSlashCommand(context.Background(), "compress", events.TextInputEvent{
+		ChatID: "chat-1",
+		Sender: out,
+	})
+
+	msg, err := worker.Events.Receive(context.Background())
+	if err != nil {
+		t.Fatalf("receive compress event: %v", err)
+	}
+	ev, ok := msg.(events.CompressCommand)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", msg)
+	}
+	if ev.Sender != out {
+		t.Fatal("expected compress command to keep original sender")
+	}
+}
+
 func TestSchedulerResumeCommandQueuesResume(t *testing.T) {
 	worker := &ConversationWorker{
 		Events:       inbox.NewMemory[events.WorkerEvent](1),

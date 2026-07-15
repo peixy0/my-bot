@@ -172,6 +172,8 @@ func (w *ConversationWorker) handleEvent(ctx context.Context, e events.WorkerEve
 		return w.processDump(ctx, ev)
 	case events.ResumeCommand:
 		return w.processResume(ctx, ev)
+	case events.CompressCommand:
+		return w.processCompress(ctx, ev)
 	case events.QueuedInputEvent:
 		return w.processText(ctx, events.TextInputEvent(ev))
 	default:
@@ -276,6 +278,17 @@ func (w *ConversationWorker) processResume(ctx context.Context, ev events.Resume
 		return err
 	}
 	ev.Sender.Send(ctx, fmt.Sprintf("session resumed: %s", ev.ID))
+	return nil
+}
+
+func (w *ConversationWorker) processCompress(ctx context.Context, ev events.CompressCommand) error {
+	ev.Sender.StartThinking(ctx)
+	defer ev.Sender.EndThinking(ctx)
+	if err := w.loop.Compress(ctx, llm.NewMainPrompt(w.skills, w.rt)); err != nil {
+		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
+		return err
+	}
+	ev.Sender.Send(ctx, "context compressed")
 	return nil
 }
 
