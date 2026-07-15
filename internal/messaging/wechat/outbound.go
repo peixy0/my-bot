@@ -36,13 +36,15 @@ func NewOutbound(hc *httpClient, fromUserID, contextToken string, rt runtime.Run
 
 func (o *Outbound) Send(ctx context.Context, text string) {
 	for _, chunk := range splitText(text, maxChunkLen) {
-		if err := messaging.CallWithTimeoutAndRetry(ctx, 10*time.Second, func(ctx context.Context) error {
+		if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
 			return o.sendText(ctx, chunk)
 		}); err != nil {
 			slog.Warn("wechat send failed", "err", err, "user", o.fromUserID)
 		}
 	}
 }
+
+func (o *Outbound) SendBegin(_ context.Context) {}
 
 func (o *Outbound) SendDelta(_ context.Context, text string) {
 	o.partial.WriteString(text)

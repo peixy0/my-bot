@@ -48,6 +48,7 @@ type CompletionRequest struct {
 	TopP           float64
 	TopK           int
 	ExtraBody      map[string]any
+	OnContentBegin func(ctx context.Context)
 	OnContentDelta func(ctx context.Context, delta string)
 }
 
@@ -129,6 +130,7 @@ func userBlocksMessage(text string, blocks []ContentPart) ChatMessage {
 // Orchestrator controls the interaction between the LLM and the outside world.
 // Implementations handle content streaming, tool dispatch, and user injection.
 type Orchestrator interface {
+	OnContentBegin(ctx context.Context)
 	OnContentDelta(ctx context.Context, delta string)
 	OnContentFinal(ctx context.Context, content string)
 	OnFinalResponse(ctx context.Context, content string)

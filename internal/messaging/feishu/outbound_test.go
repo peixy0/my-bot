@@ -15,6 +15,9 @@ func TestStreamingCardPayload(t *testing.T) {
 	if config["streaming_mode"] != true {
 		t.Fatalf("expected streaming mode enabled, got %#v", config["streaming_mode"])
 	}
+	if config["update_multi"] != true {
+		t.Fatalf("expected update_multi enabled, got %#v", config["update_multi"])
+	}
 	body, ok := payload["body"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected body map, got %#v", payload["body"])

@@ -4,6 +4,7 @@ import "context"
 
 type Outbound interface {
 	Send(ctx context.Context, text string)
+	SendBegin(ctx context.Context)
 	SendDelta(ctx context.Context, text string)
 	SendFinal(ctx context.Context)
 	StartThinking(ctx context.Context)

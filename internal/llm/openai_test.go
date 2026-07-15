@@ -32,6 +32,7 @@ func TestOpenAIProvider_CompleteStreamsContent(t *testing.T) {
 	defer server.Close()
 
 	provider := NewOpenAIProvider(server.URL, "test-key", server.Client())
+	begins := 0
 	var deltas []string
 	resp, err := provider.Complete(context.Background(), CompletionRequest{
 		Model:       "test-model",
@@ -40,6 +41,9 @@ func TestOpenAIProvider_CompleteStreamsContent(t *testing.T) {
 		Temperature: 0.2,
 		TopP:        0.9,
 		TopK:        40,
+		OnContentBegin: func(context.Context) {
+			begins++
+		},
 		OnContentDelta: func(_ context.Context, delta string) {
 			deltas = append(deltas, delta)
 		},
@@ -52,6 +56,9 @@ func TestOpenAIProvider_CompleteStreamsContent(t *testing.T) {
 	}
 	if !reflect.DeepEqual(deltas, []string{"Hel", "lo"}) {
 		t.Fatalf("expected content deltas, got %v", deltas)
+	}
+	if begins != 1 {
+		t.Fatalf("expected one content begin, got %d", begins)
 	}
 	if requestBody["stream"] != true {
 		t.Fatalf("expected stream=true in request, got %#v", requestBody["stream"])

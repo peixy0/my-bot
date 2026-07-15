@@ -40,6 +40,9 @@ func (m *mockClient) Complete(ctx context.Context, req llm.CompletionRequest) (l
 		return llm.CompletionResponse{FinishReason: "stop"}, nil
 	}
 	resp := m.responses[idx]
+	if req.OnContentBegin != nil {
+		req.OnContentBegin(ctx)
+	}
 	if req.OnContentDelta != nil && resp.Content != "" {
 		req.OnContentDelta(ctx, resp.Content)
 	}
@@ -72,6 +75,7 @@ func cloneTools(tools []map[string]any) []map[string]any {
 
 type mockOrchestrator struct {
 	registry        *tools.Registry
+	begins          int
 	beforeToolCalls int
 	finalContent    []string
 	finalResponses  []string
@@ -84,6 +88,9 @@ func newMockOrchestrator() *mockOrchestrator {
 	return &mockOrchestrator{registry: tools.NewRegistry()}
 }
 
+func (o *mockOrchestrator) OnContentBegin(_ context.Context) {
+	o.begins++
+}
 func (o *mockOrchestrator) OnContentDelta(_ context.Context, _ string) {}
 func (o *mockOrchestrator) OnContentFinal(_ context.Context, content string) {
 	o.finalContent = append(o.finalContent, content)

@@ -19,12 +19,16 @@ import (
 
 type mockSender struct {
 	sent   []string
+	begins int
 	deltas []string
 	finals int
 }
 
 func (s *mockSender) Send(_ context.Context, msg string) {
 	s.sent = append(s.sent, msg)
+}
+func (s *mockSender) SendBegin(_ context.Context) {
+	s.begins++
 }
 func (s *mockSender) SendDelta(_ context.Context, msg string) {
 	s.deltas = append(s.deltas, msg)
@@ -128,12 +132,16 @@ func TestHumanInputOrchestrator_StreamsDeltasAndFinal(t *testing.T) {
 	sender := &mockSender{}
 	orch := NewHumanInputOrchestrator(tools.NewRegistry(), sender, nil)
 
+	orch.OnContentBegin(context.Background())
 	orch.OnContentDelta(context.Background(), "hel")
 	orch.OnContentDelta(context.Background(), "lo")
 	orch.OnContentFinal(context.Background(), "hello")
 
 	if fmt.Sprint(sender.deltas) != fmt.Sprint([]string{"hel", "lo"}) {
 		t.Fatalf("expected streamed deltas, got %v", sender.deltas)
+	}
+	if sender.begins != 1 {
+		t.Fatalf("expected one begin marker, got %d", sender.begins)
 	}
 	if sender.finals != 1 {
 		t.Fatalf("expected one final stream marker, got %d", sender.finals)

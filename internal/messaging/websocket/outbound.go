@@ -46,6 +46,15 @@ func (o *Outbound) Send(ctx context.Context, text string) {
 	}
 }
 
+func (o *Outbound) SendBegin(ctx context.Context) {
+	if err := o.writeJSON(map[string]any{
+		"type":    "message_stream_begin",
+		"chat_id": o.chatID,
+	}); err != nil {
+		slog.Warn("websocket send message_stream_begin failed", "chat_id", o.chatID, "err", err)
+	}
+}
+
 func (o *Outbound) SendDelta(ctx context.Context, text string) {
 	if err := o.writeJSON(map[string]any{
 		"type":    "message_stream_delta",

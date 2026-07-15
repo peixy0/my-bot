@@ -82,6 +82,7 @@ func (a *Agent) Run(
 			TopP:           cfg.LLM.TopP,
 			TopK:           cfg.LLM.TopK,
 			ExtraBody:      cfg.LLM.ExtraBody,
+			OnContentBegin: orch.OnContentBegin,
 			OnContentDelta: orch.OnContentDelta,
 		})
 		if err != nil {

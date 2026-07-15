@@ -101,6 +101,9 @@ func (p *OpenAIProvider) doComplete(ctx context.Context, req CompletionRequest) 
 		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
 	}
 
+	if req.OnContentBegin != nil {
+		req.OnContentBegin(ctx)
+	}
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
 		return CompletionResponse{}, err

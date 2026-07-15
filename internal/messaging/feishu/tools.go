@@ -40,10 +40,11 @@ func (o *Outbound) registerAddReaction(r *tools.Registry) {
 		if err := json.Unmarshal(args, &p); err != nil {
 			return tools.ToolResult{}, fmt.Errorf("parse add_reaction args: %w", err)
 		}
-		if err := messaging.CallWithTimeoutAndRetry(ctx, 10*time.Second, func(ctx context.Context) error {
+		if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
 			return o.addReaction(ctx, p.Emoji)
 		}); err != nil {
 			slog.Warn("feishu add reaction failed", "err", err, "chat_id", o.chatID, "message_id", o.messageID)
+			return tools.ErrorResult(err), nil
 		}
 		return tools.TextResult("reaction added"), nil
 	})
@@ -74,11 +75,12 @@ func (o *Outbound) registerSendImage(r *tools.Registry) {
 		if len(data) > 10*1024*1024 {
 			return tools.ErrorResult(fmt.Errorf("image file too large: %d bytes", len(data))), nil
 		}
-		if err := messaging.CallWithTimeoutAndRetry(ctx, 10*time.Second, func(ctx context.Context) error {
+		if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
 			_, err := o.sendImage(ctx, data)
 			return err
 		}); err != nil {
 			slog.Warn("feishu send image failed", "err", err, "chat_id", o.chatID)
+			return tools.ErrorResult(err), nil
 		}
 		return tools.TextResult(fmt.Sprintf("sent image %s", p.ImagePath)), nil
 	})
@@ -112,10 +114,11 @@ func (o *Outbound) registerSendFile(r *tools.Registry) {
 		if len(data) > 20*1024*1024 {
 			return tools.ErrorResult(fmt.Errorf("file size too large: %d bytes", len(data))), nil
 		}
-		if err := messaging.CallWithTimeoutAndRetry(ctx, 10*time.Second, func(ctx context.Context) error {
+		if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
 			return o.sendFile(ctx, filepath.Base(p.FilePath), data)
 		}); err != nil {
 			slog.Warn("feishu send file failed", "err", err, "chat_id", o.chatID)
+			return tools.ErrorResult(err), nil
 		}
 		return tools.TextResult(fmt.Sprintf("sent file %s", p.FilePath)), nil
 	})

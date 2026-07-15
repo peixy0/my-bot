@@ -23,6 +23,8 @@ func (o *captureOutbound) Send(_ context.Context, text string) {
 	o.messages = append(o.messages, text)
 }
 
+func (o *captureOutbound) SendBegin(context.Context) {}
+
 func (o *captureOutbound) SendDelta(_ context.Context, text string) {
 	o.messages = append(o.messages, text)
 }

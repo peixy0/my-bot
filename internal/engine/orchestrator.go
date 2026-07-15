@@ -33,6 +33,12 @@ func (o *HumanInputOrchestrator) WithVision(visionSupport bool) *HumanInputOrche
 	return o
 }
 
+func (o *HumanInputOrchestrator) OnContentBegin(ctx context.Context) {
+	if o.sender != nil {
+		o.sender.SendBegin(ctx)
+	}
+}
+
 func (o *HumanInputOrchestrator) OnContentDelta(ctx context.Context, delta string) {
 	if o.sender == nil || delta == "" {
 		return
@@ -113,6 +119,8 @@ func NewBackgroundOrchestrator(registry *tools.Registry, sender events.Outbound)
 	return &BackgroundOrchestrator{registry: registry, sender: sender}
 }
 
+func (o *BackgroundOrchestrator) OnContentBegin(_ context.Context) {}
+
 func (o *BackgroundOrchestrator) OnContentDelta(_ context.Context, _ string) {}
 
 func (o *BackgroundOrchestrator) OnContentFinal(_ context.Context, _ string) {}
@@ -144,6 +152,8 @@ type SubagentOrchestrator struct {
 func NewSubagentOrchestrator(registry *tools.Registry, emit *tasks.Emitter, input <-chan string) *SubagentOrchestrator {
 	return &SubagentOrchestrator{registry: registry, emit: emit, input: input}
 }
+
+func (o *SubagentOrchestrator) OnContentBegin(_ context.Context) {}
 
 func (o *SubagentOrchestrator) OnContentDelta(_ context.Context, delta string) {
 	if delta != "" && o.emit != nil {

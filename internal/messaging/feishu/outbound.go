@@ -21,7 +21,7 @@ import (
 
 const (
 	streamingElementID = "agent_markdown"
-	streamingMinPush   = 500 * time.Millisecond
+	streamingMinPush   = 1000 * time.Millisecond
 )
 
 type Outbound struct {
@@ -37,7 +37,6 @@ type streamingCard struct {
 	cardID   string
 	sequence int
 	lastPush time.Time
-	failed   bool
 }
 
 func NewOutbound(client *lark.Client, rt runtime.Runtime, chatID, messageID string) *Outbound {
@@ -50,11 +49,36 @@ func NewOutbound(client *lark.Client, rt runtime.Runtime, chatID, messageID stri
 }
 
 func (o *Outbound) Send(ctx context.Context, text string) {
-	if err := messaging.CallWithTimeoutAndRetry(ctx, 10*time.Second, func(ctx context.Context) error {
+	if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
 		return o.SendText(ctx, text)
 	}); err != nil {
 		slog.Warn("feishu send failed", "err", err, "chat_id", o.chatID)
 	}
+}
+
+func (o *Outbound) SendBegin(ctx context.Context) {
+	o.partial.Reset()
+	if o.stream != nil {
+		if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
+			return o.updateStreamingCard(ctx, o.stream, "")
+		}); err != nil {
+			slog.Warn("feishu streaming card clear failed", "err", err, "chat_id", o.chatID, "card_id", o.stream.cardID)
+		}
+		o.stream.lastPush = time.Time{}
+		return
+	}
+
+	var stream *streamingCard
+	if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
+		var err error
+		stream, err = o.openStreamingCard(ctx, "")
+		return err
+	}); err != nil {
+		slog.Warn("feishu streaming card open failed; falling back to batch send", "err", err, "chat_id", o.chatID)
+		return
+	}
+	stream.lastPush = time.Time{}
+	o.stream = stream
 }
 
 func (o *Outbound) SendDelta(ctx context.Context, text string) {
@@ -63,32 +87,16 @@ func (o *Outbound) SendDelta(ctx context.Context, text string) {
 	if strings.TrimSpace(o.partial.String()) == "" {
 		return
 	}
-	if o.stream != nil && o.stream.failed {
-		return
-	}
 	if o.stream == nil {
-		var stream *streamingCard
-		err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
-			var err error
-			stream, err = o.openStreamingCard(ctx, o.partial.String())
-			return err
-		})
-		if err != nil {
-			slog.Warn("feishu streaming card open failed; falling back to batch send", "err", err, "chat_id", o.chatID)
-			o.stream = &streamingCard{failed: true}
-			return
-		}
-		o.stream = stream
 		return
 	}
 	if time.Since(o.stream.lastPush) < streamingMinPush {
 		return
 	}
-	if err := messaging.CallWithTimeoutAndRetry(ctx, 10*time.Second, func(ctx context.Context) error {
+	if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
 		return o.updateStreamingCard(ctx, o.stream, o.partial.String())
 	}); err != nil {
 		slog.Warn("feishu streaming card update failed", "err", err, "chat_id", o.chatID, "card_id", o.stream.cardID)
-		o.stream.failed = true
 	}
 }
 
@@ -99,24 +107,23 @@ func (o *Outbound) SendFinal(ctx context.Context) {
 	o.stream = nil
 	hasText := strings.TrimSpace(text) != ""
 
-	if stream != nil && !stream.failed {
+	updateFailed := false
+	if stream != nil {
 		if hasText {
-			if err := messaging.CallWithTimeoutAndRetry(ctx, 10*time.Second, func(ctx context.Context) error {
+			if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
 				return o.updateStreamingCard(ctx, stream, text)
 			}); err != nil {
 				slog.Warn("feishu streaming card final update failed", "err", err, "chat_id", o.chatID, "card_id", stream.cardID)
-				stream.failed = true
+				updateFailed = true
 			}
 		}
-		if !stream.failed {
-			if err := messaging.CallWithTimeoutAndRetry(ctx, 10*time.Second, func(ctx context.Context) error {
-				return o.closeStreamingCard(ctx, stream)
-			}); err != nil {
-				slog.Warn("feishu streaming card close failed", "err", err, "chat_id", o.chatID, "card_id", stream.cardID)
-			}
+		if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
+			return o.closeStreamingCard(ctx, stream)
+		}); err != nil {
+			slog.Warn("feishu streaming card close failed", "err", err, "chat_id", o.chatID, "card_id", stream.cardID)
 		}
 	}
-	if hasText && (stream == nil || stream.failed) {
+	if hasText && (stream == nil || updateFailed) {
 		o.Send(ctx, text)
 	}
 }
@@ -238,6 +245,7 @@ func streamingCardPayload(content string, streaming bool) map[string]any {
 		"schema": "2.0",
 		"config": map[string]any{
 			"streaming_mode": streaming,
+			"update_multi":   true,
 			"summary":        map[string]any{"content": ""},
 			"streaming_config": map[string]any{
 				"print_frequency_ms": map[string]any{"default": 70},

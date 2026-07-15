@@ -42,7 +42,7 @@ func (o *Outbound) registerSendImage(r *tools.Registry) {
 		if len(data) > 10*1024*1024 {
 			return tools.ErrorResult(fmt.Errorf("image file too large: %d bytes", len(data))), nil
 		}
-		if err := messaging.CallWithTimeoutAndRetry(ctx, 10*time.Second, func(ctx context.Context) error {
+		if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
 			return o.sendImage(ctx, data)
 		}); err != nil {
 			slog.Warn("wechat send image failed", "err", err, "user", o.fromUserID)
@@ -79,7 +79,7 @@ func (o *Outbound) registerSendFile(r *tools.Registry) {
 		if len(data) > 20*1024*1024 {
 			return tools.ErrorResult(fmt.Errorf("file size too large: %d bytes", len(data))), nil
 		}
-		if err := messaging.CallWithTimeoutAndRetry(ctx, 10*time.Second, func(ctx context.Context) error {
+		if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
 			return o.sendFile(ctx, filepath.Base(p.FilePath), data)
 		}); err != nil {
 			slog.Warn("wechat send file failed", "err", err, "user", o.fromUserID)
