@@ -92,8 +92,9 @@ func main() {
 	}
 
 	if cfg.WebUI.Enabled {
-		srv := api.NewServer(mainInbox, cfg.Workspace.ProjectDir, rt, api.ServerOptions{
-			Token: cfg.WebUI.Token,
+		srv := api.NewServer(mainInbox, rt, api.ServerOptions{
+			Token:         cfg.WebUI.Token,
+			IndexHTMLPath: cfg.WebUI.IndexHTMLPath,
 		})
 		addr := fmt.Sprintf("%s:%d", cfg.WebUI.Host, cfg.WebUI.Port)
 		go func() {

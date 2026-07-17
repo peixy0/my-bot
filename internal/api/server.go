@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -28,24 +27,25 @@ const (
 )
 
 type Server struct {
-	inbox      inbox.Inbox[events.AgentEvent]
-	projectDir string
-	rt         runtime.Runtime
-	mux        *http.ServeMux
-	token      string
+	inbox         inbox.Inbox[events.AgentEvent]
+	indexHTMLPath string
+	rt            runtime.Runtime
+	mux           *http.ServeMux
+	token         string
 }
 
 type ServerOptions struct {
-	Token string
+	Token         string
+	IndexHTMLPath string
 }
 
-func NewServer(agentInbox inbox.Inbox[events.AgentEvent], projectDir string, rt runtime.Runtime, opts ServerOptions) *Server {
+func NewServer(agentInbox inbox.Inbox[events.AgentEvent], rt runtime.Runtime, opts ServerOptions) *Server {
 	s := &Server{
-		inbox:      agentInbox,
-		projectDir: projectDir,
-		rt:         rt,
-		mux:        http.NewServeMux(),
-		token:      opts.Token,
+		inbox:         agentInbox,
+		indexHTMLPath: opts.IndexHTMLPath,
+		rt:            rt,
+		mux:           http.NewServeMux(),
+		token:         opts.Token,
 	}
 	s.mux.HandleFunc("/", s.handleRoot)
 	s.mux.HandleFunc("/api/health", s.handleHealth)
@@ -72,8 +72,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	path := filepath.Join(s.projectDir, "chat.html")
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(s.indexHTMLPath)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return

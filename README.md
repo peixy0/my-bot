@@ -74,6 +74,7 @@ webui:
   host: 127.0.0.1
   port: 8017
   token: change-me        # optional; gates http://host:port/?token=... and ws://...?token=...
+  index_html_path: ../chat.html  # path to the WebUI HTML file
 ```
 
 Other notable sections (defaults shown):
@@ -86,7 +87,6 @@ tool:
 
 workspace:
   cwd: ./workspace             # where PERSONA.md / RULES.md / etc. live
-  project_dir: ../             # default cwd for read/write/edit tools
   skills_dir: ./.skills
   crons_dir: ./.cron
   session_dir: ./.session

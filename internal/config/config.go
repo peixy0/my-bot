@@ -97,7 +97,6 @@ type ToolConfig struct {
 
 type WorkspaceConfig struct {
 	CWD        string `yaml:"cwd"`
-	ProjectDir string `yaml:"project_dir"`
 	SkillsDir  string `yaml:"skills_dir"`
 	CronsDir   string `yaml:"crons_dir"`
 	SessionDir string `yaml:"session_dir"`
@@ -122,10 +121,11 @@ type WeChatConfig struct {
 }
 
 type WebUIConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	Host    string `yaml:"host"`
-	Port    int    `yaml:"port"`
-	Token   string `yaml:"token"`
+	Enabled       bool   `yaml:"enabled"`
+	Host          string `yaml:"host"`
+	Port          int    `yaml:"port"`
+	Token         string `yaml:"token"`
+	IndexHTMLPath string `yaml:"index_html_path"`
 }
 
 type HeartbeatConfig struct {
@@ -250,7 +250,6 @@ func defaultConfig() *Config {
 		},
 		Workspace: WorkspaceConfig{
 			CWD:        "./workspace",
-			ProjectDir: "../",
 			SkillsDir:  "./.skills",
 			CronsDir:   "./.cron",
 			SessionDir: "./.session",
@@ -272,9 +271,10 @@ func defaultConfig() *Config {
 			CompressionThreshold: 0.7,
 		},
 		WebUI: WebUIConfig{
-			Enabled: true,
-			Host:    "127.0.0.1",
-			Port:    8017,
+			Enabled:       true,
+			Host:          "127.0.0.1",
+			Port:          8017,
+			IndexHTMLPath: "../chat.html",
 		},
 	}
 }

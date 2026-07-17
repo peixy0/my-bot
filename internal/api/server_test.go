@@ -11,7 +11,7 @@ import (
 )
 
 func TestServerAuthorized(t *testing.T) {
-	s := NewServer(inbox.NewMemory[events.AgentEvent](1), "", nil, ServerOptions{Token: "secret"})
+	s := NewServer(inbox.NewMemory[events.AgentEvent](1), nil, ServerOptions{Token: "secret"})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/bot?token=secret", nil)
 	if !s.authorized(req) {
@@ -32,7 +32,7 @@ func TestServerAuthorized(t *testing.T) {
 
 func TestServerEnqueueCanceled(t *testing.T) {
 	agentInbox := inbox.NewMemory[events.AgentEvent](0)
-	s := NewServer(agentInbox, "", nil, ServerOptions{})
+	s := NewServer(agentInbox, nil, ServerOptions{})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -43,7 +43,7 @@ func TestServerEnqueueCanceled(t *testing.T) {
 
 func TestServerEnqueueSuccess(t *testing.T) {
 	agentInbox := inbox.NewMemory[events.AgentEvent](1)
-	s := NewServer(agentInbox, "", nil, ServerOptions{})
+	s := NewServer(agentInbox, nil, ServerOptions{})
 
 	if !s.enqueue(context.Background(), events.TextInputEvent{ChatID: "c"}) {
 		t.Fatal("expected enqueue to succeed")
