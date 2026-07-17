@@ -9,6 +9,7 @@ llm:
   top_k: 0
   context_window: 128000
   vision: false
+  skip_on_tool_dispatch_error: false
   # extra_body:
   #   chat_template_kwargs:
   #     enable_thinking: true

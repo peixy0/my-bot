@@ -123,7 +123,12 @@ func (a *Agent) Run(
 		var followups []llm.ChatMessage
 		for i, oc := range outcomes {
 			if oc.Err != nil {
-				slog.Warn("dispatch error, skipping", "tool", resp.ToolCalls[i].Name, "id", resp.ToolCalls[i].ID, "err", oc.Err)
+				if cfg.LLM.SkipOnToolDispatchError {
+					slog.Warn("dispatch error, skipping", "tool", resp.ToolCalls[i].Name, "id", resp.ToolCalls[i].ID, "err", oc.Err)
+				} else {
+					toolCalls = append(toolCalls, resp.ToolCalls[i])
+					toolMsgs = append(toolMsgs, llm.ToolResultMessage(resp.ToolCalls[i].ID, fmt.Sprintf("tool dispatch error: %v", oc.Err)))
+				}
 				continue
 			}
 			toolCalls = append(toolCalls, resp.ToolCalls[i])

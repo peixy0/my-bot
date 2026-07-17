@@ -9,12 +9,13 @@ import (
 )
 
 type ModelConfig struct {
-	Temperature   *float64       `yaml:"temperature,omitempty"`
-	TopP          *float64       `yaml:"top_p,omitempty"`
-	TopK          *int           `yaml:"top_k,omitempty"`
-	ContextWindow *int64         `yaml:"context_window,omitempty"`
-	Vision        *bool          `yaml:"vision,omitempty"`
-	ExtraBody     map[string]any `yaml:"extra_body,omitempty"`
+	Temperature             *float64       `yaml:"temperature,omitempty"`
+	TopP                    *float64       `yaml:"top_p,omitempty"`
+	TopK                    *int           `yaml:"top_k,omitempty"`
+	ContextWindow           *int64         `yaml:"context_window,omitempty"`
+	Vision                  *bool          `yaml:"vision,omitempty"`
+	SkipOnToolDispatchError *bool          `yaml:"skip_on_tool_dispatch_error,omitempty"`
+	ExtraBody               map[string]any `yaml:"extra_body,omitempty"`
 }
 
 func (m *ModelConfig) ApplyTo(target *LLMConfig) {
@@ -32,6 +33,9 @@ func (m *ModelConfig) ApplyTo(target *LLMConfig) {
 	}
 	if m.Vision != nil {
 		target.Vision = *m.Vision
+	}
+	if m.SkipOnToolDispatchError != nil {
+		target.SkipOnToolDispatchError = *m.SkipOnToolDispatchError
 	}
 	if m.ExtraBody != nil {
 		target.ExtraBody = m.ExtraBody
@@ -68,15 +72,16 @@ type LimiterConfig struct {
 }
 
 type LLMConfig struct {
-	BaseURL       string         `yaml:"base_url"`
-	Model         string         `yaml:"model"`
-	APIKey        string         `yaml:"api_key"`
-	Temperature   float64        `yaml:"temperature"`
-	TopP          float64        `yaml:"top_p"`
-	TopK          int            `yaml:"top_k"`
-	ContextWindow int64          `yaml:"context_window"`
-	Vision        bool           `yaml:"vision"`
-	ExtraBody     map[string]any `yaml:"extra_body"`
+	BaseURL                 string         `yaml:"base_url"`
+	Model                   string         `yaml:"model"`
+	APIKey                  string         `yaml:"api_key"`
+	Temperature             float64        `yaml:"temperature"`
+	TopP                    float64        `yaml:"top_p"`
+	TopK                    int            `yaml:"top_k"`
+	ContextWindow           int64          `yaml:"context_window"`
+	Vision                  bool           `yaml:"vision"`
+	SkipOnToolDispatchError bool           `yaml:"skip_on_tool_dispatch_error"`
+	ExtraBody               map[string]any `yaml:"extra_body"`
 }
 
 type ContainerConfig struct {
@@ -133,15 +138,16 @@ type SessionOverride struct {
 }
 
 type LLMOverride struct {
-	BaseURL       *string        `yaml:"base_url,omitempty"`
-	Model         *string        `yaml:"model,omitempty"`
-	APIKey        *string        `yaml:"api_key,omitempty"`
-	Temperature   *float64       `yaml:"temperature,omitempty"`
-	TopP          *float64       `yaml:"top_p,omitempty"`
-	TopK          *int           `yaml:"top_k,omitempty"`
-	ContextWindow *int64         `yaml:"context_window,omitempty"`
-	Vision        *bool          `yaml:"vision,omitempty"`
-	ExtraBody     map[string]any `yaml:"extra_body,omitempty"`
+	BaseURL                 *string        `yaml:"base_url,omitempty"`
+	Model                   *string        `yaml:"model,omitempty"`
+	APIKey                  *string        `yaml:"api_key,omitempty"`
+	Temperature             *float64       `yaml:"temperature,omitempty"`
+	TopP                    *float64       `yaml:"top_p,omitempty"`
+	TopK                    *int           `yaml:"top_k,omitempty"`
+	ContextWindow           *int64         `yaml:"context_window,omitempty"`
+	Vision                  *bool          `yaml:"vision,omitempty"`
+	SkipOnToolDispatchError *bool          `yaml:"skip_on_tool_dispatch_error,omitempty"`
+	ExtraBody               map[string]any `yaml:"extra_body,omitempty"`
 }
 
 type ContextOverride struct {
@@ -174,6 +180,9 @@ func (o *LLMOverride) ApplyTo(target *LLMConfig) {
 	}
 	if o.Vision != nil {
 		target.Vision = *o.Vision
+	}
+	if o.SkipOnToolDispatchError != nil {
+		target.SkipOnToolDispatchError = *o.SkipOnToolDispatchError
 	}
 	if o.ExtraBody != nil {
 		target.ExtraBody = o.ExtraBody

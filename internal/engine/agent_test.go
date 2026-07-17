@@ -239,7 +239,7 @@ func TestAgent_SkipsOnlyFailedToolOutcomes(t *testing.T) {
 	conv := llm.NewConversation()
 	conv.Messages = append(conv.Messages, llm.UserMessage("run tools"))
 
-	cfg := &config.Config{LLM: config.LLMConfig{Model: "test-model"}, Context: config.ContextConfig{MaxOutputTokens: 16384}}
+	cfg := &config.Config{LLM: config.LLMConfig{Model: "test-model", SkipOnToolDispatchError: true}, Context: config.ContextConfig{MaxOutputTokens: 16384}}
 	err := NewAgent(client, nil).Run(context.Background(), nil, cfg, "sys", conv, orch, tools.NewRegistry())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

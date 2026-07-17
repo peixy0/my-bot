@@ -69,10 +69,6 @@ func UserMessage(content string) ChatMessage {
 	return ChatMessage{Role: "user", Content: content}
 }
 
-func userMessage(content string) ChatMessage {
-	return UserMessage(content)
-}
-
 func AssistantMessage(content, reasoningContent string, toolCalls []ToolCall) ChatMessage {
 	msg := ChatMessage{Role: "assistant"}
 	if content != "" {
@@ -98,20 +94,12 @@ func AssistantMessage(content, reasoningContent string, toolCalls []ToolCall) Ch
 	return msg
 }
 
-func assistantMessage(content, reasoningContent string, toolCalls []ToolCall) ChatMessage {
-	return AssistantMessage(content, reasoningContent, toolCalls)
-}
-
 func ToolResultMessage(callID, content string) ChatMessage {
 	return ChatMessage{
 		Role:       "tool",
 		ToolCallID: callID,
 		Content:    content,
 	}
-}
-
-func toolResultMessage(callID, content string) ChatMessage {
-	return ToolResultMessage(callID, content)
 }
 
 func UserBlocksMessage(text string, blocks []ContentPart) ChatMessage {
