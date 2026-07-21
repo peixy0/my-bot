@@ -159,8 +159,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				if !s.enqueue(r.Context(), events.ImageInputEvent{
 					ChatID:    chatID,
 					MessageID: frame.MessageID,
-					ImageData: imgData,
-					MIMEType:  frame.MIMEType,
+					ImageData: []events.ImageData{{Data: imgData, MIMEType: frame.MIMEType}},
 					Message:   frame.Message,
 					Sender:    outbound,
 				}) {

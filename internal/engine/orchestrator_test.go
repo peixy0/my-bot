@@ -79,7 +79,10 @@ func TestHumanInputOrchestrator_DrainInLoopInputWithImageUsesMultipart(t *testin
 	orch := NewHumanInputOrchestrator(reg, sender, inLoopInbox).WithVision(true)
 
 	inLoopInbox.TryPublish(events.TextInputEvent{ChatID: "chat", Message: "stop doing that"})
-	inLoopInbox.TryPublish(events.ImageInputEvent{ChatID: "chat", Message: "see image", MIMEType: "image/png", ImageData: []byte{1, 2, 3}})
+	inLoopInbox.TryPublish(events.ImageInputEvent{ChatID: "chat", Message: "see image", ImageData: []events.ImageData{
+		{Data: []byte{1, 2, 3}, MIMEType: "image/png"},
+		{Data: []byte{4, 5, 6}, MIMEType: "image/jpeg"},
+	}})
 
 	calls := []llm.ToolCall{{ID: "c1", Name: "unknown_tool", Args: []byte(`{}`)}}
 	outcomes, err := orch.DispatchTools(context.Background(), calls)
@@ -100,11 +103,14 @@ func TestHumanInputOrchestrator_DrainInLoopInputWithImageUsesMultipart(t *testin
 	if !ok {
 		t.Fatalf("expected multimodal content, got %T", interrupt.Content)
 	}
-	if len(content) != 2 {
+	if len(content) != 3 {
 		t.Fatalf("expected text plus image content, got %d parts", len(content))
 	}
 	if content[1]["type"] != "image_url" {
 		t.Fatalf("expected final content part to be image_url, got %+v", content[1])
+	}
+	if content[2]["type"] != "image_url" {
+		t.Fatalf("expected final content part to be image_url, got %+v", content[2])
 	}
 }
 

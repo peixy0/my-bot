@@ -296,8 +296,7 @@ func (i *Inbound) processMessage(ctx context.Context, msg wxMsg, hc *httpClient)
 		i.enqueue(ctx, events.ImageInputEvent{
 			ChatID:    msg.FromUserID,
 			MessageID: msg.ClientID,
-			ImageData: imgData,
-			MIMEType:  http.DetectContentType(imgData),
+			ImageData: []events.ImageData{{Data: imgData, MIMEType: http.DetectContentType(imgData)}},
 			Sender:    outbound,
 		})
 		return

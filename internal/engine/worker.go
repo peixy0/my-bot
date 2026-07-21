@@ -214,20 +214,26 @@ func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageIn
 		ev.Sender.Send(ctx, "Image processing is disabled for the current model")
 		return nil
 	}
-	slog.Debug("image input", "chat_id", w.chatID, "msg_id", ev.MessageID, "mime", ev.MIMEType, "bytes", len(ev.ImageData))
+	totalBytes := 0
+	for _, image := range ev.ImageData {
+		totalBytes += len(image.Data)
+	}
+	slog.Debug("image input", "chat_id", w.chatID, "msg_id", ev.MessageID, "count", len(ev.ImageData), "bytes", totalBytes)
 	prompt := llm.NewMainPrompt(w.skills, w.rt)
 	if err := w.maybeCompress(ctx, prompt); err != nil {
 		slog.Error("compress", "chat_id", w.chatID, "err", err)
 	}
 	content := []map[string]any{
 		{"type": "text", "text": wrapUserMessage(ev.Message)},
-		{
+	}
+	for _, image := range ev.ImageData {
+		content = append(content, map[string]any{
 			"type": "image_url",
 			"image_url": map[string]any{
-				"url":    fmt.Sprintf("data:%s;base64,%s", ev.MIMEType, base64.StdEncoding.EncodeToString(ev.ImageData)),
+				"url":    fmt.Sprintf("data:%s;base64,%s", image.MIMEType, base64.StdEncoding.EncodeToString(image.Data)),
 				"detail": "auto",
 			},
-		},
+		})
 	}
 	reg := w.tools.BuildRegistry(ev.Sender)
 	orch := NewHumanInputOrchestrator(reg, ev.Sender, w.MessageInbox).WithVision(true)

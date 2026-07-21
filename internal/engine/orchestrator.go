@@ -98,7 +98,9 @@ func (o *HumanInputOrchestrator) drainInLoopInput() *llm.ChatMessage {
 				sb.WriteString(ev.Message)
 				sb.WriteString("\n\n")
 			}
-			imageParts = appendVisionImagePart(imageParts, ev)
+			for _, image := range ev.ImageData {
+				imageParts = appendVisionImagePart(imageParts, image)
+			}
 		}
 	}
 	text := strings.TrimSpace(sb.String())
@@ -196,11 +198,11 @@ func (o *SubagentOrchestrator) drainInput() *llm.ChatMessage {
 	}
 }
 
-func appendVisionImagePart(parts []map[string]any, ev events.ImageInputEvent) []map[string]any {
+func appendVisionImagePart(parts []map[string]any, image events.ImageData) []map[string]any {
 	return append(parts, map[string]any{
 		"type": "image_url",
 		"image_url": map[string]any{
-			"url":    fmt.Sprintf("data:%s;base64,%s", ev.MIMEType, base64.StdEncoding.EncodeToString(ev.ImageData)),
+			"url":    fmt.Sprintf("data:%s;base64,%s", image.MIMEType, base64.StdEncoding.EncodeToString(image.Data)),
 			"detail": "auto",
 		},
 	})

@@ -114,8 +114,7 @@ func TestSchedulerDispatchImageInputPublishesToExistingWorkerMessageInbox(t *tes
 		ChatID:    "chat-1",
 		MessageID: "msg-1",
 		Message:   "look at this",
-		MIMEType:  "image/png",
-		ImageData: []byte{1, 2, 3},
+		ImageData: []events.ImageData{{Data: []byte{1, 2, 3}, MIMEType: "image/png"}},
 		Sender:    &captureOutbound{},
 	})
 
@@ -127,7 +126,7 @@ func TestSchedulerDispatchImageInputPublishesToExistingWorkerMessageInbox(t *tes
 	if !ok {
 		t.Fatalf("unexpected payload type: %T", msg)
 	}
-	if ev.Message != "look at this" || ev.MIMEType != "image/png" {
+	if ev.Message != "look at this" || len(ev.ImageData) != 1 || ev.ImageData[0].MIMEType != "image/png" {
 		t.Fatalf("unexpected in-loop image input: %+v", ev)
 	}
 	if worker.Events.Len() != 0 {

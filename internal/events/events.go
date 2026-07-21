@@ -26,11 +26,15 @@ type TextInputEvent struct {
 	Sender    Outbound
 }
 
+type ImageData struct {
+	Data     []byte
+	MIMEType string
+}
+
 type ImageInputEvent struct {
 	ChatID    string
 	MessageID string
-	ImageData []byte
-	MIMEType  string
+	ImageData []ImageData
 	Message   string
 	Sender    Outbound
 }
