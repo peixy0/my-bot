@@ -45,6 +45,13 @@ tool:
   web_search_api: ""
   fetch_proxy: ""
 
+browser:
+  enabled: false
+  listen_addr: "127.0.0.1:8020"
+  path: "/browser"
+  bearer_token: ""
+  request_timeout_seconds: 30
+
 workspace:
   cwd: "./workspace"
   skills_dir: "./.skills"

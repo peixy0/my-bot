@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"my-bot/internal/browser"
 	"my-bot/internal/config"
 	"my-bot/internal/llm"
 	"my-bot/internal/runtime"
@@ -20,28 +21,29 @@ type SubagentToolset struct {
 	runner *subagentRunner
 }
 
-func NewSubagentToolset(agent *Agent, skills *tools.SkillLoader, cfg *config.Config, rt runtime.Runtime, taskManager *tasks.Manager) *SubagentToolset {
-	return &SubagentToolset{runner: newSubagentRunner(agent, skills, cfg, rt, taskManager)}
+func NewSubagentToolset(agent *Agent, skills *tools.SkillLoader, cfg *config.Config, rt runtime.Runtime, taskManager *tasks.Manager, browserBroker browser.Broker) *SubagentToolset {
+	return &SubagentToolset{runner: newSubagentRunner(agent, skills, cfg, rt, taskManager, browserBroker)}
 }
 
 type FleetToolset struct {
 	runner *subagentRunner
 }
 
-func NewFleetToolset(agent *Agent, skills *tools.SkillLoader, cfg *config.Config, rt runtime.Runtime, taskManager *tasks.Manager) *FleetToolset {
-	return &FleetToolset{runner: newSubagentRunner(agent, skills, cfg, rt, taskManager)}
+func NewFleetToolset(agent *Agent, skills *tools.SkillLoader, cfg *config.Config, rt runtime.Runtime, taskManager *tasks.Manager, browserBroker browser.Broker) *FleetToolset {
+	return &FleetToolset{runner: newSubagentRunner(agent, skills, cfg, rt, taskManager, browserBroker)}
 }
 
 type subagentRunner struct {
-	agent       *Agent
-	skills      *tools.SkillLoader
-	cfg         *config.Config
-	rt          runtime.Runtime
-	taskManager *tasks.Manager
+	agent         *Agent
+	skills        *tools.SkillLoader
+	cfg           *config.Config
+	rt            runtime.Runtime
+	taskManager   *tasks.Manager
+	browserBroker browser.Broker
 }
 
-func newSubagentRunner(agent *Agent, skills *tools.SkillLoader, cfg *config.Config, rt runtime.Runtime, taskManager *tasks.Manager) *subagentRunner {
-	return &subagentRunner{agent: agent, skills: skills, cfg: cfg, rt: rt, taskManager: taskManager}
+func newSubagentRunner(agent *Agent, skills *tools.SkillLoader, cfg *config.Config, rt runtime.Runtime, taskManager *tasks.Manager, browserBroker browser.Broker) *subagentRunner {
+	return &subagentRunner{agent: agent, skills: skills, cfg: cfg, rt: rt, taskManager: taskManager, browserBroker: browserBroker}
 }
 
 func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task string) (tasks.Snapshot, error) {
@@ -57,12 +59,19 @@ func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task 
 			defer cancel()
 			taskManager := tasks.NewManager(cfg.Tool.MaxOutputChars)
 			cmdTools := tools.NewCommandToolset(r.rt, taskManager)
+			browserClient := r.browserBroker.NewClient()
 			defer func() {
 				ctx2, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 				defer cancel()
-				_ = taskManager.Shutdown(ctx2)
+				if err := browserClient.Close(ctx2); err != nil {
+					slog.Warn("close browser scope", "task_id", info.TaskID, "err", err)
+				}
+				if err := taskManager.Shutdown(ctx2); err != nil {
+					slog.Error("shutdown subagent tasks", "task_id", info.TaskID, "err", err)
+				}
 			}()
 			reg := NewSubagentRegistry(r.rt, r.skills, &cfg, cmdTools)
+			browserClient.Register(reg)
 			orch := NewSubagentOrchestrator(reg, emit, input)
 			loop := NewAgentLoop(&cfg, r.agent)
 			err := loop.Run(agentCtx, nil, reg, orch, llm.NewSubagentPrompt(r.skills, r.rt, systemPrompt), task)

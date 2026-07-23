@@ -2,10 +2,12 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"my-bot/internal/browser"
 	"my-bot/internal/config"
 	"my-bot/internal/events"
 	"my-bot/internal/runtime"
@@ -14,32 +16,40 @@ import (
 )
 
 type sessionTools struct {
-	rt          runtime.Runtime
-	skills      *tools.SkillLoader
-	cfg         *config.Config
-	agent       *Agent
-	taskManager *tasks.Manager
-	cmdTools    *tools.CommandToolset
+	rt            runtime.Runtime
+	skills        *tools.SkillLoader
+	cfg           *config.Config
+	agent         *Agent
+	taskManager   *tasks.Manager
+	cmdTools      *tools.CommandToolset
+	browserBroker browser.Broker
+	browserClient browser.Client
 }
 
-func newSessionTools(rt runtime.Runtime, skills *tools.SkillLoader, cfg *config.Config, agent *Agent) *sessionTools {
+func newSessionTools(rt runtime.Runtime, skills *tools.SkillLoader, cfg *config.Config, agent *Agent, browserBroker browser.Broker) *sessionTools {
 	taskManager := tasks.NewManager(cfg.Tool.MaxOutputChars)
+	browserClient := browserBroker.NewClient()
 	return &sessionTools{
-		rt:          rt,
-		skills:      skills,
-		cfg:         cfg,
-		agent:       agent,
-		taskManager: taskManager,
-		cmdTools:    tools.NewCommandToolset(rt, taskManager),
+		rt:            rt,
+		skills:        skills,
+		cfg:           cfg,
+		agent:         agent,
+		taskManager:   taskManager,
+		cmdTools:      tools.NewCommandToolset(rt, taskManager),
+		browserBroker: browserBroker,
+		browserClient: browserClient,
 	}
 }
 
 func (t *sessionTools) BuildRegistry(sender events.Outbound) *tools.Registry {
-	return NewSessionRegistry(t.rt, t.skills, t.cfg, t.agent, t.taskManager, t.cmdTools, sender)
+	return NewSessionRegistry(t.rt, t.skills, t.cfg, t.agent, t.taskManager, t.cmdTools, t.browserBroker, t.browserClient, sender)
 }
 
 func (t *sessionTools) Shutdown(ctx context.Context) error {
-	return t.taskManager.Shutdown(ctx)
+	return errors.Join(
+		t.browserClient.Close(ctx),
+		t.taskManager.Shutdown(ctx),
+	)
 }
 
 type chatSession struct {
@@ -58,8 +68,9 @@ func newChatSession(
 	rt runtime.Runtime,
 	skills *tools.SkillLoader,
 	cronLoader *CronLoader,
+	browserBroker browser.Broker,
 ) *chatSession {
-	tools := newSessionTools(rt, skills, cfg, agent)
+	tools := newSessionTools(rt, skills, cfg, agent, browserBroker)
 	worker := newConversationWorker(chatID, cfg, agent, rt, skills, tools)
 	workerCtx, cancel := context.WithCancel(parent)
 	session := &chatSession{
@@ -127,6 +138,6 @@ func (s *chatSession) shutdown() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := s.tools.Shutdown(ctx); err != nil {
-		slog.Error("shutdown", "chat_id", s.chatID, "err", err)
+		slog.Error("shutdown session resources", "chat_id", s.chatID, "err", err)
 	}
 }

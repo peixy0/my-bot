@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"my-bot/internal/api"
+	"my-bot/internal/browser"
 	"my-bot/internal/config"
 	"my-bot/internal/engine"
 	"my-bot/internal/events"
@@ -56,6 +57,12 @@ func main() {
 
 	rt := buildRuntime(cfg)
 	skills := tools.NewSkillLoader(cfg.Workspace.SkillsDir)
+	browserBroker := buildBrowserBroker(cfg, rt)
+	go func() {
+		if err := browserBroker.Run(ctx); err != nil && ctx.Err() == nil {
+			slog.Error("browser broker", "err", err)
+		}
+	}()
 
 	llmClient := buildLLMClient(cfg)
 	limiter := buildLimiter(cfg)
@@ -106,7 +113,7 @@ func main() {
 	}
 
 	cronLoader := engine.NewCronLoader(cfg.Workspace.CronsDir)
-	scheduler := engine.NewScheduler(cfg, agent, rt, skills, mainInbox, cronLoader)
+	scheduler := engine.NewScheduler(cfg, agent, rt, skills, browserBroker, mainInbox, cronLoader)
 
 	slog.Info("bot started", "model", cfg.LLM.Model)
 	if err := scheduler.Run(ctx); err != nil && err != context.Canceled {
@@ -127,6 +134,20 @@ func buildRuntime(cfg *config.Config) runtime.Runtime {
 	}
 	slog.Info("using host runtime")
 	return runtime.NewHostRuntime(cfg.Tool.MaxOutputChars)
+}
+
+func buildBrowserBroker(cfg *config.Config, rt runtime.Runtime) browser.Broker {
+	browserCfg := cfg.Browser
+	if browserCfg == nil || !browserCfg.Enabled {
+		return browser.NewNoopBroker()
+	}
+	broker := browser.NewExtensionBroker(browser.Config{
+		ListenAddr:     browserCfg.ListenAddr,
+		Path:           browserCfg.Path,
+		BearerToken:    browserCfg.BearerToken,
+		RequestTimeout: time.Duration(browserCfg.RequestTimeoutSeconds) * time.Second,
+	}, rt, cfg.Tool.MaxOutputChars)
+	return broker
 }
 
 func buildLLMClient(cfg *config.Config) llm.CompletionClient {

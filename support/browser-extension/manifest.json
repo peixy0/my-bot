@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "My Bot Browser Bridge",
+  "version": "0.2.0",
+  "description": "Connect My Bot to Chrome tabs it owns.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "tabs",
+    "tabGroups",
+    "debugger",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  }
+}

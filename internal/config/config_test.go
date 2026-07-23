@@ -46,6 +46,15 @@ func TestConfigValidateRejectsInvalidValues(t *testing.T) {
 		{"limiter burst", func(c *Config) { c.Limiter = &LimiterConfig{RPM: 1, Burst: 0} }},
 		{"webui host", func(c *Config) { c.WebUI.Host = "" }},
 		{"webui port", func(c *Config) { c.WebUI.Port = 70000 }},
+		{"browser bad address", func(c *Config) {
+			c.Browser = &BrowserConfig{Enabled: true, ListenAddr: "bad", Path: "/browser", RequestTimeoutSeconds: 30}
+		}},
+		{"browser bad path", func(c *Config) {
+			c.Browser = &BrowserConfig{Enabled: true, ListenAddr: "127.0.0.1:8020", Path: "browser", RequestTimeoutSeconds: 30}
+		}},
+		{"browser timeout", func(c *Config) {
+			c.Browser = &BrowserConfig{Enabled: true, ListenAddr: "127.0.0.1:8020", Path: "/browser"}
+		}},
 	}
 
 	for _, tt := range tests {
@@ -98,6 +107,11 @@ context:
   max_output_tokens: 8192
 tool:
   max_output_chars: 50000
+browser:
+  enabled: true
+  listen_addr: "127.0.0.1:8020"
+  path: "/browser"
+  request_timeout_seconds: 30
 `)
 	cfg, err := Load(path)
 	if err != nil {
@@ -111,6 +125,9 @@ tool:
 	}
 	if cfg.Tool.MaxOutputChars != 50000 {
 		t.Fatalf("expected max_output_chars 50000, got %d", cfg.Tool.MaxOutputChars)
+	}
+	if cfg.Browser == nil || !cfg.Browser.Enabled {
+		t.Fatal("expected browser config to be parsed")
 	}
 }
 

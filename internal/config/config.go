@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strings"
 
@@ -48,6 +49,7 @@ type Config struct {
 	Limiter   *LimiterConfig             `yaml:"limiter,omitempty"`
 	Models    map[string]ModelConfig     `yaml:"models,omitempty"`
 	Container *ContainerConfig           `yaml:"container,omitempty"`
+	Browser   *BrowserConfig             `yaml:"browser,omitempty"`
 	Tool      ToolConfig                 `yaml:"tool"`
 	Workspace WorkspaceConfig            `yaml:"workspace"`
 	Context   ContextConfig              `yaml:"context"`
@@ -93,6 +95,14 @@ type ToolConfig struct {
 	MaxOutputChars int    `yaml:"max_output_chars"`
 	WebSearchAPI   string `yaml:"web_search_api"`
 	FetchProxy     string `yaml:"fetch_proxy"`
+}
+
+type BrowserConfig struct {
+	Enabled               bool   `yaml:"enabled"`
+	ListenAddr            string `yaml:"listen_addr"`
+	Path                  string `yaml:"path"`
+	BearerToken           string `yaml:"bearer_token"`
+	RequestTimeoutSeconds int    `yaml:"request_timeout_seconds"`
 }
 
 type WorkspaceConfig struct {
@@ -312,6 +322,25 @@ func (cfg *Config) Validate() error {
 	}
 	if cfg.Tool.MaxOutputChars <= 0 {
 		return fmt.Errorf("tool.max_output_chars must be positive")
+	}
+	if cfg.Browser != nil {
+		browser := cfg.Browser
+		if browser.Enabled {
+			if strings.TrimSpace(browser.ListenAddr) == "" {
+				return fmt.Errorf("browser.listen_addr is required")
+			}
+			if _, port, err := net.SplitHostPort(browser.ListenAddr); err != nil {
+				return fmt.Errorf("parse browser.listen_addr: %w", err)
+			} else if port == "0" {
+				return fmt.Errorf("browser.listen_addr port must be non-zero")
+			}
+			if !strings.HasPrefix(browser.Path, "/") {
+				return fmt.Errorf("browser.path must begin with /")
+			}
+			if browser.RequestTimeoutSeconds <= 0 {
+				return fmt.Errorf("browser.request_timeout_seconds must be positive")
+			}
+		}
 	}
 	if cfg.Heartbeat.IntervalSeconds <= 0 {
 		return fmt.Errorf("heartbeat.interval_seconds must be positive")

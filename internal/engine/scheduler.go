@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"my-bot/internal/browser"
 	"my-bot/internal/config"
 	"my-bot/internal/events"
 	"my-bot/internal/inbox"
@@ -17,12 +18,13 @@ import (
 )
 
 type Scheduler struct {
-	cfg        *config.Config
-	agent      *Agent
-	rt         runtime.Runtime
-	skills     *tools.SkillLoader
-	inbox      inbox.Inbox[events.AgentEvent]
-	cronLoader *CronLoader
+	cfg           *config.Config
+	agent         *Agent
+	rt            runtime.Runtime
+	skills        *tools.SkillLoader
+	browserBroker browser.Broker
+	inbox         inbox.Inbox[events.AgentEvent]
+	cronLoader    *CronLoader
 
 	sessions map[string]*chatSession
 }
@@ -32,17 +34,19 @@ func NewScheduler(
 	agent *Agent,
 	rt runtime.Runtime,
 	skills *tools.SkillLoader,
+	browserBroker browser.Broker,
 	agentInbox inbox.Inbox[events.AgentEvent],
 	cronLoader *CronLoader,
 ) *Scheduler {
 	return &Scheduler{
-		cfg:        cfg,
-		agent:      agent,
-		rt:         rt,
-		skills:     skills,
-		inbox:      agentInbox,
-		cronLoader: cronLoader,
-		sessions:   make(map[string]*chatSession),
+		cfg:           cfg,
+		agent:         agent,
+		rt:            rt,
+		skills:        skills,
+		browserBroker: browserBroker,
+		inbox:         agentInbox,
+		cronLoader:    cronLoader,
+		sessions:      make(map[string]*chatSession),
 	}
 }
 
@@ -256,7 +260,7 @@ func (s *Scheduler) getOrCreateSession(ctx context.Context, chatID string) *chat
 		return session
 	}
 	sessionCfg := s.cfg.ForSession(chatID)
-	session := newChatSession(ctx, chatID, sessionCfg, s.agent, s.rt, s.skills, s.cronLoader)
+	session := newChatSession(ctx, chatID, sessionCfg, s.agent, s.rt, s.skills, s.cronLoader, s.browserBroker)
 	s.sessions[chatID] = session
 	return session
 }

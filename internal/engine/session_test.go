@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"my-bot/internal/browser"
 	"my-bot/internal/config"
 )
 
@@ -19,6 +20,7 @@ func TestNewChatSessionOwnsWorkerResources(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		browser.NewNoopBroker(),
 	)
 	defer session.close()
 

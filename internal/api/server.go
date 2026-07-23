@@ -59,7 +59,9 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			slog.Error("shutdown api server", "err", err)
+		}
 	}()
 	return srv.ListenAndServe()
 }

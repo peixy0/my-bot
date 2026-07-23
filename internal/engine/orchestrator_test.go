@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"my-bot/internal/browser"
 	"my-bot/internal/config"
 	"my-bot/internal/events"
 	"my-bot/internal/inbox"
@@ -211,7 +212,7 @@ func TestSubagentToolset_DoesNotForwardSubagentToolContent(t *testing.T) {
 		defer cancel()
 		_ = manager.Shutdown(ctx)
 	}()
-	NewSubagentToolset(agent, skills, cfg, rt, manager).Register(reg)
+	NewSubagentToolset(agent, skills, cfg, rt, manager, browser.NewNoopBroker()).Register(reg)
 	handler, ok := reg.Handler("agent")
 	if !ok {
 		t.Fatal("expected agent handler")
@@ -250,7 +251,7 @@ func TestFleetToolset_ReturnsAllChildTaskIDs(t *testing.T) {
 		_ = manager.Shutdown(ctx)
 	}()
 
-	NewFleetToolset(agent, skills, cfg, rt, manager).Register(reg)
+	NewFleetToolset(agent, skills, cfg, rt, manager, browser.NewNoopBroker()).Register(reg)
 	handler, ok := reg.Handler("fleet")
 	if !ok {
 		t.Fatal("expected fleet handler")

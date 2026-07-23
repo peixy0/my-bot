@@ -114,6 +114,8 @@ Every long-lived goroutine and what it owns. This is the single source of truth 
 | WeChat message processing | WeChat inbound | fire-and-forget per-message goroutine; enqueues events | publishes through `inbox.Publish` |
 | API server `Run` | main | `http.Server` + WS handler per connection | ctx cancel triggers graceful shutdown (10s) |
 | WebSocket per-conn ping loop | API server WS handler | WS keepalive ping ticker | ctx cancel ends loop |
+| Browser extension broker loop | main | active extension connection and request/response correlation | single owner goroutine; HTTP handlers only forward connection events and extension responses |
+| Browser extension WS handler | Browser broker HTTP server | one Chrome extension WebSocket read loop | forwards frames to broker loop; exits on disconnect or context cancellation |
 | Heartbeat `time.AfterFunc` | ConversationWorker | non-blocking send to worker `Events` | timer is `Stop()`-ed on shutdown |
 | OpenAI retry loop | `OpenAIProvider.Complete` | exponential backoff (≤ 99 attempts, max 300s) | ctx cancel returns early |
 
@@ -252,6 +254,8 @@ Highest-value untested seams:
 - `internal/messaging/wechat/inbound.go` — QR login, session re-login, dedup.
 - `internal/messaging/websocket/outbound.go` — writeJSON, send_image.
 - `internal/api/server.go` — token gate, WS upgrade, image enqueue.
+- `internal/browser/broker.go` — WebSocket broker for the Chrome extension bridge (single-goroutine event loop, auth, request/response correlation).
+- `internal/browser/toolset.go` — per-session browser client and toolset; registers `browser_tabs` / `browser_new_tab` / `browser_snapshot` / `browser_click` / `browser_type` / `browser_press_key` / `browser_select_option` / `browser_navigate` / `browser_evaluate` / `browser_wait` tools. Scope-isolated; each session/subagent gets its own scope ID.
 - `tools/background.go` (does not exist yet — `CommandToolset` is the replacement) and `internal/tasks/` retention / subagent shutdown.
 
 ## Development Rules
