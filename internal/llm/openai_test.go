@@ -194,6 +194,42 @@ func TestOpenAIProvider_CompleteReturnsAPIErrorForNonOK(t *testing.T) {
 	}
 }
 
+func TestOpenAIProvider_Models(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/models" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
+			t.Fatalf("expected authorization header, got %q", got)
+		}
+		fmt.Fprint(w, `{"data":[{"id":"z-model"},{"id":"a-model"},{"id":""}]}`)
+	}))
+	defer server.Close()
+
+	provider := NewOpenAIProvider(server.URL, "test-key", server.Client())
+	models, err := provider.Models(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(models, []string{"a-model", "z-model"}) {
+		t.Fatalf("unexpected models: %v", models)
+	}
+}
+
+func TestOpenAIProvider_ModelsReturnsAPIErrorForNonOK(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	provider := NewOpenAIProvider(server.URL, "", server.Client())
+	_, err := provider.Models(context.Background())
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusServiceUnavailable || !strings.Contains(apiErr.Message, "unavailable") {
+		t.Fatalf("expected 503 APIError, got %v", err)
+	}
+}
+
 func TestOpenAIProvider_CompleteRejectsMalformedSSEJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

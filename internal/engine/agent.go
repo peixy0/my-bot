@@ -22,12 +22,21 @@ import (
 var ErrAborted = errors.New("aborted")
 
 type Agent struct {
-	client  llm.CompletionClient
-	limiter *rate.Limiter
+	client   llm.CompletionClient
+	provider *llm.OpenAIProvider
+	limiter  *rate.Limiter
 }
 
 func NewAgent(client llm.CompletionClient, limiter *rate.Limiter) *Agent {
-	return &Agent{client: client, limiter: limiter}
+	provider, _ := client.(*llm.OpenAIProvider)
+	return &Agent{client: client, provider: provider, limiter: limiter}
+}
+
+func (a *Agent) Models(ctx context.Context) ([]string, error) {
+	if a.provider == nil {
+		return nil, errors.New("model listing is not supported by the configured LLM provider")
+	}
+	return a.provider.Models(ctx)
 }
 
 func (a *Agent) Run(

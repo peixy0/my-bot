@@ -101,6 +101,8 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 		e.Sender.Send(ctx, fmt.Sprintf("dropped session: %s", e.ChatID))
 	case "model", "vision", "temperature", "top_p", "top_k", "max_tokens", "context_window":
 		s.handleConfigCommand(ctx, parts, e)
+	case "models":
+		s.handleModelsCommand(ctx, e)
 	case "queue":
 		text := strings.TrimSpace(strings.TrimPrefix(cmd, "queue"))
 		if text == "" {
@@ -159,6 +161,19 @@ func (s *Scheduler) handleConfigCommand(ctx context.Context, parts []string, e e
 		return
 	}
 	s.dispatchToSession(ctx, e.ChatID, events.ConfigChangeEvent{ChatID: e.ChatID, Key: key, Value: parts[1], Sender: e.Sender})
+}
+
+func (s *Scheduler) handleModelsCommand(ctx context.Context, e events.TextInputEvent) {
+	models, err := s.agent.Models(ctx)
+	if err != nil {
+		e.Sender.Send(ctx, fmt.Sprintf("error listing models: %v", err))
+		return
+	}
+	if len(models) == 0 {
+		e.Sender.Send(ctx, "no models available")
+		return
+	}
+	e.Sender.Send(ctx, "available models:\n- "+strings.Join(models, "\n- "))
 }
 
 func (s *Scheduler) heartbeatInterval(ctx context.Context, args []string, sender events.Outbound) (int, bool) {

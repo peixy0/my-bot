@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -359,6 +361,59 @@ func TestSchedulerModelCommandQueuesConfigChange(t *testing.T) {
 	}
 	if ev.Key != events.ConfigKeyModel || ev.Value != "gpt-test" {
 		t.Fatalf("unexpected model event: %+v", ev)
+	}
+}
+
+func TestSchedulerModelsCommandListsRemoteModels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/models" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"z-model"},{"id":"a-model"}]}`))
+	}))
+	defer server.Close()
+
+	out := &captureOutbound{}
+	s := &Scheduler{
+		agent:    NewAgent(llm.NewOpenAIProvider(server.URL, "", server.Client()), nil),
+		sessions: map[string]*chatSession{},
+	}
+
+	s.handleSlashCommand(context.Background(), "models", events.TextInputEvent{
+		ChatID: "chat-1",
+		Sender: out,
+	})
+
+	if len(out.messages) != 1 || out.messages[0] != "available models:\n- a-model\n- z-model" {
+		t.Fatalf("unexpected response: %v", out.messages)
+	}
+	if len(s.sessions) != 0 {
+		t.Fatalf("expected /models not to create a session, got %d", len(s.sessions))
+	}
+}
+
+func TestSchedulerModelsCommandReportsProviderFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	out := &captureOutbound{}
+	s := &Scheduler{
+		agent:    NewAgent(llm.NewOpenAIProvider(server.URL, "", server.Client()), nil),
+		sessions: map[string]*chatSession{},
+	}
+
+	s.handleSlashCommand(context.Background(), "models", events.TextInputEvent{
+		ChatID: "chat-1",
+		Sender: out,
+	})
+
+	if len(out.messages) != 1 || out.messages[0] != "error listing models: api error (status 503): unavailable\n" {
+		t.Fatalf("unexpected response: %v", out.messages)
+	}
+	if len(s.sessions) != 0 {
+		t.Fatalf("expected /models not to create a session, got %d", len(s.sessions))
 	}
 }
 

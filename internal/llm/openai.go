@@ -60,6 +60,48 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (C
 	return resp, err
 }
 
+func (p *OpenAIProvider) Models(ctx context.Context) ([]string, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	if p.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("read error response: %w", err)
+		}
+		return nil, &APIError{StatusCode: resp.StatusCode, Message: string(respBody)}
+	}
+
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode models response: %w", err)
+	}
+
+	models := make([]string, 0, len(payload.Data))
+	for _, model := range payload.Data {
+		if model.ID != "" {
+			models = append(models, model.ID)
+		}
+	}
+	sort.Strings(models)
+	return models, nil
+}
+
 func (p *OpenAIProvider) doComplete(ctx context.Context, req CompletionRequest) (CompletionResponse, error) {
 	body := map[string]any{
 		"model":          req.Model,
