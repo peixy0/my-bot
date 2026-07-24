@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"my-bot/internal/browser"
 	"my-bot/internal/config"
 	"my-bot/internal/events"
 	"my-bot/internal/inbox"
@@ -228,12 +230,7 @@ func TestSchedulerDumpCommandQueuesUUIDDump(t *testing.T) {
 	if _, err := uuid.Parse(ev.ID); err != nil {
 		t.Fatalf("dump id is not a UUID: %q", ev.ID)
 	}
-	if ev.Sender != out {
-		t.Fatal("expected dump command to keep original sender")
-	}
-	if len(out.messages) != 0 {
-		t.Fatalf("expected scheduler not to send dump success before worker writes, got %v", out.messages)
-	}
+	ev.Result <- nil
 }
 
 func TestSchedulerDumpCommandRequiresActiveSession(t *testing.T) {
@@ -306,9 +303,10 @@ func TestSchedulerResumeCommandQueuesResume(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected payload type: %T", msg)
 	}
-	if ev.ID != id || ev.Sender != out {
+	if ev.ID != id {
 		t.Fatalf("unexpected resume event: %+v", ev)
 	}
+	ev.Result <- nil
 }
 
 func TestSchedulerResumeCommandValidatesUsageAndUUID(t *testing.T) {
@@ -417,19 +415,124 @@ func TestSchedulerModelsCommandReportsProviderFailure(t *testing.T) {
 	}
 }
 
+func TestSchedulerRunReturnsRebootAfterWritingRestoreMarker(t *testing.T) {
+	ctx := context.Background()
+	sessionDir := t.TempDir()
+	out := &captureOutbound{}
+	in := inbox.NewMemory[events.AgentEvent](1)
+	s := NewScheduler(
+		&config.Config{
+			Workspace: config.WorkspaceConfig{SessionDir: sessionDir},
+			Tool:      config.ToolConfig{MaxOutputChars: 1000},
+		},
+		NewAgent(nil, nil),
+		nil,
+		nil,
+		browser.NewNoopBroker(),
+		in,
+		nil,
+	)
+	session := s.getOrCreateSession(ctx, "chat-1")
+	session.worker.loop.conv = &llm.Conversation{
+		Messages:    []llm.ChatMessage{{Role: "user", Content: "hello"}},
+		TotalTokens: 42,
+	}
+	if err := in.Publish(context.Background(), events.TextInputEvent{
+		ChatID:  "chat-1",
+		Message: "/reboot",
+		Sender:  out,
+	}); err != nil {
+		t.Fatalf("publish reboot: %v", err)
+	}
+
+	err := s.Run(context.Background())
+	if !errors.Is(err, ErrReboot) {
+		t.Fatalf("expected reboot error, got %v", err)
+	}
+	if len(out.messages) != 1 || out.messages[0] != "dumped 1 session(s); rebooting" {
+		t.Fatalf("unexpected response: %v", out.messages)
+	}
+	if _, err := os.Stat(filepath.Join(sessionDir, ".checkpoint")); err != nil {
+		t.Fatalf("expected restore marker: %v", err)
+	}
+}
+
+func TestSchedulerRestoreSessionsRestoresAndDeletesMarker(t *testing.T) {
+	ctx := context.Background()
+	sessionDir := t.TempDir()
+	cfg := &config.Config{
+		Workspace: config.WorkspaceConfig{SessionDir: sessionDir},
+		Tool:      config.ToolConfig{MaxOutputChars: 1000},
+	}
+	s := NewScheduler(cfg, NewAgent(nil, nil), nil, nil, browser.NewNoopBroker(), inbox.NewMemory[events.AgentEvent](1), nil)
+	session := s.getOrCreateSession(ctx, "chat-1")
+	session.worker.loop.conv = &llm.Conversation{
+		Messages:    []llm.ChatMessage{{Role: "user", Content: "restore me"}},
+		TotalTokens: 42,
+	}
+	out := &captureOutbound{}
+	if err := s.handleRebootCommand(ctx, events.TextInputEvent{Sender: out}); !errors.Is(err, ErrReboot) {
+		t.Fatalf("expected reboot preparation to succeed, got %v: %v", err, out.messages)
+	}
+	s.closeAllSessions()
+
+	restored := NewScheduler(cfg, NewAgent(nil, nil), nil, nil, browser.NewNoopBroker(), inbox.NewMemory[events.AgentEvent](1), nil)
+	restored.maybeRestoreSessions(ctx)
+	defer restored.closeAllSessions()
+
+	got := restored.sessions["chat-1"].worker.loop.conv
+	if len(got.Messages) != 1 || got.Messages[0].Content != "restore me" || got.TotalTokens != 42 {
+		t.Fatalf("unexpected restored conversation: %#v", got)
+	}
+	if _, err := os.Stat(filepath.Join(sessionDir, ".checkpoint")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected restore marker removal, got %v", err)
+	}
+}
+
+func TestSchedulerRunKeepsRestoreMarkerAfterRestoreFailure(t *testing.T) {
+	sessionDir := t.TempDir()
+	markerPath := filepath.Join(sessionDir, ".checkpoint")
+	if err := os.WriteFile(markerPath, []byte(`[{"chat_id":"chat-1","dump_id":"missing"}]`), 0600); err != nil {
+		t.Fatalf("write restore marker: %v", err)
+	}
+	s := NewScheduler(
+		&config.Config{
+			Workspace: config.WorkspaceConfig{SessionDir: sessionDir},
+			Tool:      config.ToolConfig{MaxOutputChars: 1000},
+		},
+		NewAgent(nil, nil),
+		nil,
+		nil,
+		browser.NewNoopBroker(),
+		inbox.NewMemory[events.AgentEvent](1),
+		nil,
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := s.Run(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected normal cancellation after restore failure, got %v", err)
+	}
+	if _, err := os.Stat(markerPath); err != nil {
+		t.Fatalf("expected restore marker retention: %v", err)
+	}
+}
+
 func TestWorkerResumeLoadsConversation(t *testing.T) {
 	sessionDir := t.TempDir()
 	worker := newConfigTestWorker(&config.Config{
 		Workspace: config.WorkspaceConfig{SessionDir: sessionDir},
 		Tool:      config.ToolConfig{MaxOutputChars: 1000},
 	})
-	out := &captureOutbound{}
 	id := uuid.NewString()
-	messages := []llm.ChatMessage{
-		{Role: "user", Content: "old question"},
-		{Role: "assistant", Content: "old answer"},
+	conv := llm.Conversation{
+		Messages: []llm.ChatMessage{
+			{Role: "user", Content: "old question"},
+			{Role: "assistant", Content: "old answer"},
+		},
+		TotalTokens: 42,
 	}
-	data, err := json.Marshal(messages)
+	data, err := json.Marshal(conv)
 	if err != nil {
 		t.Fatalf("marshal conversation: %v", err)
 	}
@@ -437,18 +540,15 @@ func TestWorkerResumeLoadsConversation(t *testing.T) {
 		t.Fatalf("write conversation: %v", err)
 	}
 
-	if err := worker.processResume(context.Background(), events.ResumeCommand{ID: id, Sender: out}); err != nil {
+	if err := worker.processResume(context.Background(), events.ResumeCommand{ID: id}); err != nil {
 		t.Fatalf("resume conversation: %v", err)
-	}
-	if len(out.messages) != 1 || out.messages[0] != "session resumed: "+id {
-		t.Fatalf("unexpected response: %v", out.messages)
 	}
 
 	dumpPath := filepath.Join(sessionDir, "after.json")
 	if err := worker.loop.DumpConversation(dumpPath); err != nil {
 		t.Fatalf("dump resumed conversation: %v", err)
 	}
-	var got []llm.ChatMessage
+	var got llm.Conversation
 	dumped, err := os.ReadFile(dumpPath)
 	if err != nil {
 		t.Fatalf("read dumped conversation: %v", err)
@@ -456,8 +556,8 @@ func TestWorkerResumeLoadsConversation(t *testing.T) {
 	if err := json.Unmarshal(dumped, &got); err != nil {
 		t.Fatalf("unmarshal dumped conversation: %v", err)
 	}
-	if len(got) != 2 || got[0].Content != "old question" || got[1].Content != "old answer" {
-		t.Fatalf("unexpected resumed messages: %#v", got)
+	if len(got.Messages) != 2 || got.Messages[0].Content != "old question" || got.Messages[1].Content != "old answer" || got.TotalTokens != 42 {
+		t.Fatalf("unexpected resumed conversation: %#v", got)
 	}
 }
 
@@ -467,14 +567,10 @@ func TestWorkerDumpWritesUUIDConversation(t *testing.T) {
 		Workspace: config.WorkspaceConfig{SessionDir: sessionDir},
 		Tool:      config.ToolConfig{MaxOutputChars: 1000},
 	})
-	out := &captureOutbound{}
 	id := uuid.NewString()
 
-	if err := worker.processDump(context.Background(), events.DumpCommand{ID: id, Sender: out}); err != nil {
+	if err := worker.processDump(context.Background(), events.DumpCommand{ID: id}); err != nil {
 		t.Fatalf("dump conversation: %v", err)
-	}
-	if len(out.messages) != 1 || out.messages[0] != "session dumped, load with: /resume "+id {
-		t.Fatalf("unexpected response: %v", out.messages)
 	}
 	if _, err := os.Stat(filepath.Join(sessionDir, id+".json")); err != nil {
 		t.Fatalf("expected dumped file: %v", err)

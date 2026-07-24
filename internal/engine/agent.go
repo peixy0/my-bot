@@ -279,7 +279,7 @@ func (l *AgentLoop) Compress(ctx context.Context, prompt llm.SystemPrompt) error
 }
 
 func (l *AgentLoop) DumpConversation(path string) error {
-	data, err := util.ToJSON(l.conv.Messages)
+	data, err := util.ToJSON(l.conv)
 	if err != nil {
 		return err
 	}
@@ -294,10 +294,10 @@ func (l *AgentLoop) LoadConversation(path string) error {
 	if err != nil {
 		return err
 	}
-	var messages []llm.ChatMessage
-	if err := json.Unmarshal(data, &messages); err != nil {
+	var conv llm.Conversation
+	if err := json.Unmarshal(data, &conv); err != nil {
 		return fmt.Errorf("unmarshal conversation: %w", err)
 	}
-	l.conv = &llm.Conversation{Messages: messages}
+	l.conv = &conv
 	return nil
 }

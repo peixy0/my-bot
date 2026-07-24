@@ -57,8 +57,8 @@ type CompletionClient interface {
 }
 
 type Conversation struct {
-	Messages    []ChatMessage
-	TotalTokens int64
+	Messages    []ChatMessage `json:"messages"`
+	TotalTokens int64         `json:"total_tokens"`
 }
 
 func NewConversation() *Conversation {

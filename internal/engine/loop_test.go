@@ -15,6 +15,7 @@ func TestAgentLoopDumpAndLoadConversation(t *testing.T) {
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "hi"},
 	}
+	loop.conv.TotalTokens = 42
 
 	path := filepath.Join(t.TempDir(), "nested", "session.json")
 	if err := loop.DumpConversation(path); err != nil {
@@ -35,6 +36,9 @@ func TestAgentLoopDumpAndLoadConversation(t *testing.T) {
 	if loaded.conv.Messages[1].Role != "assistant" || loaded.conv.Messages[1].Content != "hi" {
 		t.Fatalf("unexpected second message: %#v", loaded.conv.Messages[1])
 	}
+	if loaded.conv.TotalTokens != 42 {
+		t.Fatalf("expected 42 total tokens, got %d", loaded.conv.TotalTokens)
+	}
 }
 
 func TestAgentLoopLoadConversationInvalidJSONDoesNotOverwrite(t *testing.T) {
@@ -42,7 +46,7 @@ func TestAgentLoopLoadConversationInvalidJSONDoesNotOverwrite(t *testing.T) {
 	loop.conv.Messages = []llm.ChatMessage{{Role: "user", Content: "keep me"}}
 
 	path := filepath.Join(t.TempDir(), "bad.json")
-	if err := os.WriteFile(path, []byte(`{"not":"a message array"}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`[]`), 0600); err != nil {
 		t.Fatalf("write bad conversation: %v", err)
 	}
 

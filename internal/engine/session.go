@@ -58,6 +58,7 @@ type chatSession struct {
 	tools  *sessionTools
 	cron   *CronWorker
 	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 func newChatSession(
@@ -78,6 +79,7 @@ func newChatSession(
 		worker: worker,
 		tools:  tools,
 		cancel: cancel,
+		done:   make(chan struct{}),
 	}
 	if cronLoader != nil {
 		session.cron = NewCronWorker(chatID, worker.Events, cronLoader)
@@ -87,6 +89,7 @@ func newChatSession(
 }
 
 func (s *chatSession) run(ctx context.Context) {
+	defer close(s.done)
 	defer s.shutdown()
 	if err := s.worker.Run(ctx); err != nil && err != context.Canceled {
 		slog.Error("worker exited", "chat_id", s.chatID, "err", err)
@@ -99,12 +102,47 @@ func (s *chatSession) close() {
 	}
 }
 
+func (s *chatSession) wait(ctx context.Context) error {
+	select {
+	case <-s.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (s *chatSession) publishEvent(ev events.WorkerEvent) bool {
 	if s.worker.Events.TryPublish(ev) {
 		return true
 	}
 	slog.Error("worker event dropped: channel full", "chat_id", s.chatID, "event", fmt.Sprintf("%T", ev))
 	return false
+}
+
+func (s *chatSession) snapshot(ctx context.Context, id string) error {
+	result := make(chan error, 1)
+	if !s.publishEvent(events.DumpCommand{ID: id, Result: result}) {
+		return errors.New("snapshot request rejected")
+	}
+	select {
+	case err := <-result:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *chatSession) restore(ctx context.Context, id string) error {
+	result := make(chan error, 1)
+	if !s.publishEvent(events.ResumeCommand{ID: id, Result: result}) {
+		return errors.New("restore request rejected")
+	}
+	select {
+	case err := <-result:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *chatSession) publishMessage(ev events.MessageEvent) bool {
@@ -115,7 +153,7 @@ func (s *chatSession) publishMessage(ev events.MessageEvent) bool {
 	return false
 }
 
-func (s *chatSession) tryAbort(ctx context.Context, sender events.Outbound) bool {
+func (s *chatSession) tryAbort() bool {
 	select {
 	case s.worker.abortCh <- struct{}{}:
 		return true

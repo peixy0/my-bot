@@ -86,12 +86,12 @@ type DropSessionEvent struct {
 
 type DumpCommand struct {
 	ID     string
-	Sender Outbound
+	Result chan<- error
 }
 
 type ResumeCommand struct {
 	ID     string
-	Sender Outbound
+	Result chan<- error
 }
 
 type CompressCommand struct {

@@ -267,24 +267,22 @@ func (w *ConversationWorker) processNewSession(ctx context.Context, ev events.Ne
 	return nil
 }
 
-func (w *ConversationWorker) processDump(ctx context.Context, ev events.DumpCommand) error {
-	path := w.conversationPath(ev.ID)
-	if err := w.loop.DumpConversation(path); err != nil {
-		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
-		return err
+func (w *ConversationWorker) processDump(_ context.Context, ev events.DumpCommand) error {
+	err := w.loop.DumpConversation(w.conversationPath(ev.ID))
+	select {
+	case ev.Result <- err:
+	default:
 	}
-	ev.Sender.Send(ctx, fmt.Sprintf("session dumped, load with: /resume %s", ev.ID))
-	return nil
+	return err
 }
 
-func (w *ConversationWorker) processResume(ctx context.Context, ev events.ResumeCommand) error {
-	path := w.conversationPath(ev.ID)
-	if err := w.loop.LoadConversation(path); err != nil {
-		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
-		return err
+func (w *ConversationWorker) processResume(_ context.Context, ev events.ResumeCommand) error {
+	err := w.loop.LoadConversation(w.conversationPath(ev.ID))
+	select {
+	case ev.Result <- err:
+	default:
 	}
-	ev.Sender.Send(ctx, fmt.Sprintf("session resumed: %s", ev.ID))
-	return nil
+	return err
 }
 
 func (w *ConversationWorker) processCompress(ctx context.Context, ev events.CompressCommand) error {

@@ -2,12 +2,12 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
-	"strconv"
-	"strings"
-
-	"github.com/google/uuid"
+	"os"
+	"path/filepath"
 
 	"my-bot/internal/browser"
 	"my-bot/internal/config"
@@ -52,21 +52,23 @@ func NewScheduler(
 
 func (s *Scheduler) Run(ctx context.Context) error {
 	defer s.closeAllSessions()
+	s.maybeRestoreSessions(ctx)
 	for {
 		msg, err := s.inbox.Receive(ctx)
 		if err != nil {
 			return err
 		}
-		s.dispatch(ctx, msg)
+		if err := s.dispatch(ctx, msg); err != nil {
+			return err
+		}
 	}
 }
 
-func (s *Scheduler) dispatch(ctx context.Context, ev events.AgentEvent) {
+func (s *Scheduler) dispatch(ctx context.Context, ev events.AgentEvent) error {
 	switch e := ev.(type) {
 	case events.TextInputEvent:
 		if cmd, ok := isSlashCommand(e.Message); ok {
-			s.handleSlashCommand(ctx, cmd, e)
-			return
+			return s.handleSlashCommand(ctx, cmd, e)
 		}
 		s.dispatchUserInput(ctx, e.ChatID, e)
 	case events.ImageInputEvent:
@@ -74,200 +76,12 @@ func (s *Scheduler) dispatch(ctx context.Context, ev events.AgentEvent) {
 	case events.DropSessionEvent:
 		s.closeSession(e.ChatID)
 	}
-}
-
-func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events.TextInputEvent) {
-	parts := strings.Fields(cmd)
-	if len(parts) == 0 {
-		return
-	}
-	switch parts[0] {
-	case "heartbeat":
-		interval, ok := s.heartbeatInterval(ctx, parts[1:], e.Sender)
-		if !ok {
-			return
-		}
-		s.dispatchToSession(ctx, e.ChatID, events.HeartbeatEvent{
-			ChatID:          e.ChatID,
-			IntervalSeconds: interval,
-			Sender:          e.Sender,
-		})
-	case "new":
-		if s.dispatchToSession(ctx, e.ChatID, events.NewSessionEvent{ChatID: e.ChatID, Sender: e.Sender}) {
-			e.Sender.Send(ctx, "new session created")
-		}
-	case "drop":
-		s.closeSession(e.ChatID)
-		e.Sender.Send(ctx, fmt.Sprintf("dropped session: %s", e.ChatID))
-	case "model", "vision", "temperature", "top_p", "top_k", "max_tokens", "context_window":
-		s.handleConfigCommand(ctx, parts, e)
-	case "models":
-		s.handleModelsCommand(ctx, e)
-	case "queue":
-		text := strings.TrimSpace(strings.TrimPrefix(cmd, "queue"))
-		if text == "" {
-			e.Sender.Send(ctx, "usage: /queue <message>")
-			return
-		}
-		s.dispatchToSession(ctx, e.ChatID, events.QueuedInputEvent{
-			ChatID:    e.ChatID,
-			MessageID: e.MessageID,
-			Message:   text,
-			Sender:    e.Sender,
-		})
-	case "dump":
-		session, ok := s.sessions[e.ChatID]
-		if !ok {
-			e.Sender.Send(ctx, "no active session")
-			return
-		}
-		session.publishEvent(events.DumpCommand{ID: uuid.NewString(), Sender: e.Sender})
-	case "resume":
-		if len(parts) != 2 {
-			e.Sender.Send(ctx, "usage: /resume <id>")
-			return
-		}
-		id := parts[1]
-		if _, err := uuid.Parse(id); err != nil {
-			e.Sender.Send(ctx, "resume id must be a UUID")
-			return
-		}
-		s.getOrCreateSession(ctx, e.ChatID).publishEvent(events.ResumeCommand{ID: id, Sender: e.Sender})
-	case "compress":
-		s.getOrCreateSession(ctx, e.ChatID).publishEvent(events.CompressCommand{Sender: e.Sender})
-	case "session":
-		e.Sender.Send(ctx, fmt.Sprintf("current session: %s", e.ChatID))
-		return
-	case "abort":
-		if !s.getOrCreateSession(ctx, e.ChatID).tryAbort(ctx, e.Sender) {
-			e.Sender.Send(ctx, "no active completion")
-		}
-	case "cron":
-		s.handleCronCommand(ctx, parts[1:], e)
-	default:
-		s.dispatchUserInput(ctx, e.ChatID, e)
-	}
+	return nil
 }
 
 func (s *Scheduler) dispatchUserInput(ctx context.Context, chatID string, e events.MessageEvent) {
 	session := s.getOrCreateSession(ctx, chatID)
 	session.publishMessage(e)
-}
-
-func (s *Scheduler) handleConfigCommand(ctx context.Context, parts []string, e events.TextInputEvent) {
-	key := parts[0]
-	if len(parts) < 2 {
-		s.dispatchToSession(ctx, e.ChatID, events.ConfigQueryEvent{ChatID: e.ChatID, Key: key, Sender: e.Sender})
-		return
-	}
-	s.dispatchToSession(ctx, e.ChatID, events.ConfigChangeEvent{ChatID: e.ChatID, Key: key, Value: parts[1], Sender: e.Sender})
-}
-
-func (s *Scheduler) handleModelsCommand(ctx context.Context, e events.TextInputEvent) {
-	models, err := s.agent.Models(ctx)
-	if err != nil {
-		e.Sender.Send(ctx, fmt.Sprintf("error listing models: %v", err))
-		return
-	}
-	if len(models) == 0 {
-		e.Sender.Send(ctx, "no models available")
-		return
-	}
-	e.Sender.Send(ctx, "available models:\n- "+strings.Join(models, "\n- "))
-}
-
-func (s *Scheduler) heartbeatInterval(ctx context.Context, args []string, sender events.Outbound) (int, bool) {
-	if len(args) == 0 {
-		return s.cfg.Heartbeat.IntervalSeconds, true
-	}
-	if len(args) > 1 {
-		sender.Send(ctx, "usage: /heartbeat [interval-seconds]")
-		return 0, false
-	}
-	interval, err := strconv.Atoi(args[0])
-	if err != nil || interval <= 0 {
-		sender.Send(ctx, "heartbeat interval must be a positive number of seconds")
-		return 0, false
-	}
-	return interval, true
-}
-
-func (s *Scheduler) handleCronCommand(ctx context.Context, args []string, e events.TextInputEvent) {
-	if len(args) == 0 {
-		e.Sender.Send(ctx, "usage: /cron load|unload|ls|trigger [job-name]")
-		return
-	}
-	sub := args[0]
-	jobName := ""
-	if len(args) > 1 {
-		jobName = args[1]
-	}
-	cw := s.sessionCronWorker(ctx, e.ChatID)
-	if cw == nil {
-		e.Sender.Send(ctx, "cron is not configured for this session")
-		return
-	}
-
-	switch sub {
-	case "load":
-		if jobName == "" {
-			e.Sender.Send(ctx, "usage: /cron load <job-name>")
-			return
-		}
-		defs, err := cw.Load(jobName, e.Sender)
-		if err != nil {
-			e.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
-			return
-		}
-		e.Sender.Send(ctx, fmt.Sprintf("loaded %d tasks for job %q", len(defs), jobName))
-	case "unload":
-		if jobName == "" {
-			e.Sender.Send(ctx, "usage: /cron unload <job-name>")
-			return
-		}
-		if cw.Unload(jobName) {
-			e.Sender.Send(ctx, fmt.Sprintf("unloaded %q", jobName))
-		} else {
-			e.Sender.Send(ctx, fmt.Sprintf("job %q not loaded", jobName))
-		}
-	case "trigger":
-		if jobName == "" {
-			e.Sender.Send(ctx, "usage: /cron trigger <job-name>")
-			return
-		}
-		err := cw.Trigger(jobName, e.Sender)
-		if err == nil {
-			e.Sender.Send(ctx, fmt.Sprintf("job %q triggered", jobName))
-		} else {
-			e.Sender.Send(ctx, fmt.Sprintf("failed to trigger job %q: %v", jobName, err))
-		}
-	case "ls":
-		available := s.cronLoader.ListJobs()
-		if len(available) == 0 {
-			e.Sender.Send(ctx, "no cron jobs found in .cron/")
-			return
-		}
-		loaded := make(map[string]struct{})
-		for _, name := range cw.LoadedJobs() {
-			loaded[name] = struct{}{}
-		}
-		var lines []string
-		for _, job := range available {
-			defs, _ := s.cronLoader.LoadJob(job)
-			status := ""
-			if _, ok := loaded[job]; ok {
-				status = " [loaded]"
-			}
-			var taskLines []string
-			for _, d := range defs {
-				taskLines = append(taskLines, fmt.Sprintf("  - %s (%s)", d.TaskName, d.CronExpr))
-			}
-			lines = append(lines, job+status+"\n"+strings.Join(taskLines, "\n"))
-		}
-		e.Sender.Send(ctx, "available cron jobs:\n\n"+strings.Join(lines, "\n\n"))
-	default:
-		e.Sender.Send(ctx, "usage: /cron load|unload|ls [job-name]")
-	}
 }
 
 func (s *Scheduler) getOrCreateSession(ctx context.Context, chatID string) *chatSession {
@@ -300,17 +114,94 @@ func (s *Scheduler) sessionCronWorker(ctx context.Context, chatID string) *CronW
 }
 
 func (s *Scheduler) closeAllSessions() {
-	for chatID := range s.sessions {
-		s.closeSession(chatID)
+	sessions := make([]*chatSession, 0, len(s.sessions))
+	for chatID, session := range s.sessions {
+		delete(s.sessions, chatID)
+		session.close()
+		sessions = append(sessions, session)
+	}
+	for _, session := range sessions {
+		if session.done != nil {
+			<-session.done
+		}
 	}
 }
 
-func isSlashCommand(msg string) (string, bool) {
-	msg = strings.TrimSpace(msg)
-	if !strings.HasPrefix(msg, "/") {
-		return "", false
+type restoreSession struct {
+	ChatID string `json:"chat_id"`
+	DumpID string `json:"dump_id"`
+}
+
+func (s *Scheduler) restorePath() string {
+	return filepath.Join(s.cfg.Workspace.SessionDir, ".checkpoint")
+}
+
+func (s *Scheduler) writeRestore(sessions []restoreSession) error {
+	data, err := json.Marshal(sessions)
+	if err != nil {
+		return fmt.Errorf("marshal restore marker: %w", err)
 	}
-	return strings.TrimPrefix(msg, "/"), true
+	dir := filepath.Dir(s.restorePath())
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("create restore directory: %w", err)
+	}
+	temp, err := os.CreateTemp(dir, ".restore-*")
+	if err != nil {
+		return fmt.Errorf("create restore marker: %w", err)
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	if err := temp.Chmod(0600); err != nil {
+		temp.Close()
+		return fmt.Errorf("chmod restore marker: %w", err)
+	}
+	if _, err := temp.Write(data); err != nil {
+		temp.Close()
+		return fmt.Errorf("write restore marker: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("close restore marker: %w", err)
+	}
+	if err := os.Rename(tempPath, s.restorePath()); err != nil {
+		return fmt.Errorf("replace restore marker: %w", err)
+	}
+	return nil
+}
+
+func (s *Scheduler) maybeRestoreSessions(ctx context.Context) {
+	data, err := os.ReadFile(s.restorePath())
+	keepCheckpoint := false
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		slog.Error("fail to read restore marker", "err", err)
+		return
+	}
+	var sessions []restoreSession
+	if err := json.Unmarshal(data, &sessions); err != nil {
+		slog.Error("fail to unmarshal restore marker", "err", err)
+		return
+	}
+	for _, entry := range sessions {
+		if entry.ChatID == "" || entry.DumpID == "" {
+			keepCheckpoint = true
+			slog.Warn("session checkpoint contains empty session")
+			continue
+		}
+		if err := s.getOrCreateSession(ctx, entry.ChatID).restore(ctx, entry.DumpID); err != nil {
+			keepCheckpoint = true
+			slog.Error("fail to restore session", "chat_id", entry.ChatID, "err", err)
+			continue
+		}
+		slog.Info("session restored", "chat_id", entry.ChatID, "dump_id", entry.DumpID)
+	}
+	if keepCheckpoint {
+		return
+	}
+	if err := os.Remove(s.restorePath()); err != nil {
+		slog.Warn("fail to remove session checkpoint", "err", err)
+	}
 }
 
 func onOff(enabled bool) string {

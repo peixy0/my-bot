@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -29,9 +31,20 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	launchDir, err := os.Getwd()
+	if err != nil {
+		slog.Error("get launch directory", "err", err)
+		os.Exit(1)
+	}
+
 	configPath := "config.yaml"
 	flag.StringVar(&configPath, "c", configPath, "config file path")
 	flag.Parse()
+	configPath, err = filepath.Abs(configPath)
+	if err != nil {
+		slog.Error("config path", "err", err)
+		os.Exit(1)
+	}
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -115,11 +128,30 @@ func main() {
 	cronLoader := engine.NewCronLoader(cfg.Workspace.CronsDir)
 	scheduler := engine.NewScheduler(cfg, agent, rt, skills, browserBroker, mainInbox, cronLoader)
 
-	slog.Info("bot started", "model", cfg.LLM.Model)
-	if err := scheduler.Run(ctx); err != nil && err != context.Canceled {
+	slog.Info("bot started")
+	if err := scheduler.Run(ctx); errors.Is(err, engine.ErrReboot) {
+		if execErr := os.Chdir(launchDir); execErr != nil {
+			slog.Error("restore launch directory", "err", execErr)
+			os.Exit(1)
+		}
+		executable, execErr := os.Executable()
+		if execErr != nil {
+			slog.Error("find executable", "err", execErr)
+			os.Exit(1)
+		}
+		if execErr := syscall.Exec(executable, restartArgs(executable, configPath), os.Environ()); execErr != nil {
+			slog.Error("reboot", "err", execErr)
+			os.Exit(1)
+		}
+		slog.Info("bot rebooting")
+	} else if err != nil && err != context.Canceled {
 		slog.Error("scheduler", "err", err)
 		os.Exit(1)
 	}
+}
+
+func restartArgs(executable, configPath string) []string {
+	return []string{executable, "-c", configPath}
 }
 
 func buildRuntime(cfg *config.Config) runtime.Runtime {
