@@ -63,8 +63,8 @@ func (o *Outbound) SendBegin(ctx context.Context) {
 		if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
 			return o.updateStreamingCard(ctx, o.stream, "")
 		}); err != nil {
-			o.stream = nil
 			slog.Warn("feishu streaming card clear failed", "err", err, "chat_id", o.chatID, "card_id", o.stream.cardID)
+			o.stream = nil
 		}
 		return
 	}
