@@ -31,12 +31,12 @@ type Outbound struct {
 	messageID string
 	partial   strings.Builder
 	stream    *streamingCard
+	lastPush  time.Time
 }
 
 type streamingCard struct {
 	cardID   string
 	sequence int
-	lastPush time.Time
 }
 
 func NewOutbound(client *lark.Client, rt runtime.Runtime, chatID, messageID string) *Outbound {
@@ -45,6 +45,7 @@ func NewOutbound(client *lark.Client, rt runtime.Runtime, chatID, messageID stri
 		rt:        rt,
 		chatID:    chatID,
 		messageID: messageID,
+		lastPush:  time.Time{},
 	}
 }
 
@@ -62,9 +63,9 @@ func (o *Outbound) SendBegin(ctx context.Context) {
 		if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
 			return o.updateStreamingCard(ctx, o.stream, "")
 		}); err != nil {
+			o.stream = nil
 			slog.Warn("feishu streaming card clear failed", "err", err, "chat_id", o.chatID, "card_id", o.stream.cardID)
 		}
-		o.stream.lastPush = time.Time{}
 		return
 	}
 }
@@ -75,6 +76,10 @@ func (o *Outbound) SendDelta(ctx context.Context, text string) {
 	if strings.TrimSpace(o.partial.String()) == "" {
 		return
 	}
+	if time.Since(o.lastPush) < streamingMinPush {
+		return
+	}
+	o.lastPush = time.Now()
 	if o.stream == nil {
 		var stream *streamingCard
 		if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
@@ -85,11 +90,7 @@ func (o *Outbound) SendDelta(ctx context.Context, text string) {
 			slog.Warn("feishu streaming card open failed; falling back to batch send", "err", err, "chat_id", o.chatID)
 			return
 		}
-		stream.lastPush = time.Time{}
 		o.stream = stream
-	}
-	if time.Since(o.stream.lastPush) < streamingMinPush {
-		return
 	}
 	if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
 		return o.updateStreamingCard(ctx, o.stream, o.partial.String())
@@ -187,7 +188,7 @@ func (o *Outbound) openStreamingCard(ctx context.Context, text string) (*streami
 	if _, err := o.client.Im.Message.Create(ctx, sendReq); err != nil {
 		return nil, fmt.Errorf("send streaming card: %w", err)
 	}
-	return &streamingCard{cardID: cardID, lastPush: time.Now()}, nil
+	return &streamingCard{cardID: cardID}, nil
 }
 
 func (o *Outbound) updateStreamingCard(ctx context.Context, stream *streamingCard, text string) error {
@@ -208,7 +209,6 @@ func (o *Outbound) updateStreamingCard(ctx context.Context, stream *streamingCar
 	if !resp.Success() {
 		return fmt.Errorf("update streaming card: %s", resp.CodeError.String())
 	}
-	stream.lastPush = time.Now()
 	return nil
 }
 
