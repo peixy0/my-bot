@@ -136,7 +136,7 @@ func (s *Scheduler) restorePath() string {
 	return filepath.Join(s.cfg.Workspace.SessionDir, ".checkpoint")
 }
 
-func (s *Scheduler) writeRestore(sessions []restoreSession) error {
+func (s *Scheduler) writeCheckpoint(sessions []restoreSession) error {
 	data, err := json.Marshal(sessions)
 	if err != nil {
 		return fmt.Errorf("marshal restore marker: %w", err)
@@ -145,7 +145,7 @@ func (s *Scheduler) writeRestore(sessions []restoreSession) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("create restore directory: %w", err)
 	}
-	temp, err := os.CreateTemp(dir, ".restore-*")
+	temp, err := os.CreateTemp(dir, ".checkpoint-*")
 	if err != nil {
 		return fmt.Errorf("create restore marker: %w", err)
 	}

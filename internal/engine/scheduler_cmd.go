@@ -21,7 +21,7 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 	}
 	switch parts[0] {
 	case "heartbeat":
-		interval, ok := s.heartbeatInterval(ctx, parts[1:], e.Sender)
+		interval, ok := s.handleHeartbeatInterval(ctx, parts[1:], e.Sender)
 		if !ok {
 			return nil
 		}
@@ -41,8 +41,6 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 		s.handleConfigCommand(ctx, parts, e)
 	case "models":
 		s.handleModelsCommand(ctx, e)
-	case "reboot":
-		return s.handleRebootCommand(ctx, e)
 	case "queue":
 		text := strings.TrimSpace(strings.TrimPrefix(cmd, "queue"))
 		if text == "" {
@@ -55,6 +53,15 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 			Message:   text,
 			Sender:    e.Sender,
 		})
+	case "reboot":
+		return s.handleRebootCommand(ctx, e)
+	case "dumpall":
+		restores, err := s.dumpAllSessions(ctx)
+		if err != nil {
+			e.Sender.Send(ctx, fmt.Sprintf("error dumping session: %v", err))
+			return nil
+		}
+		e.Sender.Send(ctx, fmt.Sprintf("dumped %d session(s)", len(restores)))
 	case "dump":
 		session, ok := s.sessions[e.ChatID]
 		if !ok {
@@ -125,34 +132,36 @@ func (s *Scheduler) handleModelsCommand(ctx context.Context, e events.TextInputE
 	e.Sender.Send(ctx, "available models:\n- "+strings.Join(models, "\n- "))
 }
 
+func (s *Scheduler) dumpAllSessions(ctx context.Context) ([]restoreSession, error) {
+	restores := make([]restoreSession, 0, len(s.sessions))
+	for chatID, session := range s.sessions {
+		dumpID := uuid.NewString()
+		if err := session.snapshot(ctx, dumpID); err != nil {
+			return []restoreSession{}, fmt.Errorf("fail to dump %s: %w", chatID, err)
+		}
+		restores = append(restores, restoreSession{ChatID: chatID, DumpID: dumpID})
+	}
+	if err := s.writeCheckpoint(restores); err != nil {
+		return []restoreSession{}, fmt.Errorf("fail to write checkpoint: %w", err)
+	}
+	return restores, nil
+}
+
 func (s *Scheduler) handleRebootCommand(ctx context.Context, e events.TextInputEvent) error {
 	if len(s.sessions) == 0 {
 		e.Sender.Send(ctx, fmt.Sprintf("rebooting"))
 		return ErrReboot
 	}
-
-	for _, session := range s.sessions {
-		session.tryAbort()
-	}
-
-	restores := make([]restoreSession, 0, len(s.sessions))
-	for chatID, session := range s.sessions {
-		dumpID := uuid.NewString()
-		if err := session.snapshot(ctx, dumpID); err != nil {
-			e.Sender.Send(ctx, fmt.Sprintf("reboot cancelled: dump %s: %v", chatID, err))
-			return nil
-		}
-		restores = append(restores, restoreSession{ChatID: chatID, DumpID: dumpID})
-	}
-	if err := s.writeRestore(restores); err != nil {
-		e.Sender.Send(ctx, fmt.Sprintf("reboot cancelled: write restore marker: %v", err))
+	restores, err := s.dumpAllSessions(ctx)
+	if err != nil {
+		e.Sender.Send(ctx, fmt.Sprintf("reboot cancelled: %v", err))
 		return nil
 	}
 	e.Sender.Send(ctx, fmt.Sprintf("dumped %d session(s); rebooting", len(restores)))
 	return ErrReboot
 }
 
-func (s *Scheduler) heartbeatInterval(ctx context.Context, args []string, sender events.Outbound) (int, bool) {
+func (s *Scheduler) handleHeartbeatInterval(ctx context.Context, args []string, sender events.Outbound) (int, bool) {
 	if len(args) == 0 {
 		return s.cfg.Heartbeat.IntervalSeconds, true
 	}

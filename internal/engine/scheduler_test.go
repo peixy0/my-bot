@@ -50,17 +50,17 @@ func TestSchedulerHeartbeatInterval(t *testing.T) {
 	s := &Scheduler{cfg: &config.Config{Heartbeat: config.HeartbeatConfig{IntervalSeconds: 1800}}}
 	out := &captureOutbound{}
 
-	interval, ok := s.heartbeatInterval(context.Background(), nil, out)
+	interval, ok := s.handleHeartbeatInterval(context.Background(), nil, out)
 	if !ok || interval != 1800 {
 		t.Fatalf("default interval mismatch: interval=%d ok=%v", interval, ok)
 	}
 
-	interval, ok = s.heartbeatInterval(context.Background(), []string{"60"}, out)
+	interval, ok = s.handleHeartbeatInterval(context.Background(), []string{"60"}, out)
 	if !ok || interval != 60 {
 		t.Fatalf("override interval mismatch: interval=%d ok=%v", interval, ok)
 	}
 
-	_, ok = s.heartbeatInterval(context.Background(), []string{"0"}, out)
+	_, ok = s.handleHeartbeatInterval(context.Background(), []string{"0"}, out)
 	if ok {
 		t.Fatal("expected zero interval to be rejected")
 	}
