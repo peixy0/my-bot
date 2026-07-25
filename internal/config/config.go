@@ -98,11 +98,9 @@ type ToolConfig struct {
 }
 
 type BrowserConfig struct {
-	Enabled               bool   `yaml:"enabled"`
-	ListenAddr            string `yaml:"listen_addr"`
-	Path                  string `yaml:"path"`
-	BearerToken           string `yaml:"bearer_token"`
-	RequestTimeoutSeconds int    `yaml:"request_timeout_seconds"`
+	Enabled    bool   `yaml:"enabled"`
+	ListenAddr string `yaml:"listen_addr"`
+	Path       string `yaml:"path"`
 }
 
 type WorkspaceConfig struct {
@@ -336,9 +334,6 @@ func (cfg *Config) Validate() error {
 			}
 			if !strings.HasPrefix(browser.Path, "/") {
 				return fmt.Errorf("browser.path must begin with /")
-			}
-			if browser.RequestTimeoutSeconds <= 0 {
-				return fmt.Errorf("browser.request_timeout_seconds must be positive")
 			}
 		}
 	}

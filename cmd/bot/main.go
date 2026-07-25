@@ -174,10 +174,8 @@ func buildBrowserBroker(cfg *config.Config, rt runtime.Runtime) browser.Broker {
 		return browser.NewNoopBroker()
 	}
 	broker := browser.NewExtensionBroker(browser.Config{
-		ListenAddr:     browserCfg.ListenAddr,
-		Path:           browserCfg.Path,
-		BearerToken:    browserCfg.BearerToken,
-		RequestTimeout: time.Duration(browserCfg.RequestTimeoutSeconds) * time.Second,
+		ListenAddr: browserCfg.ListenAddr,
+		Path:       browserCfg.Path,
 	}, rt, cfg.Tool.MaxOutputChars)
 	return broker
 }

@@ -2,18 +2,16 @@ package browser
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-func TestBrokerRoutesAuthenticatedRequest(t *testing.T) {
-	broker := NewExtensionBroker(Config{BearerToken: "secret", RequestTimeout: time.Second}, nil, 0)
+func TestBrokerRoutesSingleFrameResponse(t *testing.T) {
+	broker := NewExtensionBroker(Config{}, nil, 0)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go broker.loop(ctx)
@@ -27,7 +25,7 @@ func TestBrokerRoutesAuthenticatedRequest(t *testing.T) {
 	}
 	defer conn.Close()
 
-	if err := conn.WriteJSON(map[string]any{"type": "authenticate", "version": protocolVersion, "token": "secret"}); err != nil {
+	if err := conn.WriteJSON(map[string]any{"type": "authenticate", "version": protocolVersion}); err != nil {
 		t.Fatalf("authenticate: %v", err)
 	}
 	var authenticated map[string]any
@@ -38,16 +36,26 @@ func TestBrokerRoutesAuthenticatedRequest(t *testing.T) {
 		t.Fatalf("unexpected authentication result: %#v", authenticated)
 	}
 
-	result := make(chan struct {
-		value json.RawMessage
-		err   error
-	}, 1)
+	type callResult struct {
+		data string
+		err  error
+	}
+	result := make(chan callResult, 1)
 	go func() {
-		value, callErr := broker.Call(context.Background(), "chat:one", "tabs", map[string]any{})
-		result <- struct {
-			value json.RawMessage
-			err   error
-		}{value, callErr}
+		frames, callErr := broker.Call(context.Background(), "chat:one", "tabs", map[string]any{})
+		if callErr != nil {
+			result <- callResult{err: callErr}
+			return
+		}
+		var sb strings.Builder
+		for frame := range frames {
+			if frame.err != nil {
+				result <- callResult{err: frame.err}
+				return
+			}
+			sb.WriteString(frame.data)
+		}
+		result <- callResult{data: sb.String()}
 	}()
 
 	var request brokerRequest
@@ -57,20 +65,20 @@ func TestBrokerRoutesAuthenticatedRequest(t *testing.T) {
 	if request.Type != "request" || request.ScopeID != "chat:one" || request.Action != "tabs" {
 		t.Fatalf("unexpected request: %#v", request)
 	}
-	if err := conn.WriteJSON(brokerResponse{Type: "response", ID: request.ID, Result: json.RawMessage(`{"tabs":[]}`)}); err != nil {
+	if err := conn.WriteJSON(brokerResponse{ID: request.ID, Data: `{"tabs":[]}`}); err != nil {
 		t.Fatalf("write browser response: %v", err)
 	}
 	got := <-result
 	if got.err != nil {
 		t.Fatalf("broker call: %v", got.err)
 	}
-	if string(got.value) != `{"tabs":[]}` {
-		t.Fatalf("unexpected result: %s", got.value)
+	if got.data != `{"tabs":[]}` {
+		t.Fatalf("unexpected result: %s", got.data)
 	}
 }
 
-func TestBrokerRejectsInvalidBearerToken(t *testing.T) {
-	broker := NewExtensionBroker(Config{BearerToken: "secret"}, nil, 0)
+func TestBrokerStreamsChunkedResponse(t *testing.T) {
+	broker := NewExtensionBroker(Config{}, nil, 0)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go broker.loop(ctx)
@@ -83,12 +91,56 @@ func TestBrokerRejectsInvalidBearerToken(t *testing.T) {
 		t.Fatalf("dial broker: %v", err)
 	}
 	defer conn.Close()
-	if err := conn.WriteJSON(map[string]any{"type": "authenticate", "version": protocolVersion, "token": "wrong"}); err != nil {
+
+	if err := conn.WriteJSON(map[string]any{"type": "authenticate", "version": protocolVersion}); err != nil {
 		t.Fatalf("authenticate: %v", err)
 	}
-	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
-	var frame map[string]any
-	if err := conn.ReadJSON(&frame); err == nil {
-		t.Fatalf("expected connection close, got %#v", frame)
+	var authenticated map[string]any
+	if err := conn.ReadJSON(&authenticated); err != nil {
+		t.Fatalf("read authentication result: %v", err)
+	}
+
+	type callResult struct {
+		data string
+		err  error
+	}
+	result := make(chan callResult, 1)
+	go func() {
+		frames, callErr := broker.Call(context.Background(), "chat:one", "screenshot", map[string]any{})
+		if callErr != nil {
+			result <- callResult{err: callErr}
+			return
+		}
+		var sb strings.Builder
+		for frame := range frames {
+			if frame.err != nil {
+				result <- callResult{err: frame.err}
+				return
+			}
+			sb.WriteString(frame.data)
+		}
+		result <- callResult{data: sb.String()}
+	}()
+
+	var request brokerRequest
+	if err := conn.ReadJSON(&request); err != nil {
+		t.Fatalf("read browser request: %v", err)
+	}
+	if err := conn.WriteJSON(brokerResponse{ID: request.ID, Data: "part1-", HasMore: true}); err != nil {
+		t.Fatalf("write chunk 1: %v", err)
+	}
+	if err := conn.WriteJSON(brokerResponse{ID: request.ID, Data: "part2-", HasMore: true}); err != nil {
+		t.Fatalf("write chunk 2: %v", err)
+	}
+	if err := conn.WriteJSON(brokerResponse{ID: request.ID, Data: "part3"}); err != nil {
+		t.Fatalf("write final chunk: %v", err)
+	}
+	got := <-result
+	if got.err != nil {
+		t.Fatalf("broker call: %v", got.err)
+	}
+	expected := "part1-part2-part3"
+	if got.data != expected {
+		t.Fatalf("unexpected result: %s, want %s", got.data, expected)
 	}
 }

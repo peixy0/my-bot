@@ -170,7 +170,7 @@ async function connect(reason = "connect") {
         return;
       }
       opened = true;
-      connection.send(JSON.stringify({ type: "authenticate", version: protocolVersion, token: config.token || "" }));
+      connection.send(JSON.stringify({ type: "authenticate", version: protocolVersion }));
       startHeartbeat(connection);
     });
     connection.addEventListener("message", (event) => {
@@ -187,7 +187,7 @@ async function connect(reason = "connect") {
         if (opened && !connection.authenticated) {
           connectionEnabled = false;
           void chrome.storage.session.set({ [connectionKey]: false });
-          setConnectionStatus("error", "Authentication failed. Check the bearer token and connect again.");
+          setConnectionStatus("error", "Authentication failed. Connect again.");
           return;
         }
         scheduleReconnect();
@@ -293,60 +293,65 @@ async function handleFrame(raw, connection) {
     return;
   }
   try {
-    const result = await execute(frame.scope_id, frame.action, frame.params || {});
-    send({ type: "response", id: frame.id, result });
+    await execute(frame.scope_id, frame.action, frame.params || {}, frame.id);
   } catch (error) {
-    send({ type: "response", id: frame.id, error: errorMessage(error) });
+    send({ type: "response", id: frame.id, error: errorMessage(error), has_more: false });
   }
 }
 
-async function execute(scopeID, action, params) {
+async function execute(scopeID, action, params, requestID) {
   if (!isPlainObject(params)) {
     throw new Error("request params must be an object");
   }
   switch (action) {
     case "tabs":
-      return listTabs(scopeID);
+      return sendResult(requestID, await listTabs(scopeID));
     case "new_tab":
-      return newTab(scopeID, params.url);
+      return sendResult(requestID, await newTab(scopeID, params.url));
     case "close_tab":
-      return closeTab(scopeID, params.tab_ref);
+      return sendResult(requestID, await closeTab(scopeID, params.tab_ref));
     case "activate_tab":
-      return activateTab(scopeID, params.tab_ref);
+      return sendResult(requestID, await activateTab(scopeID, params.tab_ref));
     case "navigate":
-      return navigate(scopeID, params.tab_ref, params.url);
+      return sendResult(requestID, await navigate(scopeID, params.tab_ref, params.url));
     case "snapshot":
-      return withTab(scopeID, params.tab_ref, (tab) => cdpSnapshot(scopeID, tab.id));
+      return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpSnapshot(scopeID, tab.id)));
     case "click":
-      return withTab(scopeID, params.tab_ref, (tab) => cdpClick(scopeID, tab.id, params.element_ref));
+      return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpClick(scopeID, tab.id, params.element_ref)));
     case "type":
-      return withTab(scopeID, params.tab_ref, (tab) => cdpType(scopeID, tab.id, params.element_ref, params.text));
+      return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpType(scopeID, tab.id, params.element_ref, params.text)));
     case "press_key":
-      return withTab(scopeID, params.tab_ref, (tab) => cdpPressKey(tab.id, params.key));
+      return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpPressKey(tab.id, params.key)));
     case "select_option":
-      return withTab(scopeID, params.tab_ref, (tab) => cdpSelectOption(scopeID, tab.id, params.element_ref, params.value));
+      return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpSelectOption(scopeID, tab.id, params.element_ref, params.value)));
     case "wait":
-      return withTab(scopeID, params.tab_ref, async (tab) => {
+      return sendResult(requestID, await withTab(scopeID, params.tab_ref, async (tab) => {
         await delay(Math.min(Math.max(Number(params.seconds) || 0, 0), 30) * 1000);
         return { tab_ref: refForTab(scopeID, tab.id), waited: Number(params.seconds) || 0 };
-      });
+      }));
     case "evaluate":
-      return withTab(scopeID, params.tab_ref, (tab) => evaluate(tab.id, params.script));
+      return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => evaluate(tab.id, params.script)));
     case "inspect":
-      return withTab(scopeID, params.tab_ref, (tab) => cdpGetHTML(tab.id, params.selector));
+      return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpGetHTML(tab.id, params.selector)));
     case "scroll":
-      return withTab(scopeID, params.tab_ref, (tab) => cdpScroll(tab.id, params.direction, params.amount));
+      return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpScroll(tab.id, params.direction, params.amount)));
     case "back":
-      return withTab(scopeID, params.tab_ref, (tab) => cdpNavigateHistory(tab.id, "back"));
+      return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpNavigateHistory(tab.id, "back")));
     case "forward":
-      return withTab(scopeID, params.tab_ref, (tab) => cdpNavigateHistory(tab.id, "forward"));
+      return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpNavigateHistory(tab.id, "forward")));
     case "reload":
-      return withTab(scopeID, params.tab_ref, (tab) => cdpReload(tab.id));
+      return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpReload(tab.id)));
+    case "screenshot":
+      return withTab(scopeID, params.tab_ref, (tab) => cdpScreenshot(tab.id, params, requestID));
     case "scope_close":
-      return closeScope(scopeID);
+      return sendResult(requestID, await closeScope(scopeID));
     default:
       throw new Error(`unknown browser action: ${action}`);
   }
+}
+
+function sendResult(requestID, result) {
+  send({ type: "response", id: requestID, data: JSON.stringify(result), has_more: false });
 }
 
 async function listTabs(scopeID) {
@@ -899,6 +904,49 @@ async function cdpReload(tabID) {
   await ensureAttached(tabID);
   await cdpSend(tabID, "Page.reload");
   return { reloaded: true };
+}
+
+const screenshotChunkSize = 512 * 1024;
+
+async function cdpScreenshot(tabID, params, requestID) {
+  await ensureAttached(tabID);
+  const captureParams = { format: "png" };
+  if (params.selector) {
+    const doc = await cdpSend(tabID, "DOM.getDocument", { depth: 0 });
+    const { nodeId } = await cdpSend(tabID, "DOM.querySelector", {
+      nodeId: doc.root.nodeId,
+      selector: params.selector,
+    });
+    if (!nodeId) {
+      throw new Error(`selector not found: ${params.selector}`);
+    }
+    const { model } = await cdpSend(tabID, "DOM.getBoxModel", { nodeId });
+    if (!model || !model.content) {
+      throw new Error("selected element has no visible box");
+    }
+    const quad = model.content;
+    const xs = quad.filter((_, i) => i % 2 === 0);
+    const ys = quad.filter((_, i) => i % 2 === 1);
+    const x = Math.min(...xs);
+    const y = Math.min(...ys);
+    const width = Math.max(...xs) - x;
+    const height = Math.max(...ys) - y;
+    if (width <= 0 || height <= 0) {
+      throw new Error("selected element has zero size");
+    }
+    captureParams.clip = { x, y, width, height, scale: 1 };
+  } else if (params.full_page) {
+    captureParams.captureBeyondViewport = true;
+  }
+  const { data } = await cdpSend(tabID, "Page.captureScreenshot", captureParams);
+  if (!data) {
+    throw new Error("screenshot returned no data");
+  }
+  for (let i = 0; i < data.length; i += screenshotChunkSize) {
+    const chunk = data.slice(i, i + screenshotChunkSize);
+    send({ type: "response", id: requestID, data: chunk, has_more: true });
+  }
+  send({ type: "response", id: requestID, data: "", has_more: false });
 }
 
 function formatException(details) {

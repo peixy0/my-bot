@@ -1,13 +1,11 @@
 const settingKey = "myBotBrowserSettings";
 const form = document.querySelector("#settings");
 const urlInput = document.querySelector("#url");
-const tokenInput = document.querySelector("#token");
 const formStatus = document.querySelector("#form-status");
 const connectionStatus = document.querySelector("#connection-status");
 const saveButton = document.querySelector("#save");
 const connectButton = document.querySelector("#connect");
 const disconnectButton = document.querySelector("#disconnect");
-const tokenToggle = document.querySelector("#toggle-token");
 
 void initialize();
 
@@ -22,13 +20,6 @@ connectButton.addEventListener("click", () => {
 
 disconnectButton.addEventListener("click", () => {
   void disconnect();
-});
-
-tokenToggle.addEventListener("click", () => {
-  const visible = tokenInput.type === "text";
-  tokenInput.type = visible ? "password" : "text";
-  tokenToggle.textContent = visible ? "Show" : "Hide";
-  tokenToggle.setAttribute("aria-pressed", String(!visible));
 });
 
 chrome.runtime.onMessage.addListener((message) => {
@@ -46,7 +37,6 @@ async function load() {
   const stored = await chrome.storage.local.get(settingKey);
   const settings = stored[settingKey] || {};
   urlInput.value = settings.url || "ws://127.0.0.1:8020/browser";
-  tokenInput.value = settings.token || "";
 }
 
 async function save() {
@@ -55,7 +45,7 @@ async function save() {
     setFormStatus("");
     const parsed = validateEndpoint(urlInput.value);
     await chrome.storage.local.set({
-      [settingKey]: { url: parsed.toString(), token: tokenInput.value.trim() }
+      [settingKey]: { url: parsed.toString() }
     });
     renderConnectionStatus(await chrome.runtime.sendMessage({ type: "browserBridgeSettingsChanged" }));
     urlInput.value = parsed.toString();

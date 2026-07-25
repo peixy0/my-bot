@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -52,8 +53,19 @@ func (c *ExtensionClient) Close(ctx context.Context) error {
 	return c.caller.CloseScope(ctx, c.scopeID)
 }
 
-func (c *ExtensionClient) call(ctx context.Context, action string, params any) (json.RawMessage, error) {
-	return c.caller.Call(ctx, c.scopeID, action, params)
+func (c *ExtensionClient) call(ctx context.Context, action string, params any) (string, error) {
+	frames, err := c.caller.Call(ctx, c.scopeID, action, params)
+	if err != nil {
+		return "", err
+	}
+	var sb strings.Builder
+	for frame := range frames {
+		if frame.err != nil {
+			return "", frame.err
+		}
+		sb.WriteString(frame.data)
+	}
+	return sb.String(), nil
 }
 
 func (c *ExtensionClient) truncate(ctx context.Context, text string) string {
@@ -196,7 +208,7 @@ func (c *ExtensionClient) Register(registry *tools.Registry) {
 
 	registry.Register(tools.ToolSchema{
 		Name:        "browser_evaluate",
-		Description: "Execute JavaScript in the page context and return the JSON-serializable result. The script can read/modify the DOM or use the signed-in session.\n\nUse ONLY when dedicated browser tools (snapshot, click, type, scroll) are insufficient. Supports async functions. Exceptions include line:column information.",
+		Description: "Execute JavaScript in the page context and return the JSON-serializable result. The script can read/modify the DOM or use the signed-in session.\n\nUse ONLY when dedicated browser tools (snapshot, click, type, scroll) are insufficient. Supports async functions.",
 		ParameterDesc: map[string]any{
 			"type":     "object",
 			"required": []string{"tab", "script"},
@@ -269,6 +281,20 @@ func (c *ExtensionClient) Register(registry *tools.Registry) {
 			},
 		},
 	}, c.handleReload)
+
+	registry.Register(tools.ToolSchema{
+		Name:        "browser_screenshot",
+		Description: "Capture a screenshot of a browser tab and save it as a PNG file. Returns the saved file path and byte count.",
+		ParameterDesc: map[string]any{
+			"type":     "object",
+			"required": []string{"tab"},
+			"properties": map[string]any{
+				"tab":       map[string]any{"type": "string", "description": "A tab returned by browser_tabs."},
+				"selector":  map[string]any{"type": "string", "description": "CSS selector to capture only a specific element. Overrides full_page when set."},
+				"full_page": map[string]any{"type": "boolean", "description": "Capture the full scrollable page instead of just the viewport. Ignored when selector is set."},
+			},
+		},
+	}, c.handleScreenshot)
 }
 
 func (c *ExtensionClient) handleTabs(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -276,7 +302,7 @@ func (c *ExtensionClient) handleTabs(ctx context.Context, args []byte) (tools.To
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_tabs: %w", err)), nil
 	}
-	return tools.TextResult(c.truncate(ctx, string(result))), nil
+	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
 func (c *ExtensionClient) handleNewTab(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -290,7 +316,7 @@ func (c *ExtensionClient) handleNewTab(ctx context.Context, args []byte) (tools.
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_new_tab: %w", err)), nil
 	}
-	return tools.TextResult(c.truncate(ctx, string(result))), nil
+	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
 func (c *ExtensionClient) handleCloseTab(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -307,7 +333,7 @@ func (c *ExtensionClient) handleCloseTab(ctx context.Context, args []byte) (tool
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_close_tab: %w", err)), nil
 	}
-	return tools.TextResult(c.truncate(ctx, string(result))), nil
+	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
 func (c *ExtensionClient) handleActivateTab(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -324,7 +350,7 @@ func (c *ExtensionClient) handleActivateTab(ctx context.Context, args []byte) (t
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_activate_tab: %w", err)), nil
 	}
-	return tools.TextResult(c.truncate(ctx, string(result))), nil
+	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
 func (c *ExtensionClient) handleNavigate(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -345,7 +371,7 @@ func (c *ExtensionClient) handleNavigate(ctx context.Context, args []byte) (tool
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_navigate: %w", err)), nil
 	}
-	return tools.TextResult(c.truncate(ctx, string(result))), nil
+	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
 func (c *ExtensionClient) handleSnapshot(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -362,7 +388,7 @@ func (c *ExtensionClient) handleSnapshot(ctx context.Context, args []byte) (tool
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_snapshot: %w", err)), nil
 	}
-	return tools.TextResult(c.truncate(ctx, string(result))), nil
+	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
 func (c *ExtensionClient) handleClick(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -383,7 +409,7 @@ func (c *ExtensionClient) handleClick(ctx context.Context, args []byte) (tools.T
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_click: %w", err)), nil
 	}
-	return tools.TextResult(c.truncate(ctx, string(result))), nil
+	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
 func (c *ExtensionClient) handleType(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -408,7 +434,7 @@ func (c *ExtensionClient) handleType(ctx context.Context, args []byte) (tools.To
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_type: %w", err)), nil
 	}
-	return tools.TextResult(c.truncate(ctx, string(result))), nil
+	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
 func (c *ExtensionClient) handlePressKey(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -429,7 +455,7 @@ func (c *ExtensionClient) handlePressKey(ctx context.Context, args []byte) (tool
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_press_key: %w", err)), nil
 	}
-	return tools.TextResult(c.truncate(ctx, string(result))), nil
+	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
 func (c *ExtensionClient) handleSelectOption(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -454,7 +480,7 @@ func (c *ExtensionClient) handleSelectOption(ctx context.Context, args []byte) (
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_select_option: %w", err)), nil
 	}
-	return tools.TextResult(c.truncate(ctx, string(result))), nil
+	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
 func (c *ExtensionClient) handleWait(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -475,7 +501,7 @@ func (c *ExtensionClient) handleWait(ctx context.Context, args []byte) (tools.To
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_wait: %w", err)), nil
 	}
-	return tools.TextResult(c.truncate(ctx, string(result))), nil
+	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
 func (c *ExtensionClient) handleEvaluate(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -496,7 +522,7 @@ func (c *ExtensionClient) handleEvaluate(ctx context.Context, args []byte) (tool
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_evaluate: %w", err)), nil
 	}
-	return tools.TextResult(c.truncate(ctx, string(result))), nil
+	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
 func (c *ExtensionClient) handleInspect(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -514,7 +540,7 @@ func (c *ExtensionClient) handleInspect(ctx context.Context, args []byte) (tools
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_inspect: %w", err)), nil
 	}
-	return tools.TextResult(c.truncate(ctx, string(result))), nil
+	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
 func (c *ExtensionClient) handleScroll(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -539,7 +565,7 @@ func (c *ExtensionClient) handleScroll(ctx context.Context, args []byte) (tools.
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_scroll: %w", err)), nil
 	}
-	return tools.TextResult(c.truncate(ctx, string(result))), nil
+	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
 func (c *ExtensionClient) handleBack(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -556,7 +582,7 @@ func (c *ExtensionClient) handleBack(ctx context.Context, args []byte) (tools.To
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_back: %w", err)), nil
 	}
-	return tools.TextResult(c.truncate(ctx, string(result))), nil
+	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
 func (c *ExtensionClient) handleForward(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -573,7 +599,7 @@ func (c *ExtensionClient) handleForward(ctx context.Context, args []byte) (tools
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_forward: %w", err)), nil
 	}
-	return tools.TextResult(c.truncate(ctx, string(result))), nil
+	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
 func (c *ExtensionClient) handleReload(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -590,5 +616,35 @@ func (c *ExtensionClient) handleReload(ctx context.Context, args []byte) (tools.
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_reload: %w", err)), nil
 	}
-	return tools.TextResult(c.truncate(ctx, string(result))), nil
+	return tools.TextResult(c.truncate(ctx, result)), nil
+}
+
+func (c *ExtensionClient) handleScreenshot(ctx context.Context, args []byte) (tools.ToolResult, error) {
+	var params struct {
+		Tab      string `json:"tab"`
+		Selector string `json:"selector"`
+		FullPage bool   `json:"full_page"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return tools.ToolResult{}, fmt.Errorf("browser_screenshot: parse args: %w", err)
+	}
+	if params.Tab == "" {
+		return tools.ErrorResult(fmt.Errorf("browser_screenshot: tab is required")), nil
+	}
+	result, err := c.call(ctx, "screenshot", params)
+	if err != nil {
+		return tools.ErrorResult(fmt.Errorf("browser_screenshot: %w", err)), nil
+	}
+	if result == "" {
+		return tools.ErrorResult(fmt.Errorf("browser_screenshot: empty screenshot data")), nil
+	}
+	data, err := base64.StdEncoding.DecodeString(result)
+	if err != nil {
+		return tools.ErrorResult(fmt.Errorf("browser_screenshot: decode base64: %w", err)), nil
+	}
+	path, err := c.rt.WriteTmpFile(ctx, string(data))
+	if err != nil {
+		return tools.ErrorResult(fmt.Errorf("browser_screenshot: write tmp file: %w", err)), nil
+	}
+	return tools.TextResult(fmt.Sprintf(`{"path":%q,"bytes":%d}`, path, len(data))), nil
 }

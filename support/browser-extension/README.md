@@ -15,8 +15,6 @@ browser:
   enabled: true
   listen_addr: "127.0.0.1:8020"
   path: "/browser"
-  bearer_token: ""
-  request_timeout_seconds: 30
 ```
 
 For remote endpoints, terminate TLS in a reverse proxy and use `wss://` with a strong bearer token. The settings page rejects remote `ws://` URLs; plain `ws://` is only accepted for localhost.

@@ -32,12 +32,6 @@
           <label for="url">WebSocket URL</label>
           <input id="url" name="url" type="url" inputmode="url" autocomplete="url" spellcheck="false" required placeholder="ws://127.0.0.1:8020/browser" aria-describedby="url-help">
           <p id="url-help" class="hint">Use ws:// only for localhost. Remote endpoints must use wss://.</p>
-
-          <label for="token">Bearer token <span class="optional">optional for local development</span></label>
-          <div class="secret">
-            <input id="token" name="token" type="password" autocomplete="off" spellcheck="false">
-            <button id="toggle-token" class="secondary compact" type="button" aria-controls="token" aria-pressed="false">Show</button>
-          </div>
         </fieldset>
 
         <div class="form-actions">
@@ -48,7 +42,7 @@
 
       <aside>
         <h2>Security</h2>
-        <p>The bridge can access signed-in content in tabs created for an agent. Keep the broker on localhost or protect a remote endpoint with TLS and a strong bearer token.</p>
+        <p>The bridge can access signed-in content in tabs created for an agent. Keep the broker on localhost or protect a remote endpoint with TLS.</p>
       </aside>
     </main>
   </body>

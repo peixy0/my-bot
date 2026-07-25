@@ -47,13 +47,10 @@ func TestConfigValidateRejectsInvalidValues(t *testing.T) {
 		{"webui host", func(c *Config) { c.WebUI.Host = "" }},
 		{"webui port", func(c *Config) { c.WebUI.Port = 70000 }},
 		{"browser bad address", func(c *Config) {
-			c.Browser = &BrowserConfig{Enabled: true, ListenAddr: "bad", Path: "/browser", RequestTimeoutSeconds: 30}
+			c.Browser = &BrowserConfig{Enabled: true, ListenAddr: "bad", Path: "/browser"}
 		}},
 		{"browser bad path", func(c *Config) {
-			c.Browser = &BrowserConfig{Enabled: true, ListenAddr: "127.0.0.1:8020", Path: "browser", RequestTimeoutSeconds: 30}
-		}},
-		{"browser timeout", func(c *Config) {
-			c.Browser = &BrowserConfig{Enabled: true, ListenAddr: "127.0.0.1:8020", Path: "/browser"}
+			c.Browser = &BrowserConfig{Enabled: true, ListenAddr: "127.0.0.1:8020", Path: "browser"}
 		}},
 	}
 
@@ -111,7 +108,6 @@ browser:
   enabled: true
   listen_addr: "127.0.0.1:8020"
   path: "/browser"
-  request_timeout_seconds: 30
 `)
 	cfg, err := Load(path)
 	if err != nil {

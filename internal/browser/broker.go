@@ -2,8 +2,6 @@ package browser
 
 import (
 	"context"
-	"crypto/subtle"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -23,14 +21,12 @@ var ErrDisconnected = errors.New("browser extension is not connected")
 const protocolVersion = 1
 
 type Config struct {
-	ListenAddr     string
-	Path           string
-	BearerToken    string
-	RequestTimeout time.Duration
+	ListenAddr string
+	Path       string
 }
 
 type BrokerCaller interface {
-	Call(context.Context, string, string, any) (json.RawMessage, error)
+	Call(context.Context, string, string, any) (<-chan brokerFrame, error)
 	CloseScope(context.Context, string) error
 }
 
@@ -56,12 +52,12 @@ type brokerCall struct {
 	scope  string
 	action string
 	params any
-	reply  chan brokerResult
+	reply  chan brokerFrame
 }
 
-type brokerResult struct {
-	result json.RawMessage
-	err    error
+type brokerFrame struct {
+	data string
+	err  error
 }
 
 type extensionConn struct {
@@ -77,19 +73,16 @@ type brokerRequest struct {
 }
 
 type brokerResponse struct {
-	Type   string          `json:"type"`
-	ID     string          `json:"id"`
-	Result json.RawMessage `json:"result"`
-	Error  string          `json:"error"`
-	conn   *extensionConn
+	ID      string `json:"id"`
+	Data    string `json:"data"`
+	Error   string `json:"error"`
+	HasMore bool   `json:"has_more,omitempty"`
+	conn    *extensionConn
 }
 
 func NewExtensionBroker(cfg Config, rt runtime.Runtime, maxChars int) *ExtensionBroker {
 	if cfg.Path == "" {
 		cfg.Path = "/browser"
-	}
-	if cfg.RequestTimeout <= 0 {
-		cfg.RequestTimeout = 30 * time.Second
 	}
 	return &ExtensionBroker{
 		cfg:          cfg,
@@ -149,10 +142,8 @@ func (b *ExtensionBroker) Run(ctx context.Context) error {
 	return serveErr
 }
 
-func (b *ExtensionBroker) Call(ctx context.Context, scopeID, action string, params any) (json.RawMessage, error) {
-	ctx, cancel := context.WithTimeout(ctx, b.cfg.RequestTimeout)
-	defer cancel()
-	reply := make(chan brokerResult, 1)
+func (b *ExtensionBroker) Call(ctx context.Context, scopeID, action string, params any) (<-chan brokerFrame, error) {
+	reply := make(chan brokerFrame, 8)
 	call := brokerCall{ctx: ctx, scope: scopeID, action: action, params: params, reply: reply}
 	select {
 	case b.requests <- call:
@@ -161,19 +152,17 @@ func (b *ExtensionBroker) Call(ctx context.Context, scopeID, action string, para
 	case <-b.done:
 		return nil, ErrDisconnected
 	}
-	select {
-	case result := <-reply:
-		return result.result, result.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-b.done:
-		return nil, ErrDisconnected
-	}
+	return reply, nil
 }
 
 func (b *ExtensionBroker) CloseScope(ctx context.Context, scopeID string) error {
-	_, err := b.Call(ctx, scopeID, "scope_close", map[string]any{})
-	return err
+	frames, err := b.Call(ctx, scopeID, "scope_close", map[string]any{})
+	if err != nil {
+		return err
+	}
+	for range frames {
+	}
+	return nil
 }
 
 func (b *ExtensionBroker) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -205,7 +194,7 @@ func (b *ExtensionBroker) handleWebSocket(w http.ResponseWriter, r *http.Request
 		if err := conn.ReadJSON(&frame); err != nil {
 			return
 		}
-		if frame.Type != "response" || frame.ID == "" {
+		if frame.ID == "" {
 			continue
 		}
 		frame.conn = extension
@@ -223,15 +212,11 @@ func (b *ExtensionBroker) authenticate(conn *websocket.Conn) bool {
 	var frame struct {
 		Type    string `json:"type"`
 		Version int    `json:"version"`
-		Token   string `json:"token"`
 	}
 	if err := conn.ReadJSON(&frame); err != nil {
 		return false
 	}
 	if frame.Type != "authenticate" || frame.Version != protocolVersion {
-		return false
-	}
-	if b.cfg.BearerToken != "" && subtle.ConstantTimeCompare([]byte(frame.Token), []byte(b.cfg.BearerToken)) != 1 {
 		return false
 	}
 	return conn.WriteJSON(map[string]any{"type": "authenticated", "version": protocolVersion}) == nil
@@ -242,14 +227,12 @@ func (b *ExtensionBroker) loop(ctx context.Context) {
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	var extension *extensionConn
-	pending := make(map[string]brokerCall)
+	pending := make(map[string]*brokerCall)
 	failPending := func(err error) {
 		for id, request := range pending {
 			delete(pending, id)
-			select {
-			case request.reply <- brokerResult{err: err}:
-			default:
-			}
+			request.reply <- brokerFrame{err: err}
+			close(request.reply)
 		}
 	}
 	for {
@@ -261,10 +244,8 @@ func (b *ExtensionBroker) loop(ctx context.Context) {
 			for id, request := range pending {
 				if err := request.ctx.Err(); err != nil {
 					delete(pending, id)
-					select {
-					case request.reply <- brokerResult{err: err}:
-					default:
-					}
+					request.reply <- brokerFrame{err: err}
+					close(request.reply)
 				}
 			}
 		case extension = <-b.connected:
@@ -284,27 +265,31 @@ func (b *ExtensionBroker) loop(ctx context.Context) {
 			if !ok {
 				continue
 			}
-			delete(pending, response.ID)
-			result := brokerResult{result: response.Result}
+			frame := brokerFrame{data: response.Data}
 			if response.Error != "" {
-				result.err = errors.New(response.Error)
+				frame.err = errors.New(response.Error)
 			}
-			select {
-			case request.reply <- result:
-			default:
+			if !response.HasMore {
+				delete(pending, response.ID)
+				request.reply <- frame
+				close(request.reply)
+			} else {
+				request.reply <- frame
 			}
 		case call := <-b.requests:
 			if extension == nil {
-				call.reply <- brokerResult{err: ErrDisconnected}
+				call.reply <- brokerFrame{err: ErrDisconnected}
+				close(call.reply)
 				continue
 			}
 			id := fmt.Sprintf("browser-%d-%s", b.nextID.Add(1), uuid.NewString())
 			frame := requestFromCall(id, call)
 			if err := extension.conn.WriteJSON(frame); err != nil {
-				call.reply <- brokerResult{err: fmt.Errorf("send browser request: %w", err)}
+				call.reply <- brokerFrame{err: fmt.Errorf("send browser request: %w", err)}
+				close(call.reply)
 				continue
 			}
-			pending[id] = call
+			pending[id] = &call
 		}
 	}
 }
