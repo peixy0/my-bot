@@ -135,6 +135,7 @@ func (s *Scheduler) handleModelsCommand(ctx context.Context, e events.TextInputE
 func (s *Scheduler) dumpAllSessions(ctx context.Context) ([]restoreSession, error) {
 	restores := make([]restoreSession, 0, len(s.sessions))
 	for chatID, session := range s.sessions {
+		session.tryAbort()
 		dumpID := uuid.NewString()
 		if err := session.snapshot(ctx, dumpID); err != nil {
 			return []restoreSession{}, fmt.Errorf("fail to dump %s: %w", chatID, err)
