@@ -8,6 +8,21 @@ const maxTextLength = 64 * 1024;
 const reconnectInitialDelay = 1000;
 const reconnectMaxDelay = 30000;
 
+// Toolbar icon paths keyed by connection state.
+// connected → colourful robot; everything else → grey robot.
+const ICONS_ON = {
+  16: "icons/robot-on-16.png",
+  32: "icons/robot-on-32.png",
+  48: "icons/robot-on-48.png",
+  128: "icons/robot-on-128.png",
+};
+const ICONS_OFF = {
+  16: "icons/robot-off-16.png",
+  32: "icons/robot-off-32.png",
+  48: "icons/robot-off-48.png",
+  128: "icons/robot-off-128.png",
+};
+
 let socket = null;
 let scopes = new Map();
 let reconnectTimer = null;
@@ -259,7 +274,13 @@ function disconnect(detail) {
 
 function setConnectionStatus(state, detail = "") {
   connectionStatus = { state, detail };
+  updateIcon(state);
   void chrome.runtime.sendMessage({ type: "browserBridgeStatusChanged", status: connectionStatus }).catch(() => {});
+}
+
+function updateIcon(state) {
+  const icons = state === "connected" ? ICONS_ON : ICONS_OFF;
+  chrome.action.setIcon({ path: icons }).catch(() => {});
 }
 
 function send(frame) {
