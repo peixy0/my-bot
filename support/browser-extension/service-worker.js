@@ -1,5 +1,3 @@
-const sessionKey = "myBotBrowserScopes";
-const connectionKey = "myBotBrowserConnectionEnabled";
 const settingKey = "myBotBrowserSettings";
 const groupColors = ["blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange", "grey"];
 const protocolVersion = 1;
@@ -31,24 +29,36 @@ let reconnectAttempt = 0;
 let connectionEnabled = false;
 let connectionStatus = { state: "disconnected", detail: "Connect from extension settings to start the browser bridge." };
 
-// Serialize CDP operations so that each request completes before the next
-// starts — critical for SPA interactions where ordering matters (type →
-// press Enter → snapshot must see the rendered result).
-let requestChain = Promise.resolve();
+// Serialize CDP operations within each scope so that ordering matters
+// (type → press Enter → snapshot must see the rendered result).
+// Different scopes run in parallel — no reason for one scope's screenshot
+// to block another scope's click.
+const scopeChains = new Map();
 
+function enqueueScope(scopeID, task) {
+  const chain = scopeChains.get(scopeID) || Promise.resolve();
+  const next = chain.then(task).catch(() => {});
+  scopeChains.set(scopeID, next);
+  // Clean up the map entry once the chain settles to avoid unbounded growth.
+  next.finally(() => {
+    if (scopeChains.get(scopeID) === next) {
+      scopeChains.delete(scopeID);
+    }
+  });
+  return next;
+}
 
-const initialized = Promise.all([restoreScopes(), restoreConnectionEnabled()]).then(reconcileScopes);
 
 chrome.tabs.onCreated.addListener((tab) => {
-  void initialized.then(() => adoptOpenedTab(tab));
+  adoptOpenedTab(tab);
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  void initialized.then(() => removeTab(tabId));
+  removeTab(tabId);
 });
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
-  void initialized.then(() => setActiveTab(activeInfo.tabId));
+  setActiveTab(activeInfo.tabId);
 });
 
 chrome.debugger.onDetach.addListener((source, reason) => {
@@ -60,105 +70,22 @@ chrome.runtime.onMessage.addListener((message) => {
     return Promise.resolve(connectionStatus);
   }
   if (message?.type === "browserBridgeReconnect") {
-    return initialized.then(() => {
-      connectionEnabled = true;
-      void chrome.storage.session.set({ [connectionKey]: true });
-      restartConnection("manual connection");
-      return connectionStatus;
-    });
+    connectionEnabled = true;
+    restartConnection("manual connection");
+    return Promise.resolve(connectionStatus);
   }
   if (message?.type === "browserBridgeDisconnect") {
-    return initialized.then(() => {
-      connectionEnabled = false;
-      void chrome.storage.session.set({ [connectionKey]: false });
-      disconnect("Disconnected by user.");
-      return connectionStatus;
-    });
+    connectionEnabled = false;
+    disconnect("Disconnected by user.");
+    return Promise.resolve(connectionStatus);
   }
   if (message?.type === "browserBridgeSettingsChanged") {
-    return initialized.then(() => {
-      connectionEnabled = false;
-      void chrome.storage.session.set({ [connectionKey]: false });
-      disconnect("Settings changed. Connect again to use the new endpoint.");
-      return connectionStatus;
-    });
+    connectionEnabled = false;
+    disconnect("Settings changed. Connect again to use the new endpoint.");
+    return Promise.resolve(connectionStatus);
   }
   return undefined;
 });
-
-async function restoreScopes() {
-  const stored = await chrome.storage.session.get(sessionKey);
-  const restored = stored[sessionKey];
-  if (!restored || typeof restored !== "object" || Array.isArray(restored)) {
-    scopes = new Map();
-    return;
-  }
-  scopes = new Map(Object.entries(restored).flatMap(([scopeID, scope]) => {
-    if (!isScopeID(scopeID) || !scope || typeof scope !== "object" || Array.isArray(scope)) {
-      return [];
-    }
-    const refs = Object.fromEntries(Object.entries(scope.refs || {}).filter(([ref, tabID]) => isRef(ref) && Number.isInteger(tabID) && tabID > 0));
-    return [[scopeID, {
-      refs,
-      activeTabId: Number.isInteger(scope.activeTabId) ? scope.activeTabId : 0,
-      groupId: Number.isInteger(scope.groupId) ? scope.groupId : 0,
-      windowId: Number.isInteger(scope.windowId) ? scope.windowId : 0
-    }]];
-  }));
-}
-
-async function restoreConnectionEnabled() {
-  const stored = await chrome.storage.session.get(connectionKey);
-  connectionEnabled = stored[connectionKey] === true;
-  if (connectionEnabled) {
-    setConnectionStatus("disconnected", "Restoring the connection.");
-    void connect("session restore");
-  }
-}
-
-async function saveScopes() {
-  const serializable = {};
-  for (const [scopeID, scope] of scopes) {
-    serializable[scopeID] = {
-      refs: scope.refs,
-      activeTabId: scope.activeTabId || 0,
-      groupId: scope.groupId || 0,
-      windowId: scope.windowId || 0
-    };
-  }
-  await chrome.storage.session.set({ [sessionKey]: serializable });
-}
-
-async function reconcileScopes() {
-  let changed = false;
-  for (const [scopeID, scope] of scopes) {
-    for (const [ref, tabID] of Object.entries(scope.refs)) {
-      try {
-        const tab = await chrome.tabs.get(tabID);
-        if (scope.windowId && tab.windowId !== scope.windowId) {
-          delete scope.refs[ref];
-          changed = true;
-        }
-      } catch {
-        delete scope.refs[ref];
-        changed = true;
-      }
-    }
-    const tabIDs = Object.values(scope.refs);
-    if (tabIDs.length === 0) {
-      scopes.delete(scopeID);
-      changed = true;
-      continue;
-    }
-    if (!tabIDs.includes(scope.activeTabId)) {
-      scope.activeTabId = tabIDs[0];
-      changed = true;
-    }
-  }
-  if (changed) {
-    await saveScopes();
-  }
-}
 
 async function connect(reason = "connect") {
   if (!connectionEnabled) {
@@ -193,15 +120,23 @@ async function connect(reason = "connect") {
         void handleFrame(event.data, connection);
         return;
       }
-      requestChain = requestChain.then(() => handleFrame(event.data, connection)).catch(() => {});
+      // Parse to get scope_id for per-scope chaining
+      let frame;
+      try {
+        frame = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (!isRequestFrame(frame)) {
+        return;
+      }
+      enqueueScope(frame.scope_id, () => handleFrame(event.data, connection));
     });
     connection.addEventListener("close", () => {
       if (socket === connection) {
-        socket = null;
-        stopHeartbeat();
+        stopHeartbeat(connection);
         if (opened && !connection.authenticated) {
           connectionEnabled = false;
-          void chrome.storage.session.set({ [connectionKey]: false });
           setConnectionStatus("error", "Authentication failed. Connect again.");
           return;
         }
@@ -221,21 +156,47 @@ async function connect(reason = "connect") {
 }
 
 function startHeartbeat(connection) {
-  stopHeartbeat();
-  heartbeatTimer = setInterval(() => {
-    if (socket === connection && connection.readyState === WebSocket.OPEN) {
-      try {
-        connection.send(JSON.stringify({ type: "ping" }));
-      } catch {
-        connection.close();
+  stopHeartbeat(connection);
+  let lastPong = Date.now();
+  // Listen for pong messages on this connection
+  const pongListener = (event) => {
+    if (event.target !== connection) return;
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.type === "pong") {
+        lastPong = Date.now();
       }
+    } catch {}
+  };
+  connection.addEventListener("message", pongListener);
+  // Store cleanup fn so stopHeartbeat can remove the listener
+  connection._pongListener = pongListener;
+
+  heartbeatTimer = setInterval(() => {
+    if (socket !== connection || connection.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    // If we haven't received a pong in 2 intervals, the connection is half-dead
+    if (Date.now() - lastPong > 40000) {
+      connection.close();
+      return;
+    }
+    try {
+      connection.send(JSON.stringify({ type: "ping" }));
+    } catch {
+      connection.close();
     }
   }, 20000);
 }
 
-function stopHeartbeat() {
+function stopHeartbeat(connection) {
   clearInterval(heartbeatTimer);
   heartbeatTimer = null;
+  const conn = connection || socket;
+  if (conn && conn._pongListener) {
+    conn.removeEventListener("message", conn._pongListener);
+    delete conn._pongListener;
+  }
 }
 
 function scheduleReconnect() {
@@ -256,7 +217,7 @@ function restartConnection(reason) {
   reconnectAttempt = 0;
   const previous = socket;
   socket = null;
-  stopHeartbeat();
+  stopHeartbeat(previous);
   previous?.close();
   void connect(reason);
 }
@@ -267,7 +228,7 @@ function disconnect(detail) {
   reconnectAttempt = 0;
   const previous = socket;
   socket = null;
-  stopHeartbeat();
+  stopHeartbeat(previous);
   previous?.close();
   setConnectionStatus("disconnected", detail);
 }
@@ -346,10 +307,7 @@ async function execute(scopeID, action, params, requestID) {
     case "select_option":
       return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpSelectOption(scopeID, tab.id, params.element_ref, params.value)));
     case "wait":
-      return sendResult(requestID, await withTab(scopeID, params.tab_ref, async (tab) => {
-        await delay(Math.min(Math.max(Number(params.seconds) || 0, 0), 30) * 1000);
-        return { tab_ref: refForTab(scopeID, tab.id), waited: Number(params.seconds) || 0 };
-      }));
+      return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpWait(scopeID, tab.id, params.seconds)));
     case "evaluate":
       return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => evaluate(tab.id, params.script)));
     case "inspect":
@@ -389,9 +347,6 @@ async function listTabs(scopeID) {
       delete scope.refs[ref];
     }
   }
-  if (tabs.length !== Object.keys(scope.refs).length) {
-    await saveScopes();
-  }
   return { tabs };
 }
 
@@ -418,7 +373,6 @@ async function activateTab(scopeID, tabRef) {
   await chrome.tabs.update(tab.id, { active: true });
   const scope = scopes.get(scopeID);
   scope.activeTabId = tab.id;
-  await saveScopes();
   return { tab_ref: tabRef, active: true };
 }
 
@@ -489,7 +443,6 @@ async function assignTab(scopeID, tabID) {
       await createGroup(scopeID, scope);
     }
   }
-  await saveScopes();
   return ref;
 }
 
@@ -542,16 +495,13 @@ async function removeTab(tabID) {
       changed = true;
     }
   }
-  if (changed) {
-    await saveScopes();
-  }
+  // State is in-memory only; no persistence needed.
 }
 
 async function setActiveTab(tabID) {
   for (const scope of scopes.values()) {
     if (Object.values(scope.refs).includes(tabID)) {
       scope.activeTabId = tabID;
-      await saveScopes();
       return;
     }
   }
@@ -568,7 +518,6 @@ async function closeScope(scopeID) {
     await chrome.tabs.remove(tabIDs).catch(() => {});
   }
   scopes.delete(scopeID);
-  await saveScopes();
   return { closed: true };
 }
 
@@ -595,6 +544,33 @@ async function detachTab(tabID) {
   }
   attachedTabs.delete(tabID);
   await chrome.debugger.detach({ tabId: tabID }).catch(() => {});
+}
+
+// Wait for the page to emit a load event, or until the timeout elapses.
+// Returns as soon as the load fires — no need to guess how long a page
+// will take to render.
+function waitForLoad(tabID, timeoutMs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const onEvent = (source, method) => {
+      if (source.tabId === tabID && method === "Page.loadEventFired") {
+        cleanup();
+        settled = true;
+        resolve(true);
+      }
+    };
+    const timer = setTimeout(() => {
+      if (!settled) {
+        cleanup();
+        resolve(false);
+      }
+    }, timeoutMs);
+    function cleanup() {
+      clearTimeout(timer);
+      chrome.debugger.onEvent.removeListener(onEvent);
+    }
+    chrome.debugger.onEvent.addListener(onEvent);
+  });
 }
 
 async function cdpSend(tabID, method, params = {}) {
@@ -675,7 +651,6 @@ async function cdpSnapshot(scopeID, tabID) {
     });
   }
 
-  await saveScopes();
   return {
     title: pageInfo.title || "",
     url: pageInfo.url || "",
@@ -733,38 +708,52 @@ async function cdpType(scopeID, tabID, elementRef, text) {
   // Activate tab so the page processes keyboard events (Chrome
   // suppresses input on background tabs).
   await chrome.tabs.update(tabID, { active: true }).catch(() => {});
+
+  const { object } = await cdpSend(tabID, "DOM.resolveNode", { nodeId });
+
+  // For <input> / <textarea>: use the native value setter so React / Vue
+  // controlled components pick up the change, then dispatch input + change.
+  // For contenteditable: fall back to Input.insertText (clears first via
+  // selectAll + delete, then inserts).
+  const isEditable = await cdpSend(tabID, "Runtime.callFunctionOn", {
+    objectId: object.objectId,
+    functionDeclaration: "(function() { return this.tagName === 'INPUT' || this.tagName === 'TEXTAREA' || this.isContentEditable; })",
+    returnByValue: true
+  });
+
+  if (isEditable.result?.value) {
+    // input / textarea — set value via native descriptor, dispatch events
+    const tag = await cdpSend(tabID, "Runtime.callFunctionOn", {
+      objectId: object.objectId,
+      functionDeclaration: "(function() { return this.tagName; })",
+      returnByValue: true
+    });
+
+    if (tag.result?.value === "INPUT" || tag.result?.value === "TEXTAREA") {
+      await cdpSend(tabID, "Runtime.callFunctionOn", {
+        objectId: object.objectId,
+        functionDeclaration: "(function(text) { var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set || Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set; if (setter) { setter.call(this, text); } else { this.value = text; } this.dispatchEvent(new Event('input', {bubbles:true})); this.dispatchEvent(new Event('change', {bubbles:true})); })",
+        arguments: [{ value: text }],
+        returnByValue: true
+      });
+      return { typed: true };
+    }
+  }
+
+  // contenteditable or unknown — use Input.insertText after clearing
+  // Focus the element, select all, delete, then insert text
   await cdpSend(tabID, "Input.dispatchKeyEvent", { type: "keyDown", key: "Control" });
   await cdpSend(tabID, "Input.dispatchKeyEvent", { type: "keyDown", key: "a", code: "KeyA" });
   await cdpSend(tabID, "Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA" });
   await cdpSend(tabID, "Input.dispatchKeyEvent", { type: "keyUp", key: "Control" });
   await cdpSend(tabID, "Input.dispatchKeyEvent", { type: "keyDown", key: "Backspace", code: "Backspace" });
   await cdpSend(tabID, "Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace" });
-  for (const char of text) {
-    const code = keyCodeForChar(char);
-    const vk = char.charCodeAt(0);
-    await cdpSend(tabID, "Input.dispatchKeyEvent", { type: "keyDown", key: char, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk });
-    await cdpSend(tabID, "Input.dispatchKeyEvent", { type: "char", key: char, code, text: char, unmodifiedText: char, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk });
-    await cdpSend(tabID, "Input.dispatchKeyEvent", { type: "keyUp", key: char, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk });
+  // Input.insertText handles large text; chunk to stay safe
+  const chunkSize = 4096;
+  for (let i = 0; i < text.length; i += chunkSize) {
+    await cdpSend(tabID, "Input.insertText", { text: text.slice(i, i + chunkSize) });
   }
   return { typed: true };
-}
-
-function keyCodeForChar(c) {
-  if (/^[a-zA-Z]$/.test(c)) return "Key" + c.toUpperCase();
-  if (/^\d$/.test(c)) return "Digit" + c;
-  if (c === " ") return "Space";
-  if (c === ".") return "Period";
-  if (c === ",") return "Comma";
-  if (c === "-") return "Minus";
-  if (c === "=") return "Equal";
-  if (c === "/") return "Slash";
-  if (c === "\\") return "Backslash";
-  if (c === "'") return "Quote";
-  if (c === ";") return "Semicolon";
-  if (c === "[") return "BracketLeft";
-  if (c === "]") return "BracketRight";
-  if (c === "`") return "Backquote";
-  return "";
 }
 
 async function cdpSelectOption(scopeID, tabID, elementRef, value) {
@@ -811,7 +800,7 @@ async function evaluate(tabID, script) {
 async function cdpGetHTML(tabID, selector) {
   await ensureAttached(tabID);
   const expression = selector
-    ? "(() => { const el = document.querySelector('" + selector.replace(/[`"\\]/g, (c) => "\\" + c) + "'); return el ? el.outerHTML : ''; })()"
+    ? `(() => { const el = document.querySelector(${JSON.stringify(selector)}); return el ? el.outerHTML : ''; })()`
     : "document.documentElement.outerHTML";
   const result = await cdpSend(tabID, "Runtime.evaluate", {
     expression,
@@ -823,19 +812,8 @@ async function cdpGetHTML(tabID, selector) {
   }
   return String(result.result?.value ?? "");
 }
-
-
-
-
-
-
-
 function shortScope(scopeID) {
   return scopeID.slice(-8);
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function cdpScroll(tabID, direction, amount) {
@@ -845,7 +823,7 @@ async function cdpScroll(tabID, direction, amount) {
   // Strategy 1: JS scroll — find the actual scrollable container
   const { result: jsResult } = await cdpSend(tabID, "Runtime.evaluate", {
     expression: `(function() {
-      const delta = ${delta};
+      const delta = ${JSON.stringify(delta)};
 
       // 1. document.scrollingElement (standard)
       const se = document.scrollingElement;
@@ -925,6 +903,17 @@ async function cdpReload(tabID) {
   await ensureAttached(tabID);
   await cdpSend(tabID, "Page.reload");
   return { reloaded: true };
+}
+
+// Wait for page load to complete, or until `seconds` elapses (whichever
+// comes first).  If the page is already loaded (no pending navigation),
+// this returns quickly via the timeout path.
+async function cdpWait(scopeID, tabID, seconds) {
+  const timeoutMs = Math.min(Math.max(Number(seconds) || 0, 0), 30) * 1000;
+  await ensureAttached(tabID);
+  await cdpSend(tabID, "Page.enable");
+  const loaded = await waitForLoad(tabID, timeoutMs);
+  return { tab_ref: refForTab(scopeID, tabID), loaded };
 }
 
 const screenshotChunkSize = 512 * 1024;

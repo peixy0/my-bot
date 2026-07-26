@@ -73,6 +73,7 @@ type brokerRequest struct {
 }
 
 type brokerResponse struct {
+	Type    string `json:"type,omitempty"`
 	ID      string `json:"id"`
 	Data    string `json:"data"`
 	Error   string `json:"error"`
@@ -193,6 +194,11 @@ func (b *ExtensionBroker) handleWebSocket(w http.ResponseWriter, r *http.Request
 		var frame brokerResponse
 		if err := conn.ReadJSON(&frame); err != nil {
 			return
+		}
+		// Application-layer heartbeat: respond to ping with pong.
+		if frame.Type == "ping" {
+			_ = conn.WriteJSON(map[string]string{"type": "pong"})
+			continue
 		}
 		if frame.ID == "" {
 			continue
