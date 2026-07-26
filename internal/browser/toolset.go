@@ -103,18 +103,6 @@ func (c *ExtensionClient) Register(registry *tools.Registry) {
 	}, c.handleCloseTab)
 
 	registry.Register(tools.ToolSchema{
-		Name:        "browser_activate_tab",
-		Description: "Activate (bring to foreground) an agent-owned browser tab. Useful before typing into inputs since browsers suppress keyboard events on background tabs.",
-		ParameterDesc: map[string]any{
-			"type":     "object",
-			"required": []string{"tab"},
-			"properties": map[string]any{
-				"tab": map[string]any{"type": "string", "description": "A tab returned by browser_tabs."},
-			},
-		},
-	}, c.handleActivateTab)
-
-	registry.Register(tools.ToolSchema{
 		Name:        "browser_navigate",
 		Description: "Navigate a tab to a URL. After navigation call browser_snapshot to confirm the actual URL — SPAs may intercept or redirect, so the final URL can differ from the requested one.",
 		ParameterDesc: map[string]any{
@@ -129,7 +117,7 @@ func (c *ExtensionClient) Register(registry *tools.Registry) {
 
 	registry.Register(tools.ToolSchema{
 		Name:        "browser_snapshot",
-		Description: "Read visible page text and interactive elements from a tab. Use returned element refs for browser_click, browser_type, and browser_select_option.\n\nIMPORTANT:\n• Element refs are RESET on every snapshot — always snapshot fresh before interacting.\n• SPAs may not expose all content until scrolled. Call browser_scroll first to trigger lazy loading.\n• Hidden elements (zero size, display:none, visibility:hidden, type=hidden) are excluded.\n• At most 300 interactive elements are returned per snapshot.",
+		Description: "Read visible page text and interactive elements from a tab. Use returned element refs for browser_click and browser_set_value.\n\nIMPORTANT:\n• Element refs are RESET on every snapshot — always snapshot fresh before interacting.\n• SPAs may not expose all content until scrolled. Call browser_scroll first to trigger lazy loading.\n• Hidden elements (zero size, display:none, visibility:hidden, type=hidden) are excluded.\n• At most 300 interactive elements are returned per snapshot.",
 		ParameterDesc: map[string]any{
 			"type":     "object",
 			"required": []string{"tab"},
@@ -153,18 +141,18 @@ func (c *ExtensionClient) Register(registry *tools.Registry) {
 	}, c.handleClick)
 
 	registry.Register(tools.ToolSchema{
-		Name:        "browser_type",
-		Description: "Clear and replace the value of an input/textarea element. Uses Ctrl+A → Backspace → insert text character by character via CDP Input.dispatchKeyEvent. Activates the tab first since browsers suppress keyboard events on background tabs.",
+		Name:        "browser_set_value",
+		Description: "Set the value of an input, textarea, select, or contenteditable element. Uses the native value setter + dispatch input/change events so React/Vue controlled components pick up the change. Activates the tab internally.",
 		ParameterDesc: map[string]any{
 			"type":     "object",
-			"required": []string{"tab", "element_ref", "text"},
+			"required": []string{"tab", "element_ref", "value"},
 			"properties": map[string]any{
 				"tab":         map[string]any{"type": "string", "description": "A tab returned by browser_tabs."},
 				"element_ref": map[string]any{"type": "string", "description": "Element ref returned by browser_snapshot."},
-				"text":        map[string]any{"type": "string", "description": "Text to enter (max 64KB)."},
+				"value":       map[string]any{"type": "string", "description": "Value to set (max 64KB)."},
 			},
 		},
-	}, c.handleType)
+	}, c.handleSetValue)
 
 	registry.Register(tools.ToolSchema{
 		Name:        "browser_press_key",
@@ -178,20 +166,6 @@ func (c *ExtensionClient) Register(registry *tools.Registry) {
 			},
 		},
 	}, c.handlePressKey)
-
-	registry.Register(tools.ToolSchema{
-		Name:        "browser_select_option",
-		Description: "Select an option in a select element by value. Uses Runtime.callFunctionOn to set value and dispatch input/change events.",
-		ParameterDesc: map[string]any{
-			"type":     "object",
-			"required": []string{"tab", "element_ref", "value"},
-			"properties": map[string]any{
-				"tab":         map[string]any{"type": "string", "description": "A tab returned by browser_tabs."},
-				"element_ref": map[string]any{"type": "string", "description": "Element ref returned by browser_snapshot."},
-				"value":       map[string]any{"type": "string", "description": "Option value (the 'value' attribute, not display text)."},
-			},
-		},
-	}, c.handleSelectOption)
 
 	registry.Register(tools.ToolSchema{
 		Name:        "browser_wait",
@@ -336,23 +310,6 @@ func (c *ExtensionClient) handleCloseTab(ctx context.Context, args []byte) (tool
 	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
-func (c *ExtensionClient) handleActivateTab(ctx context.Context, args []byte) (tools.ToolResult, error) {
-	var params struct {
-		Tab string `json:"tab"`
-	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return tools.ToolResult{}, fmt.Errorf("browser_activate_tab: parse args: %w", err)
-	}
-	if params.Tab == "" {
-		return tools.ErrorResult(fmt.Errorf("browser_activate_tab: tab is required")), nil
-	}
-	result, err := c.call(ctx, "activate_tab", params)
-	if err != nil {
-		return tools.ErrorResult(fmt.Errorf("browser_activate_tab: %w", err)), nil
-	}
-	return tools.TextResult(c.truncate(ctx, result)), nil
-}
-
 func (c *ExtensionClient) handleNavigate(ctx context.Context, args []byte) (tools.ToolResult, error) {
 	var params struct {
 		Tab string `json:"tab"`
@@ -412,27 +369,27 @@ func (c *ExtensionClient) handleClick(ctx context.Context, args []byte) (tools.T
 	return tools.TextResult(c.truncate(ctx, result)), nil
 }
 
-func (c *ExtensionClient) handleType(ctx context.Context, args []byte) (tools.ToolResult, error) {
+func (c *ExtensionClient) handleSetValue(ctx context.Context, args []byte) (tools.ToolResult, error) {
 	var params struct {
 		Tab        string `json:"tab"`
 		ElementRef string `json:"element_ref"`
-		Text       string `json:"text"`
+		Value      string `json:"value"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
-		return tools.ToolResult{}, fmt.Errorf("browser_type: parse args: %w", err)
+		return tools.ToolResult{}, fmt.Errorf("browser_set_value: parse args: %w", err)
 	}
 	if params.Tab == "" {
-		return tools.ErrorResult(fmt.Errorf("browser_type: tab is required")), nil
+		return tools.ErrorResult(fmt.Errorf("browser_set_value: tab is required")), nil
 	}
 	if params.ElementRef == "" {
-		return tools.ErrorResult(fmt.Errorf("browser_type: element_ref is required")), nil
+		return tools.ErrorResult(fmt.Errorf("browser_set_value: element_ref is required")), nil
 	}
-	if params.Text == "" {
-		return tools.ErrorResult(fmt.Errorf("browser_type: text is required")), nil
+	if params.Value == "" {
+		return tools.ErrorResult(fmt.Errorf("browser_set_value: value is required")), nil
 	}
-	result, err := c.call(ctx, "type", params)
+	result, err := c.call(ctx, "set_value", params)
 	if err != nil {
-		return tools.ErrorResult(fmt.Errorf("browser_type: %w", err)), nil
+		return tools.ErrorResult(fmt.Errorf("browser_set_value: %w", err)), nil
 	}
 	return tools.TextResult(c.truncate(ctx, result)), nil
 }
@@ -454,31 +411,6 @@ func (c *ExtensionClient) handlePressKey(ctx context.Context, args []byte) (tool
 	result, err := c.call(ctx, "press_key", params)
 	if err != nil {
 		return tools.ErrorResult(fmt.Errorf("browser_press_key: %w", err)), nil
-	}
-	return tools.TextResult(c.truncate(ctx, result)), nil
-}
-
-func (c *ExtensionClient) handleSelectOption(ctx context.Context, args []byte) (tools.ToolResult, error) {
-	var params struct {
-		Tab        string `json:"tab"`
-		ElementRef string `json:"element_ref"`
-		Value      string `json:"value"`
-	}
-	if err := json.Unmarshal(args, &params); err != nil {
-		return tools.ToolResult{}, fmt.Errorf("browser_select_option: parse args: %w", err)
-	}
-	if params.Tab == "" {
-		return tools.ErrorResult(fmt.Errorf("browser_select_option: tab is required")), nil
-	}
-	if params.ElementRef == "" {
-		return tools.ErrorResult(fmt.Errorf("browser_select_option: element_ref is required")), nil
-	}
-	if params.Value == "" {
-		return tools.ErrorResult(fmt.Errorf("browser_select_option: value is required")), nil
-	}
-	result, err := c.call(ctx, "select_option", params)
-	if err != nil {
-		return tools.ErrorResult(fmt.Errorf("browser_select_option: %w", err)), nil
 	}
 	return tools.TextResult(c.truncate(ctx, result)), nil
 }

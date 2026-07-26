@@ -292,20 +292,16 @@ async function execute(scopeID, action, params, requestID) {
       return sendResult(requestID, await newTab(scopeID, params.url));
     case "close_tab":
       return sendResult(requestID, await closeTab(scopeID, params.tab_ref));
-    case "activate_tab":
-      return sendResult(requestID, await activateTab(scopeID, params.tab_ref));
     case "navigate":
       return sendResult(requestID, await navigate(scopeID, params.tab_ref, params.url));
     case "snapshot":
       return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpSnapshot(scopeID, tab.id)));
     case "click":
       return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpClick(scopeID, tab.id, params.element_ref)));
-    case "type":
-      return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpType(scopeID, tab.id, params.element_ref, params.text)));
+    case "set_value":
+      return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpSetValue(scopeID, tab.id, params.element_ref, params.value)));
     case "press_key":
       return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpPressKey(tab.id, params.key)));
-    case "select_option":
-      return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpSelectOption(scopeID, tab.id, params.element_ref, params.value)));
     case "wait":
       return sendResult(requestID, await withTab(scopeID, params.tab_ref, (tab) => cdpWait(scopeID, tab.id, params.seconds)));
     case "evaluate":
@@ -358,7 +354,7 @@ async function newTab(scopeID, url) {
   }
   const tab = await chrome.tabs.create(options);
   const ref = await assignTab(scopeID, tab.id);
-  return { tab_ref: ref, title: tab.title || "", url: tab.url || "" };
+  return { tab_ref: ref };
 }
 
 async function closeTab(scopeID, tabRef) {
@@ -584,39 +580,37 @@ const snapshotSelector = "a,button,input,textarea,select,[role=button],[role=lin
 async function cdpSnapshot(scopeID, tabID) {
   await ensureAttached(tabID);
 
-  // Get document root nodeId (depth=0: just the root, no tree walk)
-  const doc = await cdpSend(tabID, "DOM.getDocument", { depth: 0 });
-  const rootNodeId = doc.root.nodeId;
-
-  // Get live nodeIds via CDP querySelectorAll — same CSS selector,
-  // same document order as the Runtime.evaluate below, so pairing by
-  // index is guaranteed correct.
-  const { nodeIds } = await cdpSend(tabID, "DOM.querySelectorAll", {
-    nodeId: rootNodeId,
-    selector: snapshotSelector
-  });
-
-  // Get element text/attributes/visibility via page-context querySelectorAll
+  // Single Runtime.evaluate call: collects element metadata AND stores
+  // ref → element mappings in window.__agentSnapshotRefs so that
+  // subsequent set_value / click calls can access elements directly
+  // from the JS context without needing CDP DOM domain (resolveNode,
+  // querySelectorAll, etc).
   const { result: pageResult } = await cdpSend(tabID, "Runtime.evaluate", {
     expression: `(function() {
-      const selector = "${snapshotSelector}";
+      const selector = ${JSON.stringify(snapshotSelector)};
       const els = document.querySelectorAll(selector);
+      const refs = {};
       const results = [];
+      let ref = 0;
       for (const el of els) {
-        if (results.length >= 300) break;
+        if (ref >= 300) break;
         const rect = el.getBoundingClientRect();
         const style = getComputedStyle(el);
         const visible = rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
         const hiddenType = el.tagName === "INPUT" && (el.type === "hidden" || el.type === "file");
+        if (!visible || hiddenType) continue;
+        ref++;
+        refs[String(ref)] = el;
         results.push({
+          ref: String(ref),
           tag: el.tagName.toLowerCase(),
           text: (el.innerText || el.value || el.getAttribute("aria-label") || "").trim().slice(0, 300),
           type: el.getAttribute("type") || "",
           name: el.getAttribute("name") || "",
-          placeholder: el.getAttribute("placeholder") || "",
-          visible: visible && !hiddenType
+          placeholder: el.getAttribute("placeholder") || ""
         });
       }
+      window.__agentSnapshotRefs = refs;
       return JSON.stringify({
         title: document.title,
         url: location.href,
@@ -629,146 +623,102 @@ async function cdpSnapshot(scopeID, tabID) {
   });
 
   const pageInfo = JSON.parse(pageResult?.value || "{}");
-  const scope = scopes.get(scopeID);
-  if (!scope) throw new Error("browser scope has no tabs");
-
-  scope.elementRefs = new Map();
-  scope.nextElementRef = 0;
-
-  const elements = [];
-  const count = Math.min(nodeIds.length, (pageInfo.elements || []).length);
-  for (let i = 0; i < count; i++) {
-    const elInfo = pageInfo.elements[i];
-    if (!elInfo.visible) continue;
-    const ref = ++scope.nextElementRef;
-    scope.elementRefs.set(ref, nodeIds[i]);
-    elements.push({
-      ref: String(ref),
-      tag: elInfo.tag || "",
-      text: elInfo.text || "",
-      type: elInfo.type || "",
-      name: elInfo.name || ""
-    });
-  }
+  if (!pageInfo.elements) throw new Error("snapshot failed to read page");
 
   return {
     title: pageInfo.title || "",
     url: pageInfo.url || "",
     text: pageInfo.text || "",
-    elements
+    elements: pageInfo.elements
   };
 }
 
 
 
-function resolveNodeId(scopeID, elementRef) {
-  const scope = scopes.get(scopeID);
-  if (!scope || !scope.elementRefs) {
-    throw new Error("element_ref is stale; call browser_snapshot again");
-  }
-  const ref = Number(elementRef);
-  if (!Number.isInteger(ref)) {
-    throw new Error("element_ref is invalid");
-  }
-  const nodeId = scope.elementRefs.get(ref);
-  if (!nodeId) {
-    throw new Error("element_ref is stale; call browser_snapshot again");
-  }
-  return nodeId;
-}
-
 async function cdpClick(scopeID, tabID, elementRef) {
   await ensureAttached(tabID);
   await chrome.tabs.update(tabID, { active: true }).catch(() => {});
-  const nodeId = resolveNodeId(scopeID, elementRef);
-  await cdpSend(tabID, "DOM.scrollIntoViewIfNeeded", { nodeId });
-  const { quads } = await cdpSend(tabID, "DOM.getContentQuads", { nodeId });
-  if (!quads || quads.length === 0) {
-    throw new Error("element has no visible quads");
+  const { result } = await cdpSend(tabID, "Runtime.evaluate", {
+    expression: `(() => {
+      const el = window.__agentSnapshotRefs?.[${JSON.stringify(elementRef)}];
+      if (!el) return JSON.stringify({ error: "stale" });
+      if (!document.body.contains(el)) return JSON.stringify({ error: "stale" });
+      el.scrollIntoView({ block: "center", behavior: "instant" });
+      const rect = el.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      return JSON.stringify({ x, y, w: rect.width, h: rect.height });
+    })()`,
+    returnByValue: true,
+    awaitPromise: true
+  });
+  const info = JSON.parse(result?.value || "{}");
+  if (info.error === "stale") {
+    throw new Error("element_ref is stale; call browser_snapshot again");
   }
-  const content = quads[0];
-  const xs = content.filter((_, i) => i % 2 === 0);
-  const ys = content.filter((_, i) => i % 2 === 1);
-  const x = (Math.min(...xs) + Math.max(...xs)) / 2;
-  const y = (Math.min(...ys) + Math.max(...ys)) / 2;
+  const { x, y } = info;
   await cdpSend(tabID, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
   await cdpSend(tabID, "Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
   await cdpSend(tabID, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
   return { clicked: true };
 }
 
-async function cdpType(scopeID, tabID, elementRef, text) {
-  if (typeof text !== "string" || text.length > maxTextLength) {
-    throw new Error("text is too long");
+async function cdpSetValue(scopeID, tabID, elementRef, value) {
+  if (typeof value !== "string" || value.length > maxTextLength) {
+    throw new Error("value is too long");
   }
   await ensureAttached(tabID);
-  const nodeId = resolveNodeId(scopeID, elementRef);
-  await cdpSend(tabID, "DOM.scrollIntoViewIfNeeded", { nodeId });
-  await cdpSend(tabID, "DOM.focus", { nodeId });
-  // Activate tab so the page processes keyboard events (Chrome
-  // suppresses input on background tabs).
   await chrome.tabs.update(tabID, { active: true }).catch(() => {});
-
-  const { object } = await cdpSend(tabID, "DOM.resolveNode", { nodeId });
-
-  // For <input> / <textarea>: use the native value setter so React / Vue
-  // controlled components pick up the change, then dispatch input + change.
-  // For contenteditable: fall back to Input.insertText (clears first via
-  // selectAll + delete, then inserts).
-  const isEditable = await cdpSend(tabID, "Runtime.callFunctionOn", {
-    objectId: object.objectId,
-    functionDeclaration: "(function() { return this.tagName === 'INPUT' || this.tagName === 'TEXTAREA' || this.isContentEditable; })",
-    returnByValue: true
+  const { result } = await cdpSend(tabID, "Runtime.evaluate", {
+    expression: `(() => {
+      const el = window.__agentSnapshotRefs?.[${JSON.stringify(elementRef)}];
+      if (!el || !document.body.contains(el)) return JSON.stringify({ error: "stale" });
+      el.scrollIntoView({ block: "center", behavior: "instant" });
+      el.focus();
+      const tag = el.tagName;
+      const val = ${JSON.stringify(value)};
+      if (tag === "INPUT" || tag === "TEXTAREA") {
+        const proto = tag === "INPUT" ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+        if (setter) { setter.call(el, val); } else { el.value = val; }
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return JSON.stringify({ set: true, tag });
+      }
+      if (tag === "SELECT") {
+        el.value = val;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return JSON.stringify({ set: true, tag });
+      }
+      if (el.isContentEditable) {
+        el.innerHTML = val;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        return JSON.stringify({ set: true, tag: "contenteditable" });
+      }
+      return JSON.stringify({ error: "element is not settable", tag });
+    })()`,
+    returnByValue: true,
+    awaitPromise: true
   });
-
-  if (isEditable.result?.value) {
-    // input / textarea — set value via native descriptor, dispatch events
-    const tag = await cdpSend(tabID, "Runtime.callFunctionOn", {
-      objectId: object.objectId,
-      functionDeclaration: "(function() { return this.tagName; })",
-      returnByValue: true
-    });
-
-    if (tag.result?.value === "INPUT" || tag.result?.value === "TEXTAREA") {
-      await cdpSend(tabID, "Runtime.callFunctionOn", {
-        objectId: object.objectId,
-        functionDeclaration: "(function(text) { var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set || Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set; if (setter) { setter.call(this, text); } else { this.value = text; } this.dispatchEvent(new Event('input', {bubbles:true})); this.dispatchEvent(new Event('change', {bubbles:true})); })",
-        arguments: [{ value: text }],
-        returnByValue: true
-      });
-      return { typed: true };
-    }
+  const info = JSON.parse(result?.value || "{}");
+  if (info.error === "stale") {
+    throw new Error("element_ref is stale; call browser_snapshot again");
   }
-
-  // contenteditable or unknown — use Input.insertText after clearing
-  // Focus the element, select all, delete, then insert text
-  await cdpSend(tabID, "Input.dispatchKeyEvent", { type: "keyDown", key: "Control" });
-  await cdpSend(tabID, "Input.dispatchKeyEvent", { type: "keyDown", key: "a", code: "KeyA" });
-  await cdpSend(tabID, "Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA" });
-  await cdpSend(tabID, "Input.dispatchKeyEvent", { type: "keyUp", key: "Control" });
-  await cdpSend(tabID, "Input.dispatchKeyEvent", { type: "keyDown", key: "Backspace", code: "Backspace" });
-  await cdpSend(tabID, "Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace" });
-  // Input.insertText handles large text; chunk to stay safe
-  const chunkSize = 4096;
-  for (let i = 0; i < text.length; i += chunkSize) {
-    await cdpSend(tabID, "Input.insertText", { text: text.slice(i, i + chunkSize) });
+  if (info.error) {
+    throw new Error(info.error);
   }
-  return { typed: true };
+  return { set: true };
 }
 
-async function cdpSelectOption(scopeID, tabID, elementRef, value) {
-  await ensureAttached(tabID);
-  await chrome.tabs.update(tabID, { active: true }).catch(() => {});
-  const nodeId = resolveNodeId(scopeID, elementRef);
-  const { object } = await cdpSend(tabID, "DOM.resolveNode", { nodeId });
-  await cdpSend(tabID, "Runtime.callFunctionOn", {
-    objectId: object.objectId,
-    functionDeclaration: "(function(value) { this.value = value; this.dispatchEvent(new Event('input', {bubbles:true})); this.dispatchEvent(new Event('change', {bubbles:true})); })",
-    arguments: [{ value }],
-    returnByValue: true
-  });
-  return { value };
-}
+// Key code map for special keys that JS frameworks (Vue @keydown.enter,
+// React onKeyDown) check via keyCode/which.
+const keyCodes = {
+  Enter: 13, Tab: 9, Escape: 27, Backspace: 8, Delete: 46,
+  ArrowDown: 40, ArrowUp: 38, ArrowLeft: 37, ArrowRight: 39,
+  PageDown: 34, PageUp: 33, Home: 36, End: 35,
+  Space: 32, Control: 17, Shift: 16, Alt: 18, Meta: 91,
+};
 
 async function cdpPressKey(tabID, key) {
   if (typeof key !== "string" || key.length > 64) {
@@ -776,8 +726,18 @@ async function cdpPressKey(tabID, key) {
   }
   await ensureAttached(tabID);
   await chrome.tabs.update(tabID, { active: true }).catch(() => {});
-  await cdpSend(tabID, "Input.dispatchKeyEvent", { type: "keyDown", key, code: key });
-  await cdpSend(tabID, "Input.dispatchKeyEvent", { type: "keyUp", key, code: key });
+  const keyCode = keyCodes[key] ?? key.charCodeAt(0);
+  const code = key.length === 1 ? "Key" + key.toUpperCase() : key;
+  await cdpSend(tabID, "Runtime.evaluate", {
+    expression: `(() => {
+      const target = document.activeElement || document.body;
+      const opts = { key: ${JSON.stringify(key)}, code: ${JSON.stringify(code)}, keyCode: ${keyCode}, which: ${keyCode}, bubbles: true, cancelable: true };
+      target.dispatchEvent(new KeyboardEvent("keydown", opts));
+      target.dispatchEvent(new KeyboardEvent("keyup", opts));
+    })()`,
+    returnByValue: true,
+    awaitPromise: true
+  });
   return { key };
 }
 
