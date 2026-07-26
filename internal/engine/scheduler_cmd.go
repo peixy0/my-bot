@@ -100,7 +100,7 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 		return nil
 	case "abort":
 		if !s.getOrCreateSession(ctx, e.ChatID).tryAbort() {
-			e.Sender.Send(ctx, "no active completion")
+			e.Sender.Send(ctx, "no active conversation")
 		}
 	case "cron":
 		s.handleCronCommand(ctx, parts[1:], e)

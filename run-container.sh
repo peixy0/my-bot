@@ -49,6 +49,7 @@ $CONTAINER_RUNTIME run -d \
     --name "$CONTAINER_NAME" \
     -v "${WORKSPACE_DIR}:/workspace" \
     --network=host \
+    --privileged \
     -i \
     "$IMAGE_NAME"
 
