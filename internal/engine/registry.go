@@ -33,9 +33,11 @@ func NewSubagentRegistry(
 	skills *tools.SkillLoader,
 	cfg *config.Config,
 	cmdTools *tools.CommandToolset,
+	browserClient browser.Client,
 ) *tools.Registry {
 	reg := tools.NewRegistry()
 	registerBaseTools(reg, rt, skills, cfg, cmdTools)
+	browserClient.Register(reg)
 	return reg
 }
 

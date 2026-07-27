@@ -455,8 +455,10 @@ func TestSubagentRegistry_HasNoMetaTools(t *testing.T) {
 		_ = manager.Shutdown(ctx)
 	}()
 	cmdTools := tools.NewCommandToolset(rt, manager)
+	browserBroker := browser.NewNoopBroker()
+	browserClient := browserBroker.NewClient()
 
-	reg := NewSubagentRegistry(rt, skills, cfg, cmdTools)
+	reg := NewSubagentRegistry(rt, skills, cfg, cmdTools, browserClient)
 
 	if _, ok := reg.Handler("agent"); ok {
 		t.Error("subagent registry should not expose 'agent' meta-tool")

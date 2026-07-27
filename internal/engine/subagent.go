@@ -70,8 +70,7 @@ func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task 
 					slog.Error("shutdown subagent tasks", "task_id", info.TaskID, "err", err)
 				}
 			}()
-			reg := NewSubagentRegistry(r.rt, r.skills, &cfg, cmdTools)
-			browserClient.Register(reg)
+			reg := NewSubagentRegistry(r.rt, r.skills, &cfg, cmdTools, browserClient)
 			orch := NewSubagentOrchestrator(reg, emit, input)
 			loop := NewAgentLoop(&cfg, r.agent)
 			err := loop.Run(agentCtx, nil, reg, orch, llm.NewSubagentPrompt(r.skills, r.rt, systemPrompt), task)
