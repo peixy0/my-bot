@@ -126,7 +126,13 @@ func main() {
 	}
 
 	cronLoader := engine.NewCronLoader(cfg.Workspace.CronsDir)
-	scheduler := engine.NewScheduler(cfg, agent, rt, skills, browserBroker, mainInbox, cronLoader)
+	scheduler := engine.NewScheduler(engine.SessionEnv{
+		Cfg:           cfg,
+		Rt:            rt,
+		Agent:         agent,
+		Skills:        skills,
+		BrowserBroker: browserBroker,
+	}, mainInbox, cronLoader)
 
 	slog.Info("bot started")
 	if err := scheduler.Run(ctx); errors.Is(err, engine.ErrReboot) {

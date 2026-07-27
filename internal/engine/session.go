@@ -15,34 +15,35 @@ import (
 	"my-bot/internal/tools"
 )
 
+// SessionEnv bundles the core dependencies shared across session-level constructors.
+type SessionEnv struct {
+	Cfg           *config.Config
+	Rt            runtime.Runtime
+	Agent         *Agent
+	Skills        *tools.SkillLoader
+	BrowserBroker browser.Broker
+}
+
 type sessionTools struct {
-	rt            runtime.Runtime
-	skills        *tools.SkillLoader
-	cfg           *config.Config
-	agent         *Agent
+	env           SessionEnv
 	taskManager   *tasks.Manager
 	cmdTools      *tools.CommandToolset
-	browserBroker browser.Broker
 	browserClient browser.Client
 }
 
-func newSessionTools(rt runtime.Runtime, skills *tools.SkillLoader, cfg *config.Config, agent *Agent, browserBroker browser.Broker) *sessionTools {
-	taskManager := tasks.NewManager(cfg.Tool.MaxOutputChars)
-	browserClient := browserBroker.NewClient()
+func newSessionTools(env SessionEnv) *sessionTools {
+	taskManager := tasks.NewManager(env.Cfg.Tool.MaxOutputChars)
+	browserClient := env.BrowserBroker.NewClient()
 	return &sessionTools{
-		rt:            rt,
-		skills:        skills,
-		cfg:           cfg,
-		agent:         agent,
+		env:           env,
 		taskManager:   taskManager,
-		cmdTools:      tools.NewCommandToolset(rt, taskManager),
-		browserBroker: browserBroker,
+		cmdTools:      tools.NewCommandToolset(env.Rt, taskManager),
 		browserClient: browserClient,
 	}
 }
 
 func (t *sessionTools) BuildRegistry(sender events.Outbound) *tools.Registry {
-	return NewSessionRegistry(t.rt, t.skills, t.cfg, t.agent, t.taskManager, t.cmdTools, t.browserBroker, t.browserClient, sender)
+	return NewSessionRegistry(t.env, t.taskManager, t.cmdTools, t.browserClient, sender)
 }
 
 func (t *sessionTools) Shutdown(ctx context.Context) error {
@@ -64,15 +65,11 @@ type chatSession struct {
 func newChatSession(
 	parent context.Context,
 	chatID string,
-	cfg *config.Config,
-	agent *Agent,
-	rt runtime.Runtime,
-	skills *tools.SkillLoader,
+	env SessionEnv,
 	cronLoader *CronLoader,
-	browserBroker browser.Broker,
 ) *chatSession {
-	tools := newSessionTools(rt, skills, cfg, agent, browserBroker)
-	worker := newConversationWorker(chatID, cfg, agent, rt, skills, tools)
+	tools := newSessionTools(env)
+	worker := newConversationWorker(chatID, env, tools)
 	workerCtx, cancel := context.WithCancel(parent)
 	session := &chatSession{
 		chatID: chatID,

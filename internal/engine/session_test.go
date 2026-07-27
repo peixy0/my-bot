@@ -16,12 +16,14 @@ func TestNewChatSessionOwnsWorkerResources(t *testing.T) {
 	session := newChatSession(
 		ctx,
 		"chat-1",
-		&config.Config{Tool: config.ToolConfig{MaxOutputChars: 1000}},
-		NewAgent(nil, nil),
+		SessionEnv{
+			Cfg:           &config.Config{Tool: config.ToolConfig{MaxOutputChars: 1000}},
+			Rt:            nil,
+			Agent:         NewAgent(nil, nil),
+			Skills:        nil,
+			BrowserBroker: browser.NewNoopBroker(),
+		},
 		nil,
-		nil,
-		nil,
-		browser.NewNoopBroker(),
 	)
 	defer func() {
 		session.close()
@@ -50,15 +52,17 @@ func TestChatSessionSnapshotsAndRestoresConversation(t *testing.T) {
 	session := newChatSession(
 		ctx,
 		"chat-1",
-		&config.Config{
-			Workspace: config.WorkspaceConfig{SessionDir: sessionDir},
-			Tool:      config.ToolConfig{MaxOutputChars: 1000},
+		SessionEnv{
+			Cfg: &config.Config{
+				Workspace: config.WorkspaceConfig{SessionDir: sessionDir},
+				Tool:      config.ToolConfig{MaxOutputChars: 1000},
+			},
+			Rt:            nil,
+			Agent:         NewAgent(nil, nil),
+			Skills:        nil,
+			BrowserBroker: browser.NewNoopBroker(),
 		},
-		NewAgent(nil, nil),
 		nil,
-		nil,
-		nil,
-		browser.NewNoopBroker(),
 	)
 	defer func() {
 		session.close()

@@ -39,7 +39,7 @@ func (o *captureOutbound) StartThinking(context.Context) {}
 func (o *captureOutbound) EndThinking(context.Context)   {}
 
 func newConfigTestWorker(cfg *config.Config) *ConversationWorker {
-	return newConversationWorker("chat-1", cfg, NewAgent(nil, nil), nil, nil, nil)
+	return newConversationWorker("chat-1", SessionEnv{Cfg: cfg, Agent: NewAgent(nil, nil)}, nil)
 }
 
 func newStubSession(worker *ConversationWorker) *chatSession {
@@ -47,7 +47,7 @@ func newStubSession(worker *ConversationWorker) *chatSession {
 }
 
 func TestSchedulerHeartbeatInterval(t *testing.T) {
-	s := &Scheduler{cfg: &config.Config{Heartbeat: config.HeartbeatConfig{IntervalSeconds: 1800}}}
+	s := &Scheduler{env: SessionEnv{Cfg: &config.Config{Heartbeat: config.HeartbeatConfig{IntervalSeconds: 1800}}}}
 	out := &captureOutbound{}
 
 	interval, ok := s.handleHeartbeatInterval(context.Background(), nil, out)
@@ -373,7 +373,7 @@ func TestSchedulerModelsCommandListsRemoteModels(t *testing.T) {
 
 	out := &captureOutbound{}
 	s := &Scheduler{
-		agent:    NewAgent(llm.NewOpenAIProvider(server.URL, "", server.Client()), nil),
+		env:      SessionEnv{Agent: NewAgent(llm.NewOpenAIProvider(server.URL, "", server.Client()), nil)},
 		sessions: map[string]*chatSession{},
 	}
 
@@ -398,7 +398,7 @@ func TestSchedulerModelsCommandReportsProviderFailure(t *testing.T) {
 
 	out := &captureOutbound{}
 	s := &Scheduler{
-		agent:    NewAgent(llm.NewOpenAIProvider(server.URL, "", server.Client()), nil),
+		env:      SessionEnv{Agent: NewAgent(llm.NewOpenAIProvider(server.URL, "", server.Client()), nil)},
 		sessions: map[string]*chatSession{},
 	}
 
@@ -421,14 +421,16 @@ func TestSchedulerRunReturnsRebootAfterWritingRestoreMarker(t *testing.T) {
 	out := &captureOutbound{}
 	in := inbox.NewMemory[events.AgentEvent](1)
 	s := NewScheduler(
-		&config.Config{
-			Workspace: config.WorkspaceConfig{SessionDir: sessionDir},
-			Tool:      config.ToolConfig{MaxOutputChars: 1000},
+		SessionEnv{
+			Cfg: &config.Config{
+				Workspace: config.WorkspaceConfig{SessionDir: sessionDir},
+				Tool:      config.ToolConfig{MaxOutputChars: 1000},
+			},
+			Rt:            nil,
+			Agent:         NewAgent(nil, nil),
+			Skills:        nil,
+			BrowserBroker: browser.NewNoopBroker(),
 		},
-		NewAgent(nil, nil),
-		nil,
-		nil,
-		browser.NewNoopBroker(),
 		in,
 		nil,
 	)
@@ -464,7 +466,7 @@ func TestSchedulerRestoreSessionsRestoresAndDeletesMarker(t *testing.T) {
 		Workspace: config.WorkspaceConfig{SessionDir: sessionDir},
 		Tool:      config.ToolConfig{MaxOutputChars: 1000},
 	}
-	s := NewScheduler(cfg, NewAgent(nil, nil), nil, nil, browser.NewNoopBroker(), inbox.NewMemory[events.AgentEvent](1), nil)
+	s := NewScheduler(SessionEnv{Cfg: cfg, Rt: nil, Agent: NewAgent(nil, nil), Skills: nil, BrowserBroker: browser.NewNoopBroker()}, inbox.NewMemory[events.AgentEvent](1), nil)
 	session := s.getOrCreateSession(ctx, "chat-1")
 	session.worker.loop.conv = &llm.Conversation{
 		Messages:    []llm.ChatMessage{{Role: "user", Content: "restore me"}},
@@ -476,7 +478,7 @@ func TestSchedulerRestoreSessionsRestoresAndDeletesMarker(t *testing.T) {
 	}
 	s.closeAllSessions()
 
-	restored := NewScheduler(cfg, NewAgent(nil, nil), nil, nil, browser.NewNoopBroker(), inbox.NewMemory[events.AgentEvent](1), nil)
+	restored := NewScheduler(SessionEnv{Cfg: cfg, Rt: nil, Agent: NewAgent(nil, nil), Skills: nil, BrowserBroker: browser.NewNoopBroker()}, inbox.NewMemory[events.AgentEvent](1), nil)
 	restored.maybeRestoreSessions(ctx)
 	defer restored.closeAllSessions()
 
@@ -496,14 +498,16 @@ func TestSchedulerRunKeepsRestoreMarkerAfterRestoreFailure(t *testing.T) {
 		t.Fatalf("write restore marker: %v", err)
 	}
 	s := NewScheduler(
-		&config.Config{
-			Workspace: config.WorkspaceConfig{SessionDir: sessionDir},
-			Tool:      config.ToolConfig{MaxOutputChars: 1000},
+		SessionEnv{
+			Cfg: &config.Config{
+				Workspace: config.WorkspaceConfig{SessionDir: sessionDir},
+				Tool:      config.ToolConfig{MaxOutputChars: 1000},
+			},
+			Rt:            nil,
+			Agent:         NewAgent(nil, nil),
+			Skills:        nil,
+			BrowserBroker: browser.NewNoopBroker(),
 		},
-		NewAgent(nil, nil),
-		nil,
-		nil,
-		browser.NewNoopBroker(),
 		inbox.NewMemory[events.AgentEvent](1),
 		nil,
 	)

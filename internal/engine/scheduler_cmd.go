@@ -120,7 +120,7 @@ func (s *Scheduler) handleConfigCommand(ctx context.Context, parts []string, e e
 }
 
 func (s *Scheduler) handleModelsCommand(ctx context.Context, e events.TextInputEvent) {
-	models, err := s.agent.Models(ctx)
+	models, err := s.env.Agent.Models(ctx)
 	if err != nil {
 		e.Sender.Send(ctx, fmt.Sprintf("error listing models: %v", err))
 		return
@@ -164,7 +164,7 @@ func (s *Scheduler) handleRebootCommand(ctx context.Context, e events.TextInputE
 
 func (s *Scheduler) handleHeartbeatInterval(ctx context.Context, args []string, sender events.Outbound) (int, bool) {
 	if len(args) == 0 {
-		return s.cfg.Heartbeat.IntervalSeconds, true
+		return s.env.Cfg.Heartbeat.IntervalSeconds, true
 	}
 	if len(args) > 1 {
 		sender.Send(ctx, "usage: /heartbeat [interval-seconds]")

@@ -9,44 +9,28 @@ import (
 	"os"
 	"path/filepath"
 
-	"my-bot/internal/browser"
-	"my-bot/internal/config"
 	"my-bot/internal/events"
 	"my-bot/internal/inbox"
-	"my-bot/internal/runtime"
-	"my-bot/internal/tools"
 )
 
 type Scheduler struct {
-	cfg           *config.Config
-	agent         *Agent
-	rt            runtime.Runtime
-	skills        *tools.SkillLoader
-	browserBroker browser.Broker
-	inbox         inbox.Inbox[events.AgentEvent]
-	cronLoader    *CronLoader
+	env        SessionEnv
+	inbox      inbox.Inbox[events.AgentEvent]
+	cronLoader *CronLoader
 
 	sessions map[string]*chatSession
 }
 
 func NewScheduler(
-	cfg *config.Config,
-	agent *Agent,
-	rt runtime.Runtime,
-	skills *tools.SkillLoader,
-	browserBroker browser.Broker,
+	env SessionEnv,
 	agentInbox inbox.Inbox[events.AgentEvent],
 	cronLoader *CronLoader,
 ) *Scheduler {
 	return &Scheduler{
-		cfg:           cfg,
-		agent:         agent,
-		rt:            rt,
-		skills:        skills,
-		browserBroker: browserBroker,
-		inbox:         agentInbox,
-		cronLoader:    cronLoader,
-		sessions:      make(map[string]*chatSession),
+		env:        env,
+		inbox:      agentInbox,
+		cronLoader: cronLoader,
+		sessions:   make(map[string]*chatSession),
 	}
 }
 
@@ -88,8 +72,15 @@ func (s *Scheduler) getOrCreateSession(ctx context.Context, chatID string) *chat
 	if session, ok := s.sessions[chatID]; ok {
 		return session
 	}
-	sessionCfg := s.cfg.ForSession(chatID)
-	session := newChatSession(ctx, chatID, sessionCfg, s.agent, s.rt, s.skills, s.cronLoader, s.browserBroker)
+	sessionCfg := s.env.Cfg.ForSession(chatID)
+	sessionEnv := SessionEnv{
+		Cfg:           sessionCfg,
+		Rt:            s.env.Rt,
+		Agent:         s.env.Agent,
+		Skills:        s.env.Skills,
+		BrowserBroker: s.env.BrowserBroker,
+	}
+	session := newChatSession(ctx, chatID, sessionEnv, s.cronLoader)
 	s.sessions[chatID] = session
 	return session
 }
@@ -133,7 +124,7 @@ type restoreSession struct {
 }
 
 func (s *Scheduler) restorePath() string {
-	return filepath.Join(s.cfg.Workspace.SessionDir, ".checkpoint")
+	return filepath.Join(s.env.Cfg.Workspace.SessionDir, ".checkpoint")
 }
 
 func (s *Scheduler) writeCheckpoint(sessions []restoreSession) error {

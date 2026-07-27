@@ -111,10 +111,6 @@ func UserBlocksMessage(text string, blocks []ContentPart) ChatMessage {
 	return ChatMessage{Role: "user", Content: parts}
 }
 
-func userBlocksMessage(text string, blocks []ContentPart) ChatMessage {
-	return UserBlocksMessage(text, blocks)
-}
-
 // Orchestrator controls the interaction between the LLM and the outside world.
 // Implementations handle content streaming, tool dispatch, and user injection.
 type Orchestrator interface {

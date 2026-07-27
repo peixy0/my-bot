@@ -10,21 +10,17 @@ import (
 )
 
 func NewSessionRegistry(
-	rt runtime.Runtime,
-	skills *tools.SkillLoader,
-	cfg *config.Config,
-	agent *Agent,
+	env SessionEnv,
 	taskManager *tasks.Manager,
 	cmdTools *tools.CommandToolset,
-	browserBroker browser.Broker,
 	browserClient browser.Client,
 	sender events.Outbound,
 ) *tools.Registry {
 	reg := tools.NewRegistry()
-	registerBaseTools(reg, rt, skills, cfg, cmdTools)
+	registerBaseTools(reg, env.Rt, env.Skills, env.Cfg, cmdTools)
 	browserClient.Register(reg)
 	registerOutboundTools(reg, sender)
-	registerMetaTools(reg, agent, skills, cfg, rt, taskManager, browserBroker)
+	registerMetaTools(reg, env, taskManager)
 	return reg
 }
 
@@ -41,9 +37,9 @@ func NewSubagentRegistry(
 	return reg
 }
 
-func registerMetaTools(r *tools.Registry, agent *Agent, skills *tools.SkillLoader, cfg *config.Config, rt runtime.Runtime, taskManager *tasks.Manager, browserBroker browser.Broker) {
-	NewSubagentToolset(agent, skills, cfg, rt, taskManager, browserBroker).Register(r)
-	NewFleetToolset(agent, skills, cfg, rt, taskManager, browserBroker).Register(r)
+func registerMetaTools(r *tools.Registry, env SessionEnv, taskManager *tasks.Manager) {
+	NewSubagentToolset(env, taskManager).Register(r)
+	NewFleetToolset(env, taskManager).Register(r)
 }
 
 func registerBaseTools(reg *tools.Registry, rt runtime.Runtime, skills *tools.SkillLoader, cfg *config.Config, cmdTools *tools.CommandToolset) {

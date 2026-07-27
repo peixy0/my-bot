@@ -44,25 +44,22 @@ type ConversationWorker struct {
 
 func newConversationWorker(
 	chatID string,
-	cfg *config.Config,
-	agent *Agent,
-	rt runtime.Runtime,
-	skills *tools.SkillLoader,
+	env SessionEnv,
 	tools *sessionTools,
 ) *ConversationWorker {
 	w := &ConversationWorker{
 		chatID:       chatID,
-		cfg:          cfg,
-		baseLLM:      cfg.BaseLLM(),
-		agent:        agent,
-		rt:           rt,
-		skills:       skills,
+		cfg:          env.Cfg,
+		baseLLM:      env.Cfg.BaseLLM(),
+		agent:        env.Agent,
+		rt:           env.Rt,
+		skills:       env.Skills,
 		tools:        tools,
 		Events:       inbox.NewMemory[events.WorkerEvent](workerEventBuf),
 		MessageInbox: inbox.NewMemory[events.MessageEvent](messageInboxBuf),
 		abortCh:      make(chan struct{}),
 	}
-	w.loop = NewAgentLoop(w.cfg, agent)
+	w.loop = NewAgentLoop(w.cfg, env.Agent)
 	return w
 }
 

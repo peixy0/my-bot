@@ -7,10 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"my-bot/internal/browser"
-	"my-bot/internal/config"
 	"my-bot/internal/llm"
-	"my-bot/internal/runtime"
 	"my-bot/internal/tasks"
 	"my-bot/internal/tools"
 )
@@ -21,36 +18,32 @@ type SubagentToolset struct {
 	runner *subagentRunner
 }
 
-func NewSubagentToolset(agent *Agent, skills *tools.SkillLoader, cfg *config.Config, rt runtime.Runtime, taskManager *tasks.Manager, browserBroker browser.Broker) *SubagentToolset {
-	return &SubagentToolset{runner: newSubagentRunner(agent, skills, cfg, rt, taskManager, browserBroker)}
+func NewSubagentToolset(env SessionEnv, taskManager *tasks.Manager) *SubagentToolset {
+	return &SubagentToolset{runner: newSubagentRunner(env, taskManager)}
 }
 
 type FleetToolset struct {
 	runner *subagentRunner
 }
 
-func NewFleetToolset(agent *Agent, skills *tools.SkillLoader, cfg *config.Config, rt runtime.Runtime, taskManager *tasks.Manager, browserBroker browser.Broker) *FleetToolset {
-	return &FleetToolset{runner: newSubagentRunner(agent, skills, cfg, rt, taskManager, browserBroker)}
+func NewFleetToolset(env SessionEnv, taskManager *tasks.Manager) *FleetToolset {
+	return &FleetToolset{runner: newSubagentRunner(env, taskManager)}
 }
 
 type subagentRunner struct {
-	agent         *Agent
-	skills        *tools.SkillLoader
-	cfg           *config.Config
-	rt            runtime.Runtime
-	taskManager   *tasks.Manager
-	browserBroker browser.Broker
+	env         SessionEnv
+	taskManager *tasks.Manager
 }
 
-func newSubagentRunner(agent *Agent, skills *tools.SkillLoader, cfg *config.Config, rt runtime.Runtime, taskManager *tasks.Manager, browserBroker browser.Broker) *subagentRunner {
-	return &subagentRunner{agent: agent, skills: skills, cfg: cfg, rt: rt, taskManager: taskManager, browserBroker: browserBroker}
+func newSubagentRunner(env SessionEnv, taskManager *tasks.Manager) *subagentRunner {
+	return &subagentRunner{env: env, taskManager: taskManager}
 }
 
 func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task string) (tasks.Snapshot, error) {
 	if r.taskManager == nil {
 		return tasks.Snapshot{}, fmt.Errorf("task manager is nil")
 	}
-	cfg := *r.cfg
+	cfg := *r.env.Cfg
 	driver := tasks.FuncDriver(func(taskCtx context.Context, info tasks.TaskInfo, emit *tasks.Emitter) (tasks.Controller, error) {
 		input := make(chan string, 32)
 		agentCtx, cancel := context.WithCancel(taskCtx)
@@ -58,8 +51,8 @@ func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task 
 		go func() {
 			defer cancel()
 			taskManager := tasks.NewManager(cfg.Tool.MaxOutputChars)
-			cmdTools := tools.NewCommandToolset(r.rt, taskManager)
-			browserClient := r.browserBroker.NewClient()
+			cmdTools := tools.NewCommandToolset(r.env.Rt, taskManager)
+			browserClient := r.env.BrowserBroker.NewClient()
 			defer func() {
 				ctx2, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 				defer cancel()
@@ -70,10 +63,10 @@ func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task 
 					slog.Error("shutdown subagent tasks", "task_id", info.TaskID, "err", err)
 				}
 			}()
-			reg := NewSubagentRegistry(r.rt, r.skills, &cfg, cmdTools, browserClient)
+			reg := NewSubagentRegistry(r.env.Rt, r.env.Skills, &cfg, cmdTools, browserClient)
 			orch := NewSubagentOrchestrator(reg, emit, input)
-			loop := NewAgentLoop(&cfg, r.agent)
-			err := loop.Run(agentCtx, nil, reg, orch, llm.NewSubagentPrompt(r.skills, r.rt, systemPrompt), task)
+			loop := NewAgentLoop(&cfg, r.env.Agent)
+			err := loop.Run(agentCtx, nil, reg, orch, llm.NewSubagentPrompt(r.env.Skills, r.env.Rt, systemPrompt), task)
 			if err != nil {
 				emit.Output(err.Error())
 				emit.Complete(tasks.TaskResult{Error: err.Error()})

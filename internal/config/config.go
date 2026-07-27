@@ -287,42 +287,42 @@ func defaultConfig() *Config {
 	}
 }
 
-func (cfg *Config) Validate() error {
-	if cfg.LLM.APIKey == "" {
+func (c *Config) Validate() error {
+	if c.LLM.APIKey == "" {
 		return fmt.Errorf("llm.api_key is required")
 	}
-	if cfg.LLM.Temperature < 0 || cfg.LLM.Temperature > 2 {
+	if c.LLM.Temperature < 0 || c.LLM.Temperature > 2 {
 		return fmt.Errorf("llm.temperature must be between 0 and 2")
 	}
-	if cfg.LLM.TopP < 0 || cfg.LLM.TopP > 1 {
+	if c.LLM.TopP < 0 || c.LLM.TopP > 1 {
 		return fmt.Errorf("llm.top_p must be between 0 and 1")
 	}
-	if cfg.LLM.TopK < 0 {
+	if c.LLM.TopK < 0 {
 		return fmt.Errorf("llm.top_k must be non-negative")
 	}
-	if cfg.Limiter != nil {
-		if cfg.Limiter.RPM <= 0 {
+	if c.Limiter != nil {
+		if c.Limiter.RPM <= 0 {
 			return fmt.Errorf("limiter.rpm must be positive")
 		}
-		if cfg.Limiter.Burst <= 0 {
+		if c.Limiter.Burst <= 0 {
 			return fmt.Errorf("limiter.burst must be positive")
 		}
 	}
-	if cfg.Container != nil {
-		switch cfg.Container.Runtime {
+	if c.Container != nil {
+		switch c.Container.Runtime {
 		case "podman", "docker":
 		default:
-			return fmt.Errorf("unsupported container.runtime %q", cfg.Container.Runtime)
+			return fmt.Errorf("unsupported container.runtime %q", c.Container.Runtime)
 		}
-		if strings.TrimSpace(cfg.Container.Name) == "" {
+		if strings.TrimSpace(c.Container.Name) == "" {
 			return fmt.Errorf("container.name is required when container is configured")
 		}
 	}
-	if cfg.Tool.MaxOutputChars <= 0 {
+	if c.Tool.MaxOutputChars <= 0 {
 		return fmt.Errorf("tool.max_output_chars must be positive")
 	}
-	if cfg.Browser != nil {
-		browser := cfg.Browser
+	if c.Browser != nil {
+		browser := c.Browser
 		if browser.Enabled {
 			if strings.TrimSpace(browser.ListenAddr) == "" {
 				return fmt.Errorf("browser.listen_addr is required")
@@ -337,26 +337,26 @@ func (cfg *Config) Validate() error {
 			}
 		}
 	}
-	if cfg.Heartbeat.IntervalSeconds <= 0 {
+	if c.Heartbeat.IntervalSeconds <= 0 {
 		return fmt.Errorf("heartbeat.interval_seconds must be positive")
 	}
-	if cfg.LLM.ContextWindow <= 0 {
+	if c.LLM.ContextWindow <= 0 {
 		return fmt.Errorf("llm.context_window must be positive")
 	}
-	if cfg.Context.MaxOutputTokens <= 0 {
+	if c.Context.MaxOutputTokens <= 0 {
 		return fmt.Errorf("context.max_output_tokens must be positive")
 	}
-	if cfg.Context.CompressionThreshold <= 0 || cfg.Context.CompressionThreshold > 1 {
+	if c.Context.CompressionThreshold <= 0 || c.Context.CompressionThreshold > 1 {
 		return fmt.Errorf("context.compression_threshold must be greater than 0 and at most 1")
 	}
-	if cfg.Context.MaxImageBytes <= 0 {
+	if c.Context.MaxImageBytes <= 0 {
 		return fmt.Errorf("context.max_image_bytes must be positive")
 	}
-	if cfg.WebUI.Enabled {
-		if strings.TrimSpace(cfg.WebUI.Host) == "" {
+	if c.WebUI.Enabled {
+		if strings.TrimSpace(c.WebUI.Host) == "" {
 			return fmt.Errorf("webui.host is required when webui.enabled=true")
 		}
-		if cfg.WebUI.Port < 1 || cfg.WebUI.Port > 65535 {
+		if c.WebUI.Port < 1 || c.WebUI.Port > 65535 {
 			return fmt.Errorf("webui.port must be between 1 and 65535")
 		}
 	}

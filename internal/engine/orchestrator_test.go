@@ -212,7 +212,9 @@ func TestSubagentToolset_DoesNotForwardSubagentToolContent(t *testing.T) {
 		defer cancel()
 		_ = manager.Shutdown(ctx)
 	}()
-	NewSubagentToolset(agent, skills, cfg, rt, manager, browser.NewNoopBroker()).Register(reg)
+
+	NewSubagentToolset(SessionEnv{Cfg: cfg, Rt: rt, Agent: agent, Skills: skills, BrowserBroker: browser.NewNoopBroker()}, manager).Register(reg)
+
 	handler, ok := reg.Handler("agent")
 	if !ok {
 		t.Fatal("expected agent handler")
@@ -251,7 +253,8 @@ func TestFleetToolset_ReturnsAllChildTaskIDs(t *testing.T) {
 		_ = manager.Shutdown(ctx)
 	}()
 
-	NewFleetToolset(agent, skills, cfg, rt, manager, browser.NewNoopBroker()).Register(reg)
+	NewFleetToolset(SessionEnv{Cfg: cfg, Rt: rt, Agent: agent, Skills: skills, BrowserBroker: browser.NewNoopBroker()}, manager).Register(reg)
+
 	handler, ok := reg.Handler("fleet")
 	if !ok {
 		t.Fatal("expected fleet handler")
