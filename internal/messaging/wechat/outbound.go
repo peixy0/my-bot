@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/md5"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -143,14 +144,14 @@ func rawMD5(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (o *Outbound) uploadMedia(ctx context.Context, mediaType int, fileKey string, data []byte) (CDNMedia, int, error) {
+func (o *Outbound) uploadMedia(ctx context.Context, mediaType int, fileKey string, data []byte) (CDNMedia, error) {
 	aesKey, err := generateAESKey()
 	if err != nil {
-		return CDNMedia{}, 0, fmt.Errorf("generate AES key: %w", err)
+		return CDNMedia{}, fmt.Errorf("generate AES key: %w", err)
 	}
 	encData, err := encryptAES128ECB(aesKey, data)
 	if err != nil {
-		return CDNMedia{}, 0, fmt.Errorf("encrypt: %w", err)
+		return CDNMedia{}, fmt.Errorf("encrypt: %w", err)
 	}
 
 	uploadReq := getUploadURLReq{
@@ -169,31 +170,31 @@ func (o *Outbound) uploadMedia(ctx context.Context, mediaType int, fileKey strin
 		return o.hc.post(ctx, pathGetUploadURL, uploadReq, &uploadResp)
 	})
 	if err != nil {
-		return CDNMedia{}, 0, fmt.Errorf("getuploadurl: %w", err)
+		return CDNMedia{}, fmt.Errorf("getuploadurl: %w", err)
 	}
 
 	uploadURL := strings.TrimSpace(uploadResp.UploadFullURL)
 	if uploadURL == "" {
 		if uploadResp.UploadParam == "" {
-			return CDNMedia{}, 0, fmt.Errorf("getuploadurl returned neither upload_full_url nor upload_param")
+			return CDNMedia{}, fmt.Errorf("getuploadurl returned neither upload_full_url nor upload_param")
 		}
 		uploadURL = buildCDNUploadURL(uploadResp.UploadParam, fileKey)
 	}
 
 	encQueryParam, err := cdnUpload(ctx, uploadURL, encData)
 	if err != nil {
-		return CDNMedia{}, 0, fmt.Errorf("cdn upload: %w", err)
+		return CDNMedia{}, fmt.Errorf("cdn upload: %w", err)
 	}
 
 	return CDNMedia{
 		EncryptQueryParam: encQueryParam,
-		AESKey:            hex.EncodeToString(aesKey),
+		AESKey:            base64.StdEncoding.EncodeToString([]byte(hex.EncodeToString(aesKey))),
 		EncryptType:       1,
-	}, len(encData), nil
+	}, nil
 }
 
 func (o *Outbound) sendImage(ctx context.Context, data []byte) error {
-	media, encSize, err := o.uploadMedia(ctx, mediaTypeImage, newFileKey(), data)
+	media, err := o.uploadMedia(ctx, mediaTypeImage, newFileKey(), data)
 	if err != nil {
 		return err
 	}
@@ -207,8 +208,7 @@ func (o *Outbound) sendImage(ctx context.Context, data []byte) error {
 				ContextToken: o.contextToken,
 				ItemList: []wxItem{
 					{Type: itemTypeImage, ImageItem: &wxImageItem{
-						Media:   media,
-						MidSize: int64(encSize),
+						Media: media,
 					}},
 				},
 			},
@@ -219,7 +219,7 @@ func (o *Outbound) sendImage(ctx context.Context, data []byte) error {
 }
 
 func (o *Outbound) sendFile(ctx context.Context, filename string, data []byte) error {
-	media, _, err := o.uploadMedia(ctx, mediaTypeFile, newFileKey(), data)
+	media, err := o.uploadMedia(ctx, mediaTypeFile, newFileKey(), data)
 	if err != nil {
 		return err
 	}
