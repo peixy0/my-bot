@@ -111,6 +111,7 @@ func (cw *CronWorker) Load(jobName string, sender events.Outbound) ([]CronJobDef
 		id, err := cw.scheduler.AddFunc(def.CronExpr, func() {
 			ev := events.CronEvent{
 				ChatID:   cw.chatID,
+				JobName:  jobName,
 				TaskName: def.TaskName,
 				Prompt:   def.Prompt,
 				Sender:   sender,
@@ -168,6 +169,7 @@ func (cw *CronWorker) Trigger(jobName string, sender events.Outbound) error {
 	for _, def := range defs {
 		ev := events.CronEvent{
 			ChatID:   cw.chatID,
+			JobName:  jobName,
 			TaskName: def.TaskName,
 			Prompt:   def.Prompt,
 			Sender:   sender,

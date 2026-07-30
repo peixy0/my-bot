@@ -47,6 +47,7 @@ type HeartbeatEvent struct {
 
 type CronEvent struct {
 	ChatID   string
+	JobName  string
 	TaskName string
 	Prompt   string
 	Sender   Outbound

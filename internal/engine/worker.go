@@ -251,7 +251,7 @@ func (w *ConversationWorker) processHeartbeat(ctx context.Context, ev events.Hea
 }
 
 func (w *ConversationWorker) processCron(ctx context.Context, ev events.CronEvent) error {
-	slog.Debug("cron start", "chat_id", w.chatID, "task", ev.TaskName)
+	slog.Debug("cron start", "chat_id", w.chatID, "job", ev.JobName, "task", ev.TaskName)
 	prompt := fmt.Sprintf("SYSTEM EVENT: scheduled task '%s'\n\n%s", ev.TaskName, ev.Prompt)
 	err := w.runBackground(ctx, ev.Sender, llm.NewCronPrompt(w.skills, w.rt), wrapUserMessage(prompt))
 	slog.Debug("cron end", "chat_id", w.chatID, "task", ev.TaskName, "err", err)
