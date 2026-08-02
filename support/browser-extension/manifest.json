@@ -29,8 +29,7 @@
     }
   },
   "background": {
-    "service_worker": "service-worker.js",
-    "type": "module"
+    "service_worker": "dist/service-worker.js"
   },
   "options_ui": {
     "page": "options.html",

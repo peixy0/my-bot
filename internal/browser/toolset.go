@@ -117,7 +117,7 @@ func (c *ExtensionClient) Register(registry *tools.Registry) {
 
 	registry.Register(tools.ToolSchema{
 		Name:        "browser_snapshot",
-		Description: "Read visible page text and interactive elements from a tab. Use returned element refs for browser_click and browser_set_value.\n\nIMPORTANT:\n• Element refs are RESET on every snapshot — always snapshot fresh before interacting.\n• SPAs may not expose all content until scrolled. Call browser_scroll first to trigger lazy loading.\n• Hidden elements (zero size, display:none, visibility:hidden, type=hidden) are excluded.\n• At most 300 interactive elements are returned per snapshot.",
+		Description: "Read the accessibility tree of a tab as a nested structure. Every node has a ref (string integer) usable with browser_click and browser_set_value. The tree includes semantic roles (link, button, image, textbox, heading, StaticText, etc.) and accessible names computed by the browser.\n\nIMPORTANT:\n• Element refs are RESET on every snapshot — always snapshot fresh before interacting.\n• SPAs may not expose all content until scrolled. Call browser_scroll first to trigger lazy loading.\n• Nodes omitted: ignored AXTree nodes, nodes beyond the 1000-node cap.\n• Empty fields (name, children) are omitted to keep output compact.",
 		ParameterDesc: map[string]any{
 			"type":     "object",
 			"required": []string{"tab"},
@@ -129,7 +129,7 @@ func (c *ExtensionClient) Register(registry *tools.Registry) {
 
 	registry.Register(tools.ToolSchema{
 		Name:        "browser_click",
-		Description: "Click an element ref from the latest browser_snapshot of an agent-owned tab. Scrolls the element into view first, then clicks at its center via CDP Input.dispatchMouseEvent.\n\nNOTE: Element refs become STALE after a new browser_snapshot. Always snapshot then click within the same interaction sequence.",
+		Description: "Click an element ref from the latest browser_snapshot of an agent-owned tab. Scrolls the element into view first, then clicks via DOM-level HTMLElement.click() for best SPA compatibility, with CDP Input.dispatchMouseEvent as fallback.\n\nNOTE: Element refs become STALE after a new browser_snapshot. Always snapshot then click within the same interaction sequence.",
 		ParameterDesc: map[string]any{
 			"type":     "object",
 			"required": []string{"tab", "element_ref"},
@@ -208,7 +208,7 @@ func (c *ExtensionClient) Register(registry *tools.Registry) {
 
 	registry.Register(tools.ToolSchema{
 		Name:        "browser_scroll",
-		Description: "Scroll the page in a direction by a pixel amount. Uses a multi-strategy approach to find the actual scrollable container:\n1. document.scrollingElement (standard)\n2. window (traditional pages)\n3. First overflow:auto/scroll DOM element (some SPAs with custom scroll containers)\n4. CDP Input.dispatchMouseEvent mouseWheel (last resort)\n\nReturns {method, before, after} so the caller can verify scrolling happened.\n\nPREFER THIS over browser_press_key(PageDown) for reliable scrolling, especially on SPAs.",
+		Description: "Scroll the page in a direction by a pixel amount. Uses a multi-strategy approach to find the actual scrollable container:\n1. document.scrollingElement (standard)\n2. window (traditional pages)\n3. First overflow:auto/scroll DOM element (some SPAs with custom scroll containers)\n4. CDP Input.dispatchMouseEvent mouseWheel (last resort)\n\nReturns {before, after, max} so the caller can verify scrolling happened and whether the page has been scrolled to the bottom.\n\nPREFER THIS over browser_press_key(PageDown) for reliable scrolling, especially on SPAs.",
 		ParameterDesc: map[string]any{
 			"type":     "object",
 			"required": []string{"tab", "direction"},
@@ -269,6 +269,55 @@ func (c *ExtensionClient) Register(registry *tools.Registry) {
 			},
 		},
 	}, c.handleScreenshot)
+
+	registry.Register(tools.ToolSchema{
+		Name:        "browser_network_start",
+		Description: "Start capturing network requests on a tab. Use before navigation to capture all requests, or at any point to begin monitoring. Network capture persists until browser_network_stop is called or the tab is closed. Maximum 200 entries per tab.",
+		ParameterDesc: map[string]any{
+			"type":     "object",
+			"required": []string{"tab"},
+			"properties": map[string]any{
+				"tab": map[string]any{"type": "string", "description": "A tab returned by browser_tabs."},
+			},
+		},
+	}, c.handleNetworkStart)
+
+	registry.Register(tools.ToolSchema{
+		Name:        "browser_network_stop",
+		Description: "Stop capturing network requests on a tab.",
+		ParameterDesc: map[string]any{
+			"type":     "object",
+			"required": []string{"tab"},
+			"properties": map[string]any{
+				"tab": map[string]any{"type": "string", "description": "A tab returned by browser_tabs."},
+			},
+		},
+	}, c.handleNetworkStop)
+
+	registry.Register(tools.ToolSchema{
+		Name:        "browser_network_list",
+		Description: "List captured network requests from a tab. Each entry includes URL, method, status, mime type, and headers. Response bodies are NOT included — use browser_network_detail to fetch a specific body.",
+		ParameterDesc: map[string]any{
+			"type":     "object",
+			"required": []string{"tab"},
+			"properties": map[string]any{
+				"tab": map[string]any{"type": "string", "description": "A tab returned by browser_tabs."},
+			},
+		},
+	}, c.handleNetworkList)
+
+	registry.Register(tools.ToolSchema{
+		Name:        "browser_network_detail",
+		Description: "Get the full response body for a captured network request. The request_id comes from browser_network_list output.",
+		ParameterDesc: map[string]any{
+			"type":     "object",
+			"required": []string{"tab", "request_id"},
+			"properties": map[string]any{
+				"tab":        map[string]any{"type": "string", "description": "A tab returned by browser_tabs."},
+				"request_id": map[string]any{"type": "string", "description": "Request ID from browser_network_list output."},
+			},
+		},
+	}, c.handleNetworkDetail)
 }
 
 func (c *ExtensionClient) handleTabs(ctx context.Context, args []byte) (tools.ToolResult, error) {
@@ -579,4 +628,76 @@ func (c *ExtensionClient) handleScreenshot(ctx context.Context, args []byte) (to
 		return tools.ErrorResult(fmt.Errorf("browser_screenshot: write tmp file: %w", err)), nil
 	}
 	return tools.TextResult(fmt.Sprintf(`{"path":%q,"bytes":%d}`, path, len(data))), nil
+}
+
+func (c *ExtensionClient) handleNetworkStart(ctx context.Context, args []byte) (tools.ToolResult, error) {
+	var params struct {
+		Tab string `json:"tab"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return tools.ToolResult{}, fmt.Errorf("browser_network_start: parse args: %w", err)
+	}
+	if params.Tab == "" {
+		return tools.ErrorResult(fmt.Errorf("browser_network_start: tab is required")), nil
+	}
+	result, err := c.call(ctx, "network_start", params)
+	if err != nil {
+		return tools.ErrorResult(fmt.Errorf("browser_network_start: %w", err)), nil
+	}
+	return tools.TextResult(c.truncate(ctx, result)), nil
+}
+
+func (c *ExtensionClient) handleNetworkStop(ctx context.Context, args []byte) (tools.ToolResult, error) {
+	var params struct {
+		Tab string `json:"tab"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return tools.ToolResult{}, fmt.Errorf("browser_network_stop: parse args: %w", err)
+	}
+	if params.Tab == "" {
+		return tools.ErrorResult(fmt.Errorf("browser_network_stop: tab is required")), nil
+	}
+	result, err := c.call(ctx, "network_stop", params)
+	if err != nil {
+		return tools.ErrorResult(fmt.Errorf("browser_network_stop: %w", err)), nil
+	}
+	return tools.TextResult(c.truncate(ctx, result)), nil
+}
+
+func (c *ExtensionClient) handleNetworkList(ctx context.Context, args []byte) (tools.ToolResult, error) {
+	var params struct {
+		Tab string `json:"tab"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return tools.ToolResult{}, fmt.Errorf("browser_network_list: parse args: %w", err)
+	}
+	if params.Tab == "" {
+		return tools.ErrorResult(fmt.Errorf("browser_network_list: tab is required")), nil
+	}
+	result, err := c.call(ctx, "network_list", params)
+	if err != nil {
+		return tools.ErrorResult(fmt.Errorf("browser_network_list: %w", err)), nil
+	}
+	return tools.TextResult(c.truncate(ctx, result)), nil
+}
+
+func (c *ExtensionClient) handleNetworkDetail(ctx context.Context, args []byte) (tools.ToolResult, error) {
+	var params struct {
+		Tab       string `json:"tab"`
+		RequestID string `json:"request_id"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return tools.ToolResult{}, fmt.Errorf("browser_network_detail: parse args: %w", err)
+	}
+	if params.Tab == "" {
+		return tools.ErrorResult(fmt.Errorf("browser_network_detail: tab is required")), nil
+	}
+	if params.RequestID == "" {
+		return tools.ErrorResult(fmt.Errorf("browser_network_detail: request_id is required")), nil
+	}
+	result, err := c.call(ctx, "network_detail", params)
+	if err != nil {
+		return tools.ErrorResult(fmt.Errorf("browser_network_detail: %w", err)), nil
+	}
+	return tools.TextResult(c.truncate(ctx, result)), nil
 }
