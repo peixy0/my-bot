@@ -209,6 +209,9 @@ func parseChatCompletionStream(
 
 	for {
 		line, err := reader.ReadString('\n')
+		if err != nil {
+			return CompletionResponse{}, err
+		}
 		if len(line) > 0 {
 			line = strings.TrimRight(line, "\r\n")
 			if strings.HasPrefix(line, ":") {
@@ -222,13 +225,6 @@ func parseChatCompletionStream(
 					return CompletionResponse{}, err
 				}
 			}
-		}
-
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return CompletionResponse{}, io.ErrUnexpectedEOF
-			}
-			return CompletionResponse{}, err
 		}
 	}
 }
@@ -323,7 +319,7 @@ func (a *streamAccumulator) response() CompletionResponse {
 }
 
 func isRetryable(err error) bool {
-	if errors.Is(err, io.ErrUnexpectedEOF) {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}
 	if apiErr, ok := err.(*APIError); ok {

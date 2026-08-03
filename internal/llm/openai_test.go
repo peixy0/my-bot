@@ -248,8 +248,8 @@ func TestParseChatCompletionStream_RejectsEOFBeforeDone(t *testing.T) {
 	stream := strings.NewReader("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"stop\"}]}\n\n")
 
 	_, err := parseChatCompletionStream(context.Background(), stream, nil)
-	if !errors.Is(err, io.ErrUnexpectedEOF) {
-		t.Fatalf("expected unexpected EOF, got %v", err)
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("expected EOF, got %v", err)
 	}
 }
 
