@@ -25,6 +25,7 @@ import { isRequestFrame } from "./types.js";
 import type { Connection, NetworkBuffer, RequestFrame } from "./types.js";
 
 const networkBuffers = new Map<number, NetworkBuffer>();
+const screenshotChunkSize = 256 * 1024;
 
 chrome.tabs.onCreated.addListener((tab) => {
   adoptOpenedTab(tab);
@@ -233,12 +234,19 @@ async function cdpScreenshot(tabId: number, params: Record<string, unknown>, req
   if (params.full_page) captureParams.captureBeyondViewport = true;
 
   const result = await cdpSend(tabId, "Page.captureScreenshot", captureParams);
-  send({
-    type: "response",
-    id: requestId,
-    data: JSON.stringify({ screenshot: String(result.data ?? ""), format }),
-    has_more: false,
-  });
+  if (!result.data) {
+    throw new Error("screenshot failed");
+  }
+  const screenshot = String(result.data);
+  for (let start = 0; start < screenshot.length; start += screenshotChunkSize) {
+    const end = (start += screenshotChunkSize);
+    send({
+      type: "response",
+      id: requestId,
+      data: screenshot.slice(start, end),
+      has_more: end < screenshot.length,
+    });
+  }
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
