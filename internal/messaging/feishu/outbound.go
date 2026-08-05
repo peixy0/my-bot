@@ -64,7 +64,7 @@ func (o *Outbound) SendBegin(ctx context.Context) {
 	o.partial.Reset()
 	if o.stream != nil {
 		if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
-			return o.updateStreamingCard(ctx, o.stream, " ")
+			return o.updateStreamingCardElement(ctx, o.stream, streamingElementID, " ")
 		}); err != nil {
 			slog.Warn("feishu streaming card clear failed", "err", err, "chat_id", o.chatID, "card_id", o.stream.cardID)
 			o.stream = nil
@@ -97,7 +97,7 @@ func (o *Outbound) SendDelta(ctx context.Context, text string) {
 		return
 	}
 	if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
-		return o.updateStreamingCard(ctx, o.stream, o.partial.String())
+		return o.updateStreamingCardElement(ctx, o.stream, streamingElementID, o.partial.String())
 	}); err != nil {
 		slog.Warn("feishu streaming card update failed", "err", err, "chat_id", o.chatID, "card_id", o.stream.cardID)
 	}
@@ -115,7 +115,7 @@ func (o *Outbound) SendFinal(ctx context.Context, metadata *events.ResponseMetad
 	if stream != nil {
 		if hasText {
 			if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
-				return o.updateStreamingCard(ctx, stream, text)
+				return o.updateStreamingCardElement(ctx, stream, streamingElementID, text)
 			}); err != nil {
 				slog.Warn("feishu streaming card final update failed", "err", err, "chat_id", o.chatID, "card_id", stream.cardID)
 				updateFailed = true
@@ -165,7 +165,7 @@ func (o *Outbound) sendCard(ctx context.Context, text, footer string) error {
 }
 
 func (o *Outbound) openStreamingCard(ctx context.Context, text string) (*streamingCard, error) {
-	cardJSON, err := util.ToJSON(streamingCardPayload(text, true))
+	cardJSON, err := util.ToJSON(cardPayload(text, "", true))
 	if err != nil {
 		return nil, fmt.Errorf("marshal streaming card: %w", err)
 	}
@@ -200,10 +200,6 @@ func (o *Outbound) openStreamingCard(ctx context.Context, text string) (*streami
 		return nil, fmt.Errorf("send streaming card: %w", err)
 	}
 	return &streamingCard{cardID: cardID}, nil
-}
-
-func (o *Outbound) updateStreamingCard(ctx context.Context, stream *streamingCard, text string) error {
-	return o.updateStreamingCardElement(ctx, stream, streamingElementID, text)
 }
 
 func (o *Outbound) updateStreamingCardElement(ctx context.Context, stream *streamingCard, elementID, text string) error {
@@ -253,10 +249,6 @@ func (o *Outbound) closeStreamingCard(ctx context.Context, stream *streamingCard
 	return nil
 }
 
-func streamingCardPayload(content string, streaming bool) map[string]any {
-	return cardPayload(content, "", streaming)
-}
-
 func cardPayload(content, footer string, streaming bool) map[string]any {
 	elements := []map[string]any{
 		{
@@ -266,12 +258,8 @@ func cardPayload(content, footer string, streaming bool) map[string]any {
 		},
 	}
 	if footer != "" || streaming {
-		if footer == "" {
-			footer = " "
-		}
 		elements = append(elements, map[string]any{
-			"tag":    "div",
-			"margin": "8px 0 0 0",
+			"tag": "div",
 			"text": map[string]any{
 				"tag":        "plain_text",
 				"content":    footer,

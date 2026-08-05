@@ -8,7 +8,7 @@ import (
 )
 
 func TestStreamingCardPayload(t *testing.T) {
-	payload := streamingCardPayload("hello", true)
+	payload := cardPayload("hello", "", true)
 
 	if payload["schema"] != "2.0" {
 		t.Fatalf("expected schema 2.0, got %#v", payload["schema"])
@@ -40,7 +40,7 @@ func TestStreamingCardPayload(t *testing.T) {
 		t.Fatalf("unexpected footer container: %#v", footer)
 	}
 	text, ok := footer["text"].(map[string]any)
-	if !ok || text["tag"] != "plain_text" || text["content"] != " " || text["text_size"] != "notation" || text["text_color"] != "grey" || text["element_id"] != streamingFooterElementID {
+	if !ok || text["tag"] != "plain_text" || text["content"] != "" || text["text_size"] != "notation" || text["text_color"] != "grey" || text["element_id"] != streamingFooterElementID {
 		t.Fatalf("unexpected footer element: %#v", footer)
 	}
 }
