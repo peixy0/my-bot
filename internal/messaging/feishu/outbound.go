@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
+	"my-bot/internal/events"
 	"my-bot/internal/messaging"
 	"my-bot/internal/runtime"
 	"my-bot/internal/util"
@@ -20,8 +22,9 @@ import (
 )
 
 const (
-	streamingElementID = "agent_markdown"
-	streamingMinPush   = 1000 * time.Millisecond
+	streamingElementID       = "agent_markdown"
+	streamingFooterElementID = "agent_footer"
+	streamingMinPush         = 1000 * time.Millisecond
 )
 
 type Outbound struct {
@@ -100,12 +103,13 @@ func (o *Outbound) SendDelta(ctx context.Context, text string) {
 	}
 }
 
-func (o *Outbound) SendFinal(ctx context.Context) {
+func (o *Outbound) SendFinal(ctx context.Context, metadata *events.ResponseMetadata) {
 	text := o.partial.String()
 	o.partial.Reset()
 	stream := o.stream
 	o.stream = nil
 	hasText := strings.TrimSpace(text) != ""
+	footer := formatResponseMetadata(metadata)
 
 	updateFailed := false
 	if stream != nil {
@@ -117,6 +121,14 @@ func (o *Outbound) SendFinal(ctx context.Context) {
 				updateFailed = true
 			}
 		}
+		if footer != "" {
+			if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
+				return o.updateStreamingCardElement(ctx, stream, streamingFooterElementID, footer)
+			}); err != nil {
+				slog.Warn("feishu streaming card footer update failed", "err", err, "chat_id", o.chatID, "card_id", stream.cardID)
+				updateFailed = true
+			}
+		}
 		if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
 			return o.closeStreamingCard(ctx, stream)
 		}); err != nil {
@@ -124,22 +136,20 @@ func (o *Outbound) SendFinal(ctx context.Context) {
 		}
 	}
 	if hasText && (stream == nil || updateFailed) {
-		o.Send(ctx, text)
+		if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
+			return o.sendCard(ctx, text, footer)
+		}); err != nil {
+			slog.Warn("feishu send failed", "err", err, "chat_id", o.chatID)
+		}
 	}
 }
 
 func (o *Outbound) SendText(ctx context.Context, text string) error {
-	card := map[string]any{
-		"schema": "2.0",
-		"body": map[string]any{
-			"elements": []map[string]any{
-				{
-					"tag":     "markdown",
-					"content": text,
-				},
-			},
-		},
-	}
+	return o.sendCard(ctx, text, "")
+}
+
+func (o *Outbound) sendCard(ctx context.Context, text, footer string) error {
+	card := cardPayload(text, footer, false)
 	content, _ := util.ToJSON(card)
 
 	req := larkim.NewCreateMessageReqBuilder().
@@ -193,10 +203,14 @@ func (o *Outbound) openStreamingCard(ctx context.Context, text string) (*streami
 }
 
 func (o *Outbound) updateStreamingCard(ctx context.Context, stream *streamingCard, text string) error {
+	return o.updateStreamingCardElement(ctx, stream, streamingElementID, text)
+}
+
+func (o *Outbound) updateStreamingCardElement(ctx context.Context, stream *streamingCard, elementID, text string) error {
 	stream.sequence++
 	req := larkcardkit.NewContentCardElementReqBuilder().
 		CardId(stream.cardID).
-		ElementId(streamingElementID).
+		ElementId(elementID).
 		Body(larkcardkit.NewContentCardElementReqBodyBuilder().
 			Uuid(uuid.NewString()).
 			Content(text).
@@ -240,6 +254,33 @@ func (o *Outbound) closeStreamingCard(ctx context.Context, stream *streamingCard
 }
 
 func streamingCardPayload(content string, streaming bool) map[string]any {
+	return cardPayload(content, "", streaming)
+}
+
+func cardPayload(content, footer string, streaming bool) map[string]any {
+	elements := []map[string]any{
+		{
+			"tag":        "markdown",
+			"content":    content,
+			"element_id": streamingElementID,
+		},
+	}
+	if footer != "" || streaming {
+		if footer == "" {
+			footer = " "
+		}
+		elements = append(elements, map[string]any{
+			"tag":    "div",
+			"margin": "8px 0 0 0",
+			"text": map[string]any{
+				"tag":        "plain_text",
+				"content":    footer,
+				"text_size":  "notation",
+				"text_color": "grey",
+				"element_id": streamingFooterElementID,
+			},
+		})
+	}
 	return map[string]any{
 		"schema": "2.0",
 		"config": map[string]any{
@@ -253,15 +294,39 @@ func streamingCardPayload(content string, streaming bool) map[string]any {
 			},
 		},
 		"body": map[string]any{
-			"elements": []map[string]any{
-				{
-					"tag":        "markdown",
-					"content":    content,
-					"element_id": streamingElementID,
-				},
-			},
+			"elements": elements,
 		},
 	}
+}
+
+func formatResponseMetadata(metadata *events.ResponseMetadata) string {
+	if metadata == nil {
+		return ""
+	}
+	var parts []string
+	if model := strings.TrimSpace(metadata.Model); model != "" {
+		parts = append(parts, model)
+	}
+	if metadata.CompletionTokens > 0 && metadata.GenerationTime > 0 {
+		parts = append(parts, fmt.Sprintf("%.1f tokens/s", float64(metadata.CompletionTokens)/metadata.GenerationTime.Seconds()))
+	}
+	if metadata.TotalTokens > 0 {
+		total := formatTokenCount(metadata.TotalTokens)
+		if metadata.ContextWindow > 0 {
+			parts = append(parts, fmt.Sprintf("%s / %s tokens (%.1f%%)", total, formatTokenCount(metadata.ContextWindow), float64(metadata.TotalTokens)*100/float64(metadata.ContextWindow)))
+		} else {
+			parts = append(parts, total+" tokens")
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+func formatTokenCount(value int64) string {
+	text := strconv.FormatInt(value, 10)
+	for i := len(text) - 3; i > 0; i -= 3 {
+		text = text[:i] + "," + text[i:]
+	}
+	return text
 }
 
 func (o *Outbound) StartThinking(_ context.Context) {}

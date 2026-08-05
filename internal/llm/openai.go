@@ -181,7 +181,9 @@ type chatCompletionStreamChunk struct {
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
-		TotalTokens int64 `json:"total_tokens"`
+		PromptTokens     int64 `json:"prompt_tokens"`
+		CompletionTokens int64 `json:"completion_tokens"`
+		TotalTokens      int64 `json:"total_tokens"`
 	} `json:"usage,omitempty"`
 }
 
@@ -190,7 +192,11 @@ type streamAccumulator struct {
 	reasoningContent strings.Builder
 	toolCalls        map[int]*toolCallAccumulator
 	finishReason     string
+	promptTokens     int64
+	completionTokens int64
 	totalTokens      int64
+	generationStart  time.Time
+	generationTime   time.Duration
 }
 
 type toolCallAccumulator struct {
@@ -257,9 +263,14 @@ func (a *streamAccumulator) add(
 	onContentDelta func(context.Context, string),
 ) {
 	if chunk.Usage != nil {
+		a.promptTokens = chunk.Usage.PromptTokens
+		a.completionTokens = chunk.Usage.CompletionTokens
 		a.totalTokens = chunk.Usage.TotalTokens
 	}
 	for _, choice := range chunk.Choices {
+		if a.generationStart.IsZero() && (choice.Delta.Content != "" || choice.Delta.ReasoningContent != "") {
+			a.generationStart = time.Now()
+		}
 		if choice.FinishReason != "" {
 			a.finishReason = choice.FinishReason
 		}
@@ -292,6 +303,9 @@ func (a *streamAccumulator) add(
 }
 
 func (a *streamAccumulator) response() CompletionResponse {
+	if !a.generationStart.IsZero() {
+		a.generationTime = time.Since(a.generationStart)
+	}
 	content := strings.TrimSpace(a.content.String())
 	indexes := make([]int, 0, len(a.toolCalls))
 	for idx := range a.toolCalls {
@@ -314,7 +328,10 @@ func (a *streamAccumulator) response() CompletionResponse {
 		ReasoningContent: strings.TrimSpace(a.reasoningContent.String()),
 		ToolCalls:        calls,
 		FinishReason:     finishReason,
+		PromptTokens:     a.promptTokens,
+		CompletionTokens: a.completionTokens,
 		TotalTokens:      a.totalTokens,
+		GenerationTime:   a.generationTime,
 	}
 }
 

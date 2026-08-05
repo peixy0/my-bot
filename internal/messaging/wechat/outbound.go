@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"my-bot/internal/events"
 	"my-bot/internal/messaging"
 	"my-bot/internal/runtime"
 )
@@ -51,7 +52,7 @@ func (o *Outbound) SendDelta(_ context.Context, text string) {
 	o.partial.WriteString(text)
 }
 
-func (o *Outbound) SendFinal(ctx context.Context) {
+func (o *Outbound) SendFinal(ctx context.Context, _ *events.ResponseMetadata) {
 	text := o.partial.String()
 	o.partial.Reset()
 	if strings.TrimSpace(text) == "" {

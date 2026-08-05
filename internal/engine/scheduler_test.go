@@ -33,7 +33,7 @@ func (o *captureOutbound) SendDelta(_ context.Context, text string) {
 	o.messages = append(o.messages, text)
 }
 
-func (o *captureOutbound) SendFinal(context.Context) {}
+func (o *captureOutbound) SendFinal(context.Context, *events.ResponseMetadata) {}
 
 func (o *captureOutbound) StartThinking(context.Context) {}
 func (o *captureOutbound) EndThinking(context.Context)   {}

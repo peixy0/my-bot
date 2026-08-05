@@ -24,6 +24,7 @@ type mockSender struct {
 	begins int
 	deltas []string
 	finals int
+	meta   []*events.ResponseMetadata
 }
 
 func (s *mockSender) Send(_ context.Context, msg string) {
@@ -35,8 +36,9 @@ func (s *mockSender) SendBegin(_ context.Context) {
 func (s *mockSender) SendDelta(_ context.Context, msg string) {
 	s.deltas = append(s.deltas, msg)
 }
-func (s *mockSender) SendFinal(_ context.Context) {
+func (s *mockSender) SendFinal(_ context.Context, metadata *events.ResponseMetadata) {
 	s.finals++
+	s.meta = append(s.meta, metadata)
 }
 func (s *mockSender) StartThinking(_ context.Context) {}
 func (s *mockSender) EndThinking(_ context.Context)   {}
@@ -102,7 +104,7 @@ func TestBackgroundOrchestrator_NoReport(t *testing.T) {
 	sender := &mockSender{}
 	orch := NewBackgroundOrchestrator(sender)
 
-	orch.OnContentFinal(context.Background())
+	orch.OnContentFinal(context.Background(), nil)
 	if len(sender.deltas) != 0 || sender.finals != 0 {
 		t.Errorf("expected no send for non-terminal background content, got deltas=%v finals=%d", sender.deltas, sender.finals)
 	}
@@ -125,7 +127,8 @@ func TestHumanInputOrchestrator_StreamsDeltasAndFinal(t *testing.T) {
 	orch.OnContentBegin(context.Background())
 	orch.OnContentDelta(context.Background(), "hel")
 	orch.OnContentDelta(context.Background(), "lo")
-	orch.OnContentFinal(context.Background())
+	metadata := &events.ResponseMetadata{Model: "m"}
+	orch.OnContentFinal(context.Background(), metadata)
 
 	if fmt.Sprint(sender.deltas) != fmt.Sprint([]string{"hel", "lo"}) {
 		t.Fatalf("expected streamed deltas, got %v", sender.deltas)
@@ -136,6 +139,9 @@ func TestHumanInputOrchestrator_StreamsDeltasAndFinal(t *testing.T) {
 	if sender.finals != 1 {
 		t.Fatalf("expected one final stream marker, got %d", sender.finals)
 	}
+	if len(sender.meta) != 1 || sender.meta[0] != metadata {
+		t.Fatalf("expected metadata to reach sender, got %+v", sender.meta)
+	}
 	if len(sender.sent) != 0 {
 		t.Fatalf("expected no duplicate batch send, got %v", sender.sent)
 	}
@@ -145,7 +151,7 @@ func TestHumanInputOrchestrator_ContentFinalClosesStream(t *testing.T) {
 	sender := &mockSender{}
 	orch := NewHumanInputOrchestrator(sender, nil)
 
-	orch.OnContentFinal(context.Background())
+	orch.OnContentFinal(context.Background(), nil)
 
 	if len(sender.deltas) != 0 {
 		t.Fatalf("expected no fallback delta, got %v", sender.deltas)

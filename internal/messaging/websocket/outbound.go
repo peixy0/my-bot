@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"my-bot/internal/events"
 	"my-bot/internal/runtime"
 	"my-bot/internal/tools"
 
@@ -65,13 +66,28 @@ func (o *Outbound) SendDelta(ctx context.Context, text string) {
 	}
 }
 
-func (o *Outbound) SendFinal(ctx context.Context) {
-	if err := o.writeJSON(map[string]any{
-		"type":    "message_stream_end",
-		"chat_id": o.chatID,
-	}); err != nil {
+func (o *Outbound) SendFinal(ctx context.Context, metadata *events.ResponseMetadata) {
+	if err := o.writeJSON(streamEndMessage(o.chatID, metadata)); err != nil {
 		slog.Warn("websocket send message_stream_end failed", "chat_id", o.chatID, "err", err)
 	}
+}
+
+func streamEndMessage(chatID string, metadata *events.ResponseMetadata) map[string]any {
+	message := map[string]any{
+		"type":    "message_stream_end",
+		"chat_id": chatID,
+	}
+	if metadata != nil {
+		message["metadata"] = map[string]any{
+			"model":              metadata.Model,
+			"prompt_tokens":      metadata.PromptTokens,
+			"completion_tokens":  metadata.CompletionTokens,
+			"total_tokens":       metadata.TotalTokens,
+			"context_window":     metadata.ContextWindow,
+			"generation_seconds": metadata.GenerationTime.Seconds(),
+		}
+	}
+	return message
 }
 
 func (o *Outbound) StartThinking(ctx context.Context) {

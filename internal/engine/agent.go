@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"my-bot/internal/config"
+	"my-bot/internal/events"
 	"my-bot/internal/llm"
 	"my-bot/internal/tools"
 	"my-bot/internal/util"
@@ -153,7 +154,7 @@ func (a *Agent) Run(
 			}
 			assistantMsg := llm.AssistantMessage(resp.Content, resp.ReasoningContent, resp.ToolCalls)
 			conv.Messages = append(conv.Messages, assistantMsg)
-			orch.OnContentFinal(ctx)
+			orch.OnContentFinal(ctx, responseMetadata(model, cfg.LLM.ContextWindow, resp))
 			orch.OnFinalResponse(ctx, resp.Content)
 			return nil
 		}
@@ -195,7 +196,7 @@ func (a *Agent) Run(
 
 		assistantMsg := llm.AssistantMessage(resp.Content, resp.ReasoningContent, toolCalls)
 		conv.Messages = append(conv.Messages, assistantMsg)
-		orch.OnContentFinal(ctx)
+		orch.OnContentFinal(ctx, nil)
 
 		if threshold := int(float64(cfg.LLM.ContextWindow) * cfg.Context.CompressionThreshold); threshold > 0 && int(conv.TotalTokens) >= threshold {
 			slog.Debug("context compression triggered", "tokens", conv.TotalTokens, "context_window", cfg.LLM.ContextWindow)
@@ -214,6 +215,17 @@ func (a *Agent) Run(
 		if interrupt := orch.MaybeInterrupt(ctx); interrupt != nil {
 			conv.Messages = append(conv.Messages, *interrupt)
 		}
+	}
+}
+
+func responseMetadata(model string, contextWindow int64, resp llm.CompletionResponse) *events.ResponseMetadata {
+	return &events.ResponseMetadata{
+		Model:            model,
+		PromptTokens:     resp.PromptTokens,
+		CompletionTokens: resp.CompletionTokens,
+		TotalTokens:      resp.TotalTokens,
+		ContextWindow:    contextWindow,
+		GenerationTime:   resp.GenerationTime,
 	}
 }
 

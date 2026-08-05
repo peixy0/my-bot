@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"my-bot/internal/config"
+	"my-bot/internal/events"
 	"my-bot/internal/llm"
 	"my-bot/internal/tools"
 )
@@ -83,6 +84,7 @@ type mockOrchestrator struct {
 	dispatches       int
 	outcomes         []llm.CallOutcome
 	interrupt        *llm.ChatMessage
+	finalMetadata    []*events.ResponseMetadata
 }
 
 func newMockOrchestrator() *mockOrchestrator {
@@ -93,7 +95,9 @@ func (o *mockOrchestrator) OnContentBegin(context.Context) {
 	o.begins++
 }
 func (o *mockOrchestrator) OnContentDelta(context.Context, string) {}
-func (o *mockOrchestrator) OnContentFinal(context.Context)         {}
+func (o *mockOrchestrator) OnContentFinal(_ context.Context, metadata *events.ResponseMetadata) {
+	o.finalMetadata = append(o.finalMetadata, metadata)
+}
 func (o *mockOrchestrator) OnFinalResponse(ctx context.Context, content string) {
 	o.finalResponses = append(o.finalResponses, content)
 }
@@ -127,7 +131,14 @@ func TestAgent_ToolCallDispatch(t *testing.T) {
 				ToolCalls:        []llm.ToolCall{{ID: "call1", Name: "test", Args: []byte(`{}`)}},
 				TotalTokens:      50,
 			},
-			{Content: "final", FinishReason: "stop", TotalTokens: 100},
+			{
+				Content:          "final",
+				FinishReason:     "stop",
+				PromptTokens:     80,
+				CompletionTokens: 20,
+				TotalTokens:      100,
+				GenerationTime:   2 * time.Second,
+			},
 		},
 	}
 
@@ -146,7 +157,7 @@ func TestAgent_ToolCallDispatch(t *testing.T) {
 	})
 
 	cfg := &config.Config{
-		LLM:     config.LLMConfig{Model: "test-model"},
+		LLM:     config.LLMConfig{Model: "test-model", ContextWindow: 1000},
 		Context: config.ContextConfig{MaxOutputTokens: 16384},
 		Tool:    config.ToolConfig{EnableDescriptiveOutput: true},
 	}
@@ -160,6 +171,12 @@ func TestAgent_ToolCallDispatch(t *testing.T) {
 	}
 	if orch.dispatches != 1 {
 		t.Errorf("expected 1 dispatch, got %d", orch.dispatches)
+	}
+	if len(orch.finalMetadata) != 2 || orch.finalMetadata[0] != nil || orch.finalMetadata[1] == nil {
+		t.Fatalf("expected metadata only for the final response, got %+v", orch.finalMetadata)
+	}
+	if metadata := orch.finalMetadata[1]; metadata.Model != "test-model" || metadata.PromptTokens != 80 || metadata.CompletionTokens != 20 || metadata.TotalTokens != 100 || metadata.ContextWindow != 1000 || metadata.GenerationTime != 2*time.Second {
+		t.Fatalf("unexpected final metadata: %+v", metadata)
 	}
 	if len(orch.dispatchContents) != 1 || orch.dispatchContents[0] != "thinking" {
 		t.Fatalf("expected original response content at dispatch, got %v", orch.dispatchContents)
@@ -176,6 +193,44 @@ func TestAgent_ToolCallDispatch(t *testing.T) {
 	}
 	if assistantMsg.Content != "thinking" {
 		t.Fatalf("expected original response content in replayed assistant message, got %#v", assistantMsg.Content)
+	}
+}
+
+func TestAgent_OmitsMetadataForContentlessToolResponse(t *testing.T) {
+	client := &mockClient{
+		responses: []llm.CompletionResponse{
+			{
+				FinishReason: "tool_calls",
+				ToolCalls:    []llm.ToolCall{{ID: "call1", Name: "test", Args: []byte(`{}`)}},
+				TotalTokens:  50,
+			},
+			{Content: "final", FinishReason: "stop", TotalTokens: 100},
+		},
+	}
+	orch := newMockOrchestrator()
+	reg := tools.NewRegistry()
+	reg.Register(tools.ToolSchema{Name: "test"}, func([]byte) (tools.PreparedTool, error) {
+		return tools.PreparedTool{
+			Execute: func(context.Context) (tools.ToolResult, error) {
+				return tools.TextResult("done"), nil
+			},
+		}, nil
+	})
+
+	err := NewAgent(client, nil).Run(
+		context.Background(),
+		nil,
+		&config.Config{LLM: config.LLMConfig{Model: "test-model"}},
+		"sys",
+		llm.NewConversation(),
+		orch,
+		reg,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(orch.finalMetadata) != 2 || orch.finalMetadata[0] != nil || orch.finalMetadata[1] == nil {
+		t.Fatalf("expected metadata only for final content-bearing response, got %+v", orch.finalMetadata)
 	}
 }
 

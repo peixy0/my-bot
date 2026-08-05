@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"time"
 )
 
 type ChatMessage struct {
@@ -36,7 +37,10 @@ type CompletionResponse struct {
 	ReasoningContent string
 	ToolCalls        []ToolCall
 	FinishReason     string
+	PromptTokens     int64
+	CompletionTokens int64
 	TotalTokens      int64
+	GenerationTime   time.Duration
 }
 
 type CompletionRequest struct {

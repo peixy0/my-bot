@@ -1,12 +1,24 @@
 package events
 
-import "context"
+import (
+	"context"
+	"time"
+)
+
+type ResponseMetadata struct {
+	Model            string
+	PromptTokens     int64
+	CompletionTokens int64
+	TotalTokens      int64
+	ContextWindow    int64
+	GenerationTime   time.Duration
+}
 
 type Outbound interface {
 	Send(ctx context.Context, text string)
 	SendBegin(ctx context.Context)
 	SendDelta(ctx context.Context, text string)
-	SendFinal(ctx context.Context)
+	SendFinal(ctx context.Context, metadata *ResponseMetadata)
 	StartThinking(ctx context.Context)
 	EndThinking(ctx context.Context)
 }

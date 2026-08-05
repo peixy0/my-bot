@@ -26,7 +26,11 @@ func TestOpenAIProvider_CompleteStreamsContent(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		writeSSE(t, w, map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "Hel"}}}})
 		writeSSE(t, w, map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "lo"}, "finish_reason": "stop"}}})
-		writeSSE(t, w, map[string]any{"choices": []any{}, "usage": map[string]any{"total_tokens": 42}})
+		writeSSE(t, w, map[string]any{"choices": []any{}, "usage": map[string]any{
+			"prompt_tokens":     32,
+			"completion_tokens": 10,
+			"total_tokens":      42,
+		}})
 		fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer server.Close()
@@ -51,8 +55,11 @@ func TestOpenAIProvider_CompleteStreamsContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Content != "Hello" || resp.FinishReason != "stop" || resp.TotalTokens != 42 {
+	if resp.Content != "Hello" || resp.FinishReason != "stop" || resp.PromptTokens != 32 || resp.CompletionTokens != 10 || resp.TotalTokens != 42 {
 		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if resp.GenerationTime <= 0 {
+		t.Fatalf("expected positive generation time, got %v", resp.GenerationTime)
 	}
 	if !reflect.DeepEqual(deltas, []string{"Hel", "lo"}) {
 		t.Fatalf("expected content deltas, got %v", deltas)
@@ -88,12 +95,15 @@ func TestOpenAIProvider_CompleteOmitsZeroMaxTokens(t *testing.T) {
 	defer server.Close()
 
 	provider := NewOpenAIProvider(server.URL, "", server.Client())
-	_, err := provider.Complete(context.Background(), CompletionRequest{Model: "test-model"})
+	resp, err := provider.Complete(context.Background(), CompletionRequest{Model: "test-model"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, ok := requestBody["max_tokens"]; ok {
 		t.Fatalf("expected max_tokens to be omitted when unset, got %#v", requestBody["max_tokens"])
+	}
+	if resp.PromptTokens != 0 || resp.CompletionTokens != 0 || resp.TotalTokens != 0 {
+		t.Fatalf("expected missing usage to remain zero, got %+v", resp)
 	}
 }
 

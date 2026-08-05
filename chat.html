@@ -395,6 +395,16 @@
       letter-spacing: 0.02em;
     }
 
+    .response-meta {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+      color: var(--text-faint);
+      font-size: 0.75rem;
+      line-height: 1.4;
+      white-space: normal;
+    }
+
     /* image bubbles */
     .bubble img {
       display: block;
@@ -1068,11 +1078,11 @@
       } else if (data.type === 'message_stream_delta') {
         appendStreamDelta(streamKey(data), data.text || '');
       } else if (data.type === 'message_stream_end') {
-        finalizeStream(streamKey(data));
+        finalizeStream(streamKey(data), data.metadata);
       } else if (data.type === 'message_delta') {
         appendStreamDelta(streamKey(data), data.delta || '');
       } else if (data.type === 'message_end') {
-        finalizeStream(streamKey(data));
+        finalizeStream(streamKey(data), data.metadata);
       } else if (data.type === 'tool_call') {
         addToolEntry(data);
       } else if (data.type === 'tool_result') {
@@ -1091,7 +1101,9 @@
       chatId = null;
       chatIdLabel.textContent = '';
       chatIdLabel.title = '';
-      Object.keys(streamBubbles).forEach(finalizeStream);
+      Object.keys(streamBubbles).forEach(function(id) {
+        finalizeStream(id, null);
+      });
       // Mark any unfinished tool entries as cancelled so the timeline doesn't
       // get stuck spinning after a disconnect mid-call.
       Object.keys(toolEntries).forEach(function(id) {
@@ -1314,7 +1326,38 @@
     }, 80);
   }
 
-  function finalizeStream(messageId) {
+  function formatResponseMetadata(metadata) {
+    if (!metadata || typeof metadata !== 'object') return '';
+    var parts = [];
+    if (typeof metadata.model === 'string' && metadata.model.trim()) {
+      parts.push(metadata.model.trim());
+    }
+    if (metadata.completion_tokens > 0 && metadata.generation_seconds > 0) {
+      parts.push((metadata.completion_tokens / metadata.generation_seconds).toFixed(1) + ' tokens/s');
+    }
+    if (metadata.total_tokens > 0) {
+      var total = Number(metadata.total_tokens).toLocaleString('en-US');
+      if (metadata.context_window > 0) {
+        var contextWindow = Number(metadata.context_window).toLocaleString('en-US');
+        var percent = metadata.total_tokens * 100 / metadata.context_window;
+        parts.push(total + ' / ' + contextWindow + ' tokens (' + percent.toFixed(1) + '%)');
+      } else {
+        parts.push(total + ' tokens');
+      }
+    }
+    return parts.join(' · ');
+  }
+
+  function appendResponseMetadata(bubble, metadata) {
+    var text = formatResponseMetadata(metadata);
+    if (!text) return;
+    var footer = document.createElement('div');
+    footer.className = 'response-meta';
+    footer.textContent = text;
+    bubble.appendChild(footer);
+  }
+
+  function finalizeStream(messageId, metadata) {
     var entry = streamBubbles[messageId];
     if (!entry) return;
     if (entry.renderTimer) {
@@ -1327,6 +1370,7 @@
       entry.bubble.innerHTML = DOMPurify.sanitize(marked.parse(entry.raw));
       entry.bubble.classList.remove('streaming');
       enhanceAgentBubble(entry.bubble, entry.raw, /*isFinal=*/true);
+      appendResponseMetadata(entry.bubble, metadata);
     }
     delete streamBubbles[messageId];
   }
