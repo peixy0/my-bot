@@ -196,7 +196,7 @@ func (w *ConversationWorker) processText(ctx context.Context, ev events.TextInpu
 		slog.Error("compress", "chat_id", w.chatID, "err", err)
 	}
 	reg := w.tools.BuildRegistry(ev.Sender)
-	orch := NewHumanInputOrchestrator(reg, ev.Sender, w.MessageInbox).WithVision(w.VisionSupported())
+	orch := NewHumanInputOrchestrator(ev.Sender, w.MessageInbox).WithVision(w.VisionSupported())
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
 	err := w.loop.Run(ctx, w.abortCh, reg, orch, prompt, wrapUserMessage(ev.Message))
@@ -233,7 +233,7 @@ func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageIn
 		})
 	}
 	reg := w.tools.BuildRegistry(ev.Sender)
-	orch := NewHumanInputOrchestrator(reg, ev.Sender, w.MessageInbox).WithVision(true)
+	orch := NewHumanInputOrchestrator(ev.Sender, w.MessageInbox).WithVision(true)
 	ev.Sender.StartThinking(ctx)
 	defer ev.Sender.EndThinking(ctx)
 	err := w.loop.Run(ctx, w.abortCh, reg, orch, prompt, content)
@@ -379,7 +379,7 @@ func (w *ConversationWorker) processConfigChange(ctx context.Context, ev events.
 
 func (w *ConversationWorker) runBackground(ctx context.Context, sender events.Outbound, prompt llm.SystemPrompt, content any) error {
 	reg := w.tools.BuildRegistry(sender)
-	orch := NewBackgroundOrchestrator(reg, sender)
+	orch := NewBackgroundOrchestrator(sender)
 	return w.loop.Run(ctx, w.abortCh, reg, orch, prompt, content)
 }
 

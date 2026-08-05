@@ -92,9 +92,10 @@ type ContainerConfig struct {
 }
 
 type ToolConfig struct {
-	MaxOutputChars int    `yaml:"max_output_chars"`
-	WebSearchAPI   string `yaml:"web_search_api"`
-	FetchProxy     string `yaml:"fetch_proxy"`
+	EnableDescriptiveOutput bool   `yaml:"enable_descriptive_output"`
+	MaxOutputChars          int    `yaml:"max_output_chars"`
+	WebSearchAPI            string `yaml:"web_search_api"`
+	FetchProxy              string `yaml:"fetch_proxy"`
 }
 
 type BrowserConfig struct {
@@ -254,7 +255,8 @@ func defaultConfig() *Config {
 		LogLevel: "debug",
 		Limiter:  nil,
 		Tool: ToolConfig{
-			MaxOutputChars: 100_000,
+			EnableDescriptiveOutput: true,
+			MaxOutputChars:          100_000,
 		},
 		Workspace: WorkspaceConfig{
 			CWD:        "./workspace",

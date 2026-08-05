@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -43,20 +44,11 @@ func (s *mockSender) EndThinking(_ context.Context)   {}
 func TestHumanInputOrchestrator_DrainInLoopInputTextOnly(t *testing.T) {
 	sender := &mockSender{}
 	inLoopInbox := inbox.NewMemory[events.MessageEvent](32)
-	reg := tools.NewRegistry()
-	orch := NewHumanInputOrchestrator(reg, sender, inLoopInbox)
+	orch := NewHumanInputOrchestrator(sender, inLoopInbox)
 
 	inLoopInbox.TryPublish(events.TextInputEvent{ChatID: "chat", Message: "stop doing that"})
 	inLoopInbox.TryPublish(events.TextInputEvent{ChatID: "chat", Message: "do this instead"})
 
-	calls := []llm.ToolCall{{ID: "c1", Name: "unknown_tool", Args: []byte(`{}`)}}
-	outcomes, err := orch.DispatchTools(context.Background(), calls)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(outcomes) != 1 {
-		t.Fatalf("expected 1 outcome, got %d", len(outcomes))
-	}
 	interrupt := orch.MaybeInterrupt(context.Background())
 	if interrupt == nil {
 		t.Fatalf("expected in-loop interrupt message")
@@ -76,8 +68,7 @@ func TestHumanInputOrchestrator_DrainInLoopInputTextOnly(t *testing.T) {
 func TestHumanInputOrchestrator_DrainInLoopInputWithImageUsesMultipart(t *testing.T) {
 	sender := &mockSender{}
 	inLoopInbox := inbox.NewMemory[events.MessageEvent](32)
-	reg := tools.NewRegistry()
-	orch := NewHumanInputOrchestrator(reg, sender, inLoopInbox).WithVision(true)
+	orch := NewHumanInputOrchestrator(sender, inLoopInbox).WithVision(true)
 
 	inLoopInbox.TryPublish(events.TextInputEvent{ChatID: "chat", Message: "stop doing that"})
 	inLoopInbox.TryPublish(events.ImageInputEvent{ChatID: "chat", Message: "see image", ImageData: []events.ImageData{
@@ -85,14 +76,6 @@ func TestHumanInputOrchestrator_DrainInLoopInputWithImageUsesMultipart(t *testin
 		{Data: []byte{4, 5, 6}, MIMEType: "image/jpeg"},
 	}})
 
-	calls := []llm.ToolCall{{ID: "c1", Name: "unknown_tool", Args: []byte(`{}`)}}
-	outcomes, err := orch.DispatchTools(context.Background(), calls)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(outcomes) != 1 {
-		t.Fatalf("expected 1 outcome, got %d", len(outcomes))
-	}
 	interrupt := orch.MaybeInterrupt(context.Background())
 	if interrupt == nil {
 		t.Fatalf("expected in-loop interrupt message")
@@ -117,9 +100,9 @@ func TestHumanInputOrchestrator_DrainInLoopInputWithImageUsesMultipart(t *testin
 
 func TestBackgroundOrchestrator_NoReport(t *testing.T) {
 	sender := &mockSender{}
-	orch := NewBackgroundOrchestrator(tools.NewRegistry(), sender)
+	orch := NewBackgroundOrchestrator(sender)
 
-	orch.OnContentFinal(context.Background(), "intermediate")
+	orch.OnContentFinal(context.Background())
 	if len(sender.deltas) != 0 || sender.finals != 0 {
 		t.Errorf("expected no send for non-terminal background content, got deltas=%v finals=%d", sender.deltas, sender.finals)
 	}
@@ -137,12 +120,12 @@ func TestBackgroundOrchestrator_NoReport(t *testing.T) {
 
 func TestHumanInputOrchestrator_StreamsDeltasAndFinal(t *testing.T) {
 	sender := &mockSender{}
-	orch := NewHumanInputOrchestrator(tools.NewRegistry(), sender, nil)
+	orch := NewHumanInputOrchestrator(sender, nil)
 
 	orch.OnContentBegin(context.Background())
 	orch.OnContentDelta(context.Background(), "hel")
 	orch.OnContentDelta(context.Background(), "lo")
-	orch.OnContentFinal(context.Background(), "hello")
+	orch.OnContentFinal(context.Background())
 
 	if fmt.Sprint(sender.deltas) != fmt.Sprint([]string{"hel", "lo"}) {
 		t.Fatalf("expected streamed deltas, got %v", sender.deltas)
@@ -160,9 +143,9 @@ func TestHumanInputOrchestrator_StreamsDeltasAndFinal(t *testing.T) {
 
 func TestHumanInputOrchestrator_ContentFinalClosesStream(t *testing.T) {
 	sender := &mockSender{}
-	orch := NewHumanInputOrchestrator(tools.NewRegistry(), sender, nil)
+	orch := NewHumanInputOrchestrator(sender, nil)
 
-	orch.OnContentFinal(context.Background(), "hello")
+	orch.OnContentFinal(context.Background())
 
 	if len(sender.deltas) != 0 {
 		t.Fatalf("expected no fallback delta, got %v", sender.deltas)
@@ -172,19 +155,139 @@ func TestHumanInputOrchestrator_ContentFinalClosesStream(t *testing.T) {
 	}
 }
 
-func TestHumanInputOrchestrator_ContentFinalBeforeToolUse(t *testing.T) {
+func TestHumanInputOrchestrator_AppendsToolDescription(t *testing.T) {
 	sender := &mockSender{}
-	orch := NewHumanInputOrchestrator(tools.NewRegistry(), sender, nil)
+	reg := tools.NewRegistry()
+	reg.Register(tools.ToolSchema{Name: "read_file"}, func([]byte) (tools.PreparedTool, error) {
+		return tools.PreparedTool{
+			Description: "reading file example.txt...",
+			Execute: func(context.Context) (tools.ToolResult, error) {
+				return tools.TextResult("content"), nil
+			},
+		}, nil
+	})
+	orch := NewHumanInputOrchestrator(sender, nil)
 
-	orch.OnContentDelta(context.Background(), "using tool")
-	orch.OnContentFinal(context.Background(), "using tool")
-	orch.BeforeToolUse(context.Background(), "using tool")
-
-	if sender.finals != 1 {
-		t.Fatalf("expected stream to be finalized before tool use, got %d", sender.finals)
+	prepared := prepareToolCalls(reg, []llm.ToolCall{{ID: "c1", Name: "read_file", Args: []byte(`{}`)}})
+	orch.BeforeToolUse(context.Background(), "using tool", toolDescriptions(prepared))
+	if _, err := orch.DispatchTools(context.Background(), prepared); err != nil {
+		t.Fatalf("dispatch: %v", err)
 	}
-	if len(sender.sent) != 0 {
-		t.Fatalf("expected no batch send after streamed content, got %v", sender.sent)
+	if fmt.Sprint(sender.deltas) != fmt.Sprint([]string{"\n", "reading file example.txt..."}) {
+		t.Fatalf("unexpected tool description delta: %v", sender.deltas)
+	}
+}
+
+func TestHumanInputOrchestrator_PreparesBatchBeforeDescriptionsAndExecution(t *testing.T) {
+	sender := &mockSender{}
+	reg := tools.NewRegistry()
+	var preparedCount atomic.Int32
+	var executedCount atomic.Int32
+
+	register := func(name, description string) {
+		reg.Register(tools.ToolSchema{Name: name, Parallel: true}, func([]byte) (tools.PreparedTool, error) {
+			preparedCount.Add(1)
+			return tools.PreparedTool{
+				Description: description,
+				Execute: func(context.Context) (tools.ToolResult, error) {
+					if preparedCount.Load() != 2 {
+						return tools.ToolResult{}, fmt.Errorf("executed before batch preparation completed")
+					}
+					if len(sender.deltas) != 1 {
+						return tools.ToolResult{}, fmt.Errorf("executed before descriptions were sent")
+					}
+					executedCount.Add(1)
+					return tools.TextResult("done"), nil
+				},
+			}, nil
+		})
+	}
+	register("first", "running first...")
+	register("second", "running second...")
+
+	orch := NewHumanInputOrchestrator(sender, nil)
+	prepared := prepareToolCalls(reg, []llm.ToolCall{
+		{ID: "c1", Name: "first", Args: []byte(`{}`)},
+		{ID: "c2", Name: "second", Args: []byte(`{}`)},
+	})
+	orch.BeforeToolUse(context.Background(), "thinking\n", toolDescriptions(prepared))
+	outcomes, err := orch.DispatchTools(context.Background(), prepared)
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if preparedCount.Load() != 2 || executedCount.Load() != 2 {
+		t.Fatalf("expected two preparations and executions, got prepared=%d executed=%d", preparedCount.Load(), executedCount.Load())
+	}
+	for i, outcome := range outcomes {
+		if outcome.Err != nil {
+			t.Fatalf("outcome %d: %v", i, outcome.Err)
+		}
+	}
+	if fmt.Sprint(sender.deltas) != fmt.Sprint([]string{"running first...\nrunning second..."}) {
+		t.Fatalf("unexpected description delta: %v", sender.deltas)
+	}
+}
+
+func TestHumanInputOrchestrator_PreservesEmptyDescriptions(t *testing.T) {
+	sender := &mockSender{}
+	reg := tools.NewRegistry()
+	reg.Register(tools.ToolSchema{Name: "empty"}, func([]byte) (tools.PreparedTool, error) {
+		return tools.PreparedTool{
+			Execute: func(context.Context) (tools.ToolResult, error) {
+				return tools.TextResult("done"), nil
+			},
+		}, nil
+	})
+	reg.Register(tools.ToolSchema{Name: "invalid"}, func([]byte) (tools.PreparedTool, error) {
+		return tools.PreparedTool{}, fmt.Errorf("missing required argument")
+	})
+	orch := NewHumanInputOrchestrator(sender, nil)
+
+	prepared := prepareToolCalls(reg, []llm.ToolCall{
+		{ID: "c1", Name: "empty", Args: []byte(`{}`)},
+		{ID: "c2", Name: "invalid", Args: []byte(`{}`)},
+		{ID: "c3", Name: "missing", Args: []byte(`{}`)},
+	})
+	orch.BeforeToolUse(context.Background(), "", toolDescriptions(prepared))
+	outcomes, err := orch.DispatchTools(context.Background(), prepared)
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if fmt.Sprint(sender.deltas) != fmt.Sprint([]string{"\n\nCalling unknown tool: \"missing\""}) {
+		t.Fatalf("unexpected descriptions: %v", sender.deltas)
+	}
+	if outcomes[1].Err == nil {
+		t.Fatal("expected preparation error for invalid tool call")
+	}
+	if outcomes[2].Err == nil {
+		t.Fatalf("expected unknown tool preparation error, got %#v", outcomes[2])
+	}
+}
+
+func TestBackgroundAndSubagentOrchestrators_DoNotEmitDescriptions(t *testing.T) {
+	reg := tools.NewRegistry()
+	reg.Register(tools.ToolSchema{Name: "tool"}, func([]byte) (tools.PreparedTool, error) {
+		return tools.PreparedTool{
+			Description: "running tool...",
+			Execute: func(context.Context) (tools.ToolResult, error) {
+				return tools.TextResult("done"), nil
+			},
+		}, nil
+	})
+	sender := &mockSender{}
+	prepared := prepareToolCalls(reg, []llm.ToolCall{{ID: "c1", Name: "tool", Args: []byte(`{}`)}})
+	background := NewBackgroundOrchestrator(sender)
+	background.BeforeToolUse(context.Background(), "thinking", toolDescriptions(prepared))
+	if _, err := background.DispatchTools(context.Background(), prepared); err != nil {
+		t.Fatalf("background dispatch: %v", err)
+	}
+	subagent := NewSubagentOrchestrator(nil, nil)
+	subagent.BeforeToolUse(context.Background(), "thinking", toolDescriptions(prepared))
+	if _, err := subagent.DispatchTools(context.Background(), prepared); err != nil {
+		t.Fatalf("subagent dispatch: %v", err)
+	}
+	if len(sender.deltas) != 0 || len(sender.sent) != 0 {
+		t.Fatalf("expected no description output, got deltas=%v sent=%v", sender.deltas, sender.sent)
 	}
 }
 
@@ -215,12 +318,15 @@ func TestSubagentToolset_DoesNotForwardSubagentToolContent(t *testing.T) {
 
 	NewSubagentToolset(SessionEnv{Cfg: cfg, Rt: rt, Agent: agent, Skills: skills, BrowserBroker: browser.NewNoopBroker()}, manager).Register(reg)
 
-	handler, ok := reg.Handler("agent")
+	preparer, ok := reg.Get("agent")
 	if !ok {
-		t.Fatal("expected agent handler")
+		t.Fatal("expected agent preparer")
 	}
-
-	result, err := handler(context.Background(), []byte(`{"task":"do work","system_prompt":"sys"}`))
+	prepared, err := preparer([]byte(`{"task":"do work","system_prompt":"sys"}`))
+	if err != nil {
+		t.Fatalf("prepare agent: %v", err)
+	}
+	result, err := prepared.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -255,12 +361,16 @@ func TestFleetToolset_ReturnsAllChildTaskIDs(t *testing.T) {
 
 	NewFleetToolset(SessionEnv{Cfg: cfg, Rt: rt, Agent: agent, Skills: skills, BrowserBroker: browser.NewNoopBroker()}, manager).Register(reg)
 
-	handler, ok := reg.Handler("fleet")
+	preparer, ok := reg.Get("fleet")
 	if !ok {
-		t.Fatal("expected fleet handler")
+		t.Fatal("expected fleet preparer")
+	}
+	prepared, err := preparer([]byte(`{"system_prompt":"sys","tasks":["a","b","c"]}`))
+	if err != nil {
+		t.Fatalf("prepare fleet: %v", err)
 	}
 
-	result, err := handler(context.Background(), []byte(`{"system_prompt":"sys","tasks":["a","b","c"]}`))
+	result, err := prepared.Execute(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -317,37 +427,38 @@ func TestRunDispatch_UnknownTool(t *testing.T) {
 	reg := tools.NewRegistry()
 	calls := []llm.ToolCall{{ID: "c1", Name: "nonexistent", Args: []byte(`{}`)}}
 
-	outcomes, err := runDispatch(context.Background(), reg, calls)
+	outcomes, err := runDispatch(context.Background(), prepareToolCalls(reg, calls))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(outcomes) != 1 {
 		t.Fatalf("expected 1 outcome, got %d", len(outcomes))
 	}
-	if outcomes[0].Err != nil {
-		t.Fatalf("expected no Err for unknown tool (handled in ToolMsg), got %v", outcomes[0].Err)
-	}
-	content, _ := outcomes[0].ToolMsg.Content.(string)
-	if content == "" {
-		t.Error("expected error content for unknown tool")
+	if outcomes[0].Err == nil || !strings.Contains(outcomes[0].Err.Error(), "unknown tool") {
+		t.Fatalf("expected unknown tool preparation error, got %#v", outcomes[0])
 	}
 }
 
 func TestRunDispatch_ImageToolInjectsMultimodalUserMessage(t *testing.T) {
 	reg := tools.NewRegistry()
-	reg.Register(tools.ToolSchema{Name: "read_image"}, func(_ context.Context, _ []byte) (tools.ToolResult, error) {
-		return tools.ImageResult([]map[string]any{
-			{
-				"type": "image_url",
-				"image_url": map[string]any{
-					"url":    "data:image/png;base64,AAAA",
-					"detail": "auto",
-				},
+	reg.Register(tools.ToolSchema{Name: "read_image"}, func([]byte) (tools.PreparedTool, error) {
+		return tools.PreparedTool{
+			Description: "reading image...",
+			Execute: func(context.Context) (tools.ToolResult, error) {
+				return tools.ImageResult([]map[string]any{
+					{
+						"type": "image_url",
+						"image_url": map[string]any{
+							"url":    "data:image/png;base64,AAAA",
+							"detail": "auto",
+						},
+					},
+				}), nil
 			},
-		}), nil
+		}, nil
 	})
 
-	outcomes, err := runDispatch(context.Background(), reg, []llm.ToolCall{{ID: "c1", Name: "read_image", Args: []byte(`{}`)}})
+	outcomes, err := runDispatch(context.Background(), prepareToolCalls(reg, []llm.ToolCall{{ID: "c1", Name: "read_image", Args: []byte(`{}`)}}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -381,25 +492,35 @@ func TestRunDispatch_ImageToolInjectsMultimodalUserMessage(t *testing.T) {
 
 func TestRunDispatch_MultipleToolsAppendFollowupsAfterAllToolReplies(t *testing.T) {
 	reg := tools.NewRegistry()
-	reg.Register(tools.ToolSchema{Name: "read_image", Parallel: true}, func(_ context.Context, _ []byte) (tools.ToolResult, error) {
-		return tools.ImageResult([]map[string]any{
-			{
-				"type": "image_url",
-				"image_url": map[string]any{
-					"url":    "data:image/png;base64,AAAA",
-					"detail": "auto",
-				},
+	reg.Register(tools.ToolSchema{Name: "read_image", Parallel: true}, func([]byte) (tools.PreparedTool, error) {
+		return tools.PreparedTool{
+			Description: "reading image...",
+			Execute: func(context.Context) (tools.ToolResult, error) {
+				return tools.ImageResult([]map[string]any{
+					{
+						"type": "image_url",
+						"image_url": map[string]any{
+							"url":    "data:image/png;base64,AAAA",
+							"detail": "auto",
+						},
+					},
+				}), nil
 			},
-		}), nil
+		}, nil
 	})
-	reg.Register(tools.ToolSchema{Name: "read_file", Parallel: true}, func(_ context.Context, _ []byte) (tools.ToolResult, error) {
-		return tools.TextResult("file contents"), nil
+	reg.Register(tools.ToolSchema{Name: "read_file", Parallel: true}, func([]byte) (tools.PreparedTool, error) {
+		return tools.PreparedTool{
+			Description: "reading file...",
+			Execute: func(context.Context) (tools.ToolResult, error) {
+				return tools.TextResult("file contents"), nil
+			},
+		}, nil
 	})
 
-	outcomes, err := runDispatch(context.Background(), reg, []llm.ToolCall{
+	outcomes, err := runDispatch(context.Background(), prepareToolCalls(reg, []llm.ToolCall{
 		{ID: "c1", Name: "read_image", Args: []byte(`{}`)},
 		{ID: "c2", Name: "read_file", Args: []byte(`{}`)},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -417,6 +538,73 @@ func TestRunDispatch_MultipleToolsAppendFollowupsAfterAllToolReplies(t *testing.
 	if outcomes[0].Followup.Role != "user" {
 		t.Fatalf("expected follow-up role=user, got %#v", outcomes[0].Followup)
 	}
+}
+
+func TestRunDispatch_RespectsParallelFlag(t *testing.T) {
+	run := func(t *testing.T, parallel bool) {
+		t.Helper()
+		reg := tools.NewRegistry()
+		started := make(chan string, 2)
+		release := make(chan struct{}, 2)
+		for _, name := range []string{"first", "second"} {
+			name := name
+			reg.Register(tools.ToolSchema{Name: name, Parallel: parallel}, func([]byte) (tools.PreparedTool, error) {
+				return tools.PreparedTool{
+					Description: "running " + name,
+					Execute: func(context.Context) (tools.ToolResult, error) {
+						started <- name
+						<-release
+						return tools.TextResult("done"), nil
+					},
+				}, nil
+			})
+		}
+		done := make(chan []llm.CallOutcome, 1)
+		go func() {
+			outcomes, _ := runDispatch(context.Background(), prepareToolCalls(reg, []llm.ToolCall{
+				{ID: "c1", Name: "first", Args: []byte(`{}`)},
+				{ID: "c2", Name: "second", Args: []byte(`{}`)},
+			}))
+			done <- outcomes
+		}()
+
+		<-started
+		if parallel {
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				t.Fatal("parallel tools did not overlap")
+			}
+			release <- struct{}{}
+			release <- struct{}{}
+		} else {
+			select {
+			case name := <-started:
+				t.Fatalf("sequential tool %s started before the first completed", name)
+			case <-time.After(20 * time.Millisecond):
+			}
+			release <- struct{}{}
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				t.Fatal("second sequential tool did not start")
+			}
+			release <- struct{}{}
+		}
+		outcomes := <-done
+		for i, outcome := range outcomes {
+			if outcome.Err != nil {
+				t.Fatalf("outcome %d: %v", i, outcome.Err)
+			}
+		}
+	}
+
+	t.Run("parallel", func(t *testing.T) {
+		run(t, true)
+	})
+	t.Run("sequential", func(t *testing.T) {
+		run(t, false)
+	})
 }
 
 type nullRuntime struct{}
@@ -463,10 +651,10 @@ func TestSubagentRegistry_HasNoMetaTools(t *testing.T) {
 
 	reg := NewSubagentRegistry(rt, skills, cfg, cmdTools, browserClient)
 
-	if _, ok := reg.Handler("agent"); ok {
+	if _, ok := reg.Schema("agent"); ok {
 		t.Error("subagent registry should not expose 'agent' meta-tool")
 	}
-	if _, ok := reg.Handler("fleet"); ok {
+	if _, ok := reg.Schema("fleet"); ok {
 		t.Error("subagent registry should not expose 'fleet' meta-tool")
 	}
 }

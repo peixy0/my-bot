@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -74,46 +75,45 @@ func cloneTools(tools []map[string]any) []map[string]any {
 }
 
 type mockOrchestrator struct {
-	registry        *tools.Registry
-	begins          int
-	beforeToolCalls int
-	finalContent    []string
-	finalResponses  []string
-	dispatches      int
-	outcomes        []llm.CallOutcome
-	interrupt       *llm.ChatMessage
+	registry         *tools.Registry
+	begins           int
+	finalResponses   []string
+	toolDescriptions [][]string
+	dispatchContents []string
+	dispatches       int
+	outcomes         []llm.CallOutcome
+	interrupt        *llm.ChatMessage
 }
 
 func newMockOrchestrator() *mockOrchestrator {
 	return &mockOrchestrator{registry: tools.NewRegistry()}
 }
 
-func (o *mockOrchestrator) OnContentBegin(_ context.Context) {
+func (o *mockOrchestrator) OnContentBegin(context.Context) {
 	o.begins++
 }
-func (o *mockOrchestrator) OnContentDelta(_ context.Context, _ string) {}
-func (o *mockOrchestrator) OnContentFinal(_ context.Context, content string) {
-	o.finalContent = append(o.finalContent, content)
-}
-func (o *mockOrchestrator) OnFinalResponse(_ context.Context, content string) {
+func (o *mockOrchestrator) OnContentDelta(context.Context, string) {}
+func (o *mockOrchestrator) OnContentFinal(context.Context)         {}
+func (o *mockOrchestrator) OnFinalResponse(ctx context.Context, content string) {
 	o.finalResponses = append(o.finalResponses, content)
 }
-func (o *mockOrchestrator) BeforeToolUse(_ context.Context, _ string) {
-	o.beforeToolCalls++
+func (o *mockOrchestrator) BeforeToolUse(ctx context.Context, content string, descriptions []string) {
+	o.dispatchContents = append(o.dispatchContents, content)
+	o.toolDescriptions = append(o.toolDescriptions, descriptions)
 }
-func (o *mockOrchestrator) DispatchTools(_ context.Context, calls []llm.ToolCall) ([]llm.CallOutcome, error) {
+func (o *mockOrchestrator) DispatchTools(ctx context.Context, calls []preparedToolCall) ([]llm.CallOutcome, error) {
 	o.dispatches++
 	if o.outcomes != nil {
 		return o.outcomes, nil
 	}
 	out := make([]llm.CallOutcome, len(calls))
 	for i, tc := range calls {
-		out[i] = llm.CallOutcome{ToolMsg: llm.ToolResultMessage(tc.ID, "result")}
+		out[i] = llm.CallOutcome{ToolMsg: llm.ToolResultMessage(tc.call.ID, "result")}
 	}
 	return out, nil
 }
 
-func (o *mockOrchestrator) MaybeInterrupt(_ context.Context) *llm.ChatMessage {
+func (o *mockOrchestrator) MaybeInterrupt(context.Context) *llm.ChatMessage {
 	return o.interrupt
 }
 
@@ -135,9 +135,22 @@ func TestAgent_ToolCallDispatch(t *testing.T) {
 	conv := llm.NewConversation()
 	conv.Messages = append(conv.Messages, llm.UserMessage("do something"))
 	orch := newMockOrchestrator()
+	reg := tools.NewRegistry()
+	reg.Register(tools.ToolSchema{Name: "test"}, func([]byte) (tools.PreparedTool, error) {
+		return tools.PreparedTool{
+			Description: "running test",
+			Execute: func(context.Context) (tools.ToolResult, error) {
+				return tools.TextResult("done"), nil
+			},
+		}, nil
+	})
 
-	cfg := &config.Config{LLM: config.LLMConfig{Model: "test-model"}, Context: config.ContextConfig{MaxOutputTokens: 16384}}
-	err := agent.Run(context.Background(), nil, cfg, "sys", conv, orch, tools.NewRegistry())
+	cfg := &config.Config{
+		LLM:     config.LLMConfig{Model: "test-model"},
+		Context: config.ContextConfig{MaxOutputTokens: 16384},
+		Tool:    config.ToolConfig{EnableDescriptiveOutput: true},
+	}
+	err := agent.Run(context.Background(), nil, cfg, "sys", conv, orch, reg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -145,11 +158,14 @@ func TestAgent_ToolCallDispatch(t *testing.T) {
 	if client.calls[0].maxTokens != cfg.Context.MaxOutputTokens {
 		t.Fatalf("expected request max_tokens %d, got %d", cfg.Context.MaxOutputTokens, client.calls[0].maxTokens)
 	}
-	if orch.beforeToolCalls != 1 {
-		t.Errorf("expected 1 BeforeToolUse call, got %d", orch.beforeToolCalls)
-	}
 	if orch.dispatches != 1 {
 		t.Errorf("expected 1 dispatch, got %d", orch.dispatches)
+	}
+	if len(orch.dispatchContents) != 1 || orch.dispatchContents[0] != "thinking" {
+		t.Fatalf("expected original response content at dispatch, got %v", orch.dispatchContents)
+	}
+	if fmt.Sprint(orch.toolDescriptions) != fmt.Sprint([][]string{{"running test"}}) {
+		t.Fatalf("expected prepared tool description, got %v", orch.toolDescriptions)
 	}
 	if len(client.calls) < 2 || len(client.calls[1].messages) < 3 {
 		t.Fatalf("expected second call to include prior assistant message, got %+v", client.calls)
@@ -157,6 +173,9 @@ func TestAgent_ToolCallDispatch(t *testing.T) {
 	assistantMsg := client.calls[1].messages[2]
 	if assistantMsg.ReasoningContent != "private chain" {
 		t.Fatalf("expected reasoning_content in replayed assistant message, got %#v", assistantMsg)
+	}
+	if assistantMsg.Content != "thinking" {
+		t.Fatalf("expected original response content in replayed assistant message, got %#v", assistantMsg.Content)
 	}
 }
 
@@ -254,7 +273,7 @@ func TestAgent_SkipsOnlyFailedToolOutcomes(t *testing.T) {
 	}
 }
 
-func TestAgent_BeforeToolUseErrorNonFatal(t *testing.T) {
+func TestAgent_ToolCallContentDoesNotBlockDispatch(t *testing.T) {
 	client := &mockClient{
 		responses: []llm.CompletionResponse{
 			{
@@ -279,7 +298,7 @@ func TestAgent_BeforeToolUseErrorNonFatal(t *testing.T) {
 	}
 
 	if orch.dispatches != 1 {
-		t.Errorf("expected tool dispatch even after BeforeToolUse error, got %d dispatches", orch.dispatches)
+		t.Errorf("expected tool dispatch, got %d dispatches", orch.dispatches)
 	}
 }
 
@@ -483,7 +502,7 @@ type mockOrchestratorWithAbort struct {
 	abortCh chan struct{}
 }
 
-func (o *mockOrchestratorWithAbort) DispatchTools(_ context.Context, calls []llm.ToolCall) ([]llm.CallOutcome, error) {
+func (o *mockOrchestratorWithAbort) DispatchTools(ctx context.Context, calls []preparedToolCall) ([]llm.CallOutcome, error) {
 	result, err := o.mockOrchestrator.DispatchTools(context.Background(), calls)
 	go func() {
 		select {
@@ -494,6 +513,6 @@ func (o *mockOrchestratorWithAbort) DispatchTools(_ context.Context, calls []llm
 	return result, err
 }
 
-func (o *mockOrchestratorWithAbort) MaybeInterrupt(_ context.Context) *llm.ChatMessage {
+func (o *mockOrchestratorWithAbort) MaybeInterrupt(context.Context) *llm.ChatMessage {
 	return nil
 }

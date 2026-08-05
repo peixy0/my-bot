@@ -26,13 +26,24 @@ func newCommandTestToolset(t *testing.T) (*CommandToolset, *tasks.Manager, *Regi
 	return toolset, manager, reg
 }
 
-func mustHandler(t *testing.T, reg *Registry, name string) ToolHandler {
+type preparedExecutor func(context.Context, []byte) (ToolResult, error)
+
+func mustPreparedExecutor(t *testing.T, reg *Registry, name string) preparedExecutor {
 	t.Helper()
-	h, ok := reg.Handler(name)
-	if !ok {
-		t.Fatalf("expected handler %q to be found", name)
+	return func(ctx context.Context, args []byte) (ToolResult, error) {
+		preparer, ok := reg.Get(name)
+		if !ok {
+			t.Fatalf("expected preparer %q to be found", name)
+		}
+		prepared, err := preparer(args)
+		if err != nil {
+			return ToolResult{}, err
+		}
+		if prepared.Description == "" {
+			t.Fatalf("expected description for %q", name)
+		}
+		return prepared.Execute(ctx)
 	}
-	return h
 }
 
 func parseTaskID(t *testing.T, result ToolResult) string {
@@ -47,9 +58,22 @@ func parseTaskID(t *testing.T, result ToolResult) string {
 	return payload["task_id"]
 }
 
+func TestCommandPreparerRejectsInvalidArguments(t *testing.T) {
+	_, _, reg := newCommandTestToolset(t)
+	preparer, ok := reg.Get("run_command")
+	if !ok {
+		t.Fatal("run_command was not registered")
+	}
+	for _, args := range [][]byte{[]byte(`{`), []byte(`{}`), []byte(`{"command":""}`)} {
+		if _, err := preparer(args); err == nil {
+			t.Fatalf("expected preparation error for %s", args)
+		}
+	}
+}
+
 func TestRunCommandReturnsTaskID(t *testing.T) {
 	_, _, reg := newCommandTestToolset(t)
-	handler := mustHandler(t, reg, "run_command")
+	handler := mustPreparedExecutor(t, reg, "run_command")
 	result, err := handler(context.Background(), []byte(`{"command":"echo hi", "timeout": 0}`))
 	if err != nil {
 		t.Fatalf("run_command: %v", err)
@@ -59,7 +83,7 @@ func TestRunCommandReturnsTaskID(t *testing.T) {
 
 func TestRunCommandReturnsFinalResultWithinTimeout(t *testing.T) {
 	_, _, reg := newCommandTestToolset(t)
-	handler := mustHandler(t, reg, "run_command")
+	handler := mustPreparedExecutor(t, reg, "run_command")
 	result, err := handler(context.Background(), []byte(`{"command":"echo hi","timeout":2}`))
 	if err != nil {
 		t.Fatalf("run_command: %v", err)
@@ -74,7 +98,7 @@ func TestRunCommandReturnsFinalResultWithinTimeout(t *testing.T) {
 
 func TestRunCommandReturnsTaskIDAfterTimeout(t *testing.T) {
 	_, _, reg := newCommandTestToolset(t)
-	handler := mustHandler(t, reg, "run_command")
+	handler := mustPreparedExecutor(t, reg, "run_command")
 	result, err := handler(context.Background(), []byte(`{"command":"sleep 2; echo hi","timeout":1}`))
 	if err != nil {
 		t.Fatalf("run_command: %v", err)
@@ -84,8 +108,8 @@ func TestRunCommandReturnsTaskIDAfterTimeout(t *testing.T) {
 
 func TestAwaitTaskReportsExitCodeAndOutput(t *testing.T) {
 	_, _, reg := newCommandTestToolset(t)
-	run := mustHandler(t, reg, "run_command")
-	await := mustHandler(t, reg, "await_task")
+	run := mustPreparedExecutor(t, reg, "run_command")
+	await := mustPreparedExecutor(t, reg, "await_task")
 	start, err := run(context.Background(), []byte(`{"command":"echo hello && exit 7", "timeout": 0}`))
 	if err != nil {
 		t.Fatalf("run_command: %v", err)
@@ -108,9 +132,9 @@ func TestAwaitTaskReportsExitCodeAndOutput(t *testing.T) {
 
 func TestWriteTaskInputFeedsProcessStdin(t *testing.T) {
 	_, _, reg := newCommandTestToolset(t)
-	run := mustHandler(t, reg, "run_command")
-	writeInput := mustHandler(t, reg, "write_to_task")
-	await := mustHandler(t, reg, "await_task")
+	run := mustPreparedExecutor(t, reg, "run_command")
+	writeInput := mustPreparedExecutor(t, reg, "write_to_task")
+	await := mustPreparedExecutor(t, reg, "await_task")
 	start, err := run(context.Background(), []byte(`{"command":"sleep 0.2; read line; echo got:$line", "timeout": 0}`))
 	if err != nil {
 		t.Fatalf("run_command: %v", err)
@@ -130,8 +154,8 @@ func TestWriteTaskInputFeedsProcessStdin(t *testing.T) {
 
 func TestGetTaskReturnsSnapshot(t *testing.T) {
 	_, _, reg := newCommandTestToolset(t)
-	run := mustHandler(t, reg, "run_command")
-	get := mustHandler(t, reg, "get_task")
+	run := mustPreparedExecutor(t, reg, "run_command")
+	get := mustPreparedExecutor(t, reg, "get_task")
 	start, err := run(context.Background(), []byte(`{"command":"sleep 1; echo hi","timeout":0}`))
 	if err != nil {
 		t.Fatalf("run_command: %v", err)
@@ -151,8 +175,8 @@ func TestGetTaskReturnsSnapshot(t *testing.T) {
 
 func TestListTasksReturnsNonEmpty(t *testing.T) {
 	_, _, reg := newCommandTestToolset(t)
-	run := mustHandler(t, reg, "run_command")
-	list := mustHandler(t, reg, "list_tasks")
+	run := mustPreparedExecutor(t, reg, "run_command")
+	list := mustPreparedExecutor(t, reg, "list_tasks")
 	start, err := run(context.Background(), []byte(`{"command":"sleep 10","timeout":0}`))
 	if err != nil {
 		t.Fatalf("run_command: %v", err)
@@ -172,9 +196,9 @@ func TestListTasksReturnsNonEmpty(t *testing.T) {
 
 func TestKillTaskTerminatesRunningTask(t *testing.T) {
 	_, _, reg := newCommandTestToolset(t)
-	run := mustHandler(t, reg, "run_command")
-	kill := mustHandler(t, reg, "kill_task")
-	get := mustHandler(t, reg, "get_task")
+	run := mustPreparedExecutor(t, reg, "run_command")
+	kill := mustPreparedExecutor(t, reg, "kill_task")
+	get := mustPreparedExecutor(t, reg, "get_task")
 	start, err := run(context.Background(), []byte(`{"command":"sleep 10","timeout":0}`))
 	if err != nil {
 		t.Fatalf("run_command: %v", err)
@@ -187,7 +211,6 @@ func TestKillTaskTerminatesRunningTask(t *testing.T) {
 	if !strings.Contains(got.Text, `"status":"killed"`) {
 		t.Fatalf("expected killed status, got:\n%s", got.Text)
 	}
-	// The killed task should have been removed, so get_task must report it missing.
 	after, err := get(context.Background(), []byte(`{"task_id":"`+taskID+`"}`))
 	if err != nil {
 		t.Fatalf("get_task: %v", err)
@@ -199,7 +222,7 @@ func TestKillTaskTerminatesRunningTask(t *testing.T) {
 
 func TestKillTaskNonExistentReturnsError(t *testing.T) {
 	_, _, reg := newCommandTestToolset(t)
-	kill := mustHandler(t, reg, "kill_task")
+	kill := mustPreparedExecutor(t, reg, "kill_task")
 	got, err := kill(context.Background(), []byte(`{"task_id":"does-not-exist"}`))
 	if err != nil {
 		t.Fatalf("kill_task: %v", err)

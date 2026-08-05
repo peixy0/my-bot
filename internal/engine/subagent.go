@@ -64,7 +64,7 @@ func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task 
 				}
 			}()
 			reg := NewSubagentRegistry(r.env.Rt, r.env.Skills, &cfg, cmdTools, browserClient)
-			orch := NewSubagentOrchestrator(reg, emit, input)
+			orch := NewSubagentOrchestrator(emit, input)
 			loop := NewAgentLoop(&cfg, r.env.Agent)
 			err := loop.Run(agentCtx, nil, reg, orch, llm.NewSubagentPrompt(r.env.Skills, r.env.Rt, systemPrompt), task)
 			if err != nil {
@@ -119,20 +119,31 @@ func (s *SubagentToolset) Register(r *tools.Registry) {
 			},
 			"required": []string{"task", "system_prompt"},
 		},
-	}, func(ctx context.Context, args []byte) (tools.ToolResult, error) {
+	}, func(args []byte) (tools.PreparedTool, error) {
 		var p struct {
 			Task         string `json:"task"`
 			SystemPrompt string `json:"system_prompt"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return tools.ToolResult{}, fmt.Errorf("parse agent args: %w", err)
+			return tools.PreparedTool{}, fmt.Errorf("parse agent args: %w", err)
 		}
-		slog.Debug("subagent start")
-		snap, err := s.runner.startAgentTask(ctx, p.SystemPrompt, p.Task)
-		if err != nil {
-			return tools.ErrorResult(fmt.Errorf("start subagent task: %w", err)), nil
+		if p.Task == "" {
+			return tools.PreparedTool{}, fmt.Errorf("task must not be empty")
 		}
-		return tools.TextResult(tools.MarshalResult(map[string]any{"task_id": snap.TaskID})), nil
+		if p.SystemPrompt == "" {
+			return tools.PreparedTool{}, fmt.Errorf("system_prompt must not be empty")
+		}
+		return tools.PreparedTool{
+			Description: fmt.Sprintf("Starting agent task: %s", p.Task),
+			Execute: func(ctx context.Context) (tools.ToolResult, error) {
+				slog.Debug("subagent start")
+				snap, err := s.runner.startAgentTask(ctx, p.SystemPrompt, p.Task)
+				if err != nil {
+					return tools.ErrorResult(fmt.Errorf("start subagent task: %w", err)), nil
+				}
+				return tools.TextResult(tools.MarshalResult(map[string]any{"task_id": snap.TaskID})), nil
+			},
+		}, nil
 	})
 }
 
@@ -155,20 +166,36 @@ func (s *FleetToolset) Register(r *tools.Registry) {
 			},
 			"required": []string{"system_prompt", "tasks"},
 		},
-	}, func(ctx context.Context, args []byte) (tools.ToolResult, error) {
+	}, func(args []byte) (tools.PreparedTool, error) {
 		var p struct {
 			SystemPrompt string   `json:"system_prompt"`
 			Tasks        []string `json:"tasks"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return tools.ToolResult{}, fmt.Errorf("parse fleet args: %w", err)
+			return tools.PreparedTool{}, fmt.Errorf("parse fleet args: %w", err)
 		}
-		slog.Debug("fleet start", "tasks", len(p.Tasks))
-		taskIDs, err := s.runner.startFleetTask(ctx, p.SystemPrompt, p.Tasks)
-		if err != nil {
-			return tools.ErrorResult(fmt.Errorf("start fleet tasks: %w", err)), nil
+		if p.SystemPrompt == "" {
+			return tools.PreparedTool{}, fmt.Errorf("system_prompt must not be empty")
 		}
-		return tools.TextResult(tools.MarshalResult(map[string]any{"task_ids": taskIDs})), nil
+		if len(p.Tasks) == 0 {
+			return tools.PreparedTool{}, fmt.Errorf("tasks must not be empty")
+		}
+		for _, task := range p.Tasks {
+			if task == "" {
+				return tools.PreparedTool{}, fmt.Errorf("tasks must not contain empty items")
+			}
+		}
+		return tools.PreparedTool{
+			Description: fmt.Sprintf("Starting %d agent tasks", len(p.Tasks)),
+			Execute: func(ctx context.Context) (tools.ToolResult, error) {
+				slog.Debug("fleet start", "tasks", len(p.Tasks))
+				taskIDs, err := s.runner.startFleetTask(ctx, p.SystemPrompt, p.Tasks)
+				if err != nil {
+					return tools.ErrorResult(fmt.Errorf("start fleet tasks: %w", err)), nil
+				}
+				return tools.TextResult(tools.MarshalResult(map[string]any{"task_ids": taskIDs})), nil
+			},
+		}, nil
 	})
 }
 

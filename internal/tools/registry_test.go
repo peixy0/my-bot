@@ -7,13 +7,25 @@ import (
 
 func TestRegistry_RegisterAndLookup(t *testing.T) {
 	r := NewRegistry()
-	r.Register(ToolSchema{Name: "foo", Description: "does foo"}, func(_ context.Context, _ []byte) (ToolResult, error) {
-		return TextResult("foo result"), nil
+	r.Register(ToolSchema{Name: "foo", Description: "does foo"}, func([]byte) (PreparedTool, error) {
+		return PreparedTool{
+			Description: "doing foo...",
+			Execute: func(context.Context) (ToolResult, error) {
+				return TextResult("foo result"), nil
+			},
+		}, nil
 	})
 
-	_, ok := r.Handler("foo")
+	preparer, ok := r.Get("foo")
 	if !ok {
-		t.Fatal("expected handler to be found")
+		t.Fatal("expected preparer to be found")
+	}
+	prepared, err := preparer([]byte(`{}`))
+	if err != nil {
+		t.Fatalf("prepare foo: %v", err)
+	}
+	if prepared.Description != "doing foo..." {
+		t.Fatalf("unexpected prepared description: %q", prepared.Description)
 	}
 	s, ok := r.Schema("foo")
 	if !ok || s.Name != "foo" {
@@ -21,11 +33,11 @@ func TestRegistry_RegisterAndLookup(t *testing.T) {
 	}
 }
 
-func TestRegistry_HandlerNotFound(t *testing.T) {
+func TestRegistry_PreparerNotFound(t *testing.T) {
 	r := NewRegistry()
-	_, ok := r.Handler("nonexistent")
+	_, ok := r.Get("nonexistent")
 	if ok {
-		t.Fatal("expected handler not to be found")
+		t.Fatal("expected preparer not to be found")
 	}
 }
 
@@ -109,9 +121,9 @@ func TestRegistry_RegisterToolset(t *testing.T) {
 	r := NewRegistry()
 	r.RegisterToolset(&testToolset{})
 
-	_, ok := r.Handler("from_toolset")
+	_, ok := r.Get("from_toolset")
 	if !ok {
-		t.Fatal("expected toolset handler to be registered")
+		t.Fatal("expected toolset preparer to be registered")
 	}
 	s, ok := r.Schema("from_toolset")
 	if !ok || s.Description != "toolset tool" {
@@ -122,5 +134,9 @@ func TestRegistry_RegisterToolset(t *testing.T) {
 type testToolset struct{}
 
 func (t *testToolset) Register(r *Registry) {
-	r.Register(ToolSchema{Name: "from_toolset", Description: "toolset tool"}, nil)
+	r.Register(ToolSchema{Name: "from_toolset", Description: "toolset tool"}, func([]byte) (PreparedTool, error) {
+		return PreparedTool{Description: "using toolset tool...", Execute: func(context.Context) (ToolResult, error) {
+			return TextResult("done"), nil
+		}}, nil
+	})
 }

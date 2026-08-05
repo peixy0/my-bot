@@ -14,7 +14,12 @@ func ErrorResult(err error) ToolResult {
 func TextResult(s string) ToolResult            { return ToolResult{Text: s} }
 func ImageResult(b []map[string]any) ToolResult { return ToolResult{Blocks: b} }
 
-type ToolHandler func(ctx context.Context, args []byte) (ToolResult, error)
+type PreparedTool struct {
+	Description string
+	Execute     func(ctx context.Context) (ToolResult, error)
+}
+
+type ToolPreparer func(args []byte) (PreparedTool, error)
 
 type ToolSchema struct {
 	Name          string

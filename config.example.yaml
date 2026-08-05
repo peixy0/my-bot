@@ -41,6 +41,7 @@ container:
   runtime: ""
 
 tool:
+  enable_descriptive_output: true
   max_output_chars: 100000
   web_search_api: ""
   fetch_proxy: ""

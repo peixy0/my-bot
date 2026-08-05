@@ -86,17 +86,25 @@ func registerSkillTool(r *Registry, loader *SkillLoader) {
 			},
 			"required": []string{"skill_name"},
 		}),
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
+	}, func(args []byte) (PreparedTool, error) {
 		var p struct {
 			SkillName string `json:"skill_name"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, fmt.Errorf("parse use_skill args: %w", err)
+			return PreparedTool{}, fmt.Errorf("parse use_skill args: %w", err)
 		}
-		skill, err := loader.Load(p.SkillName)
-		if err != nil {
-			return ErrorResult(fmt.Errorf("load skill %s: %w", p.SkillName, err)), nil
+		if p.SkillName == "" {
+			return PreparedTool{}, fmt.Errorf("use_skill skill_name must not be empty")
 		}
-		return TextResult(formatSkillResult(skill)), nil
+		return PreparedTool{
+			Description: fmt.Sprintf("Loading skill %s", p.SkillName),
+			Execute: func(ctx context.Context) (ToolResult, error) {
+				skill, err := loader.Load(p.SkillName)
+				if err != nil {
+					return ErrorResult(fmt.Errorf("load skill %s: %w", p.SkillName, err)), nil
+				}
+				return TextResult(formatSkillResult(skill)), nil
+			},
+		}, nil
 	})
 }

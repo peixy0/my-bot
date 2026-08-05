@@ -97,28 +97,36 @@ func (o *Outbound) Register(r *tools.Registry) {
 			},
 			"required": []string{"image_path"},
 		}),
-	}, func(ctx context.Context, args []byte) (tools.ToolResult, error) {
+	}, func(args []byte) (tools.PreparedTool, error) {
 		var p struct {
 			ImagePath string `json:"image_path"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return tools.ToolResult{}, fmt.Errorf("parse send_image args: %w", err)
+			return tools.PreparedTool{}, fmt.Errorf("parse send_image args: %w", err)
 		}
-		data, err := o.rt.ReadRawBytes(ctx, p.ImagePath)
-		if err != nil {
-			return tools.ErrorResult(fmt.Errorf("read image %s for send_image: %w", p.ImagePath, err)), nil
+		if p.ImagePath == "" {
+			return tools.PreparedTool{}, fmt.Errorf("image_path must not be empty")
 		}
-		mimeType := http.DetectContentType(data)
-		b64 := base64.StdEncoding.EncodeToString(data)
-		if err := o.writeJSON(map[string]any{
-			"type":      "image",
-			"chat_id":   o.chatID,
-			"data":      b64,
-			"mime_type": mimeType,
-		}); err != nil {
-			return tools.ErrorResult(fmt.Errorf("send image %s to current chat: %w", p.ImagePath, err)), nil
-		}
-		return tools.TextResult(fmt.Sprintf("sent %s", p.ImagePath)), nil
+		return tools.PreparedTool{
+			Description: fmt.Sprintf("Sending image %s", p.ImagePath),
+			Execute: func(ctx context.Context) (tools.ToolResult, error) {
+				data, err := o.rt.ReadRawBytes(ctx, p.ImagePath)
+				if err != nil {
+					return tools.ErrorResult(fmt.Errorf("read image %s for send_image: %w", p.ImagePath, err)), nil
+				}
+				mimeType := http.DetectContentType(data)
+				b64 := base64.StdEncoding.EncodeToString(data)
+				if err := o.writeJSON(map[string]any{
+					"type":      "image",
+					"chat_id":   o.chatID,
+					"data":      b64,
+					"mime_type": mimeType,
+				}); err != nil {
+					return tools.ErrorResult(fmt.Errorf("send image %s to current chat: %w", p.ImagePath, err)), nil
+				}
+				return tools.TextResult(fmt.Sprintf("sent %s", p.ImagePath)), nil
+			},
+		}, nil
 	})
 }
 

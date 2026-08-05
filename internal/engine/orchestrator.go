@@ -12,20 +12,28 @@ import (
 	"my-bot/internal/inbox"
 	"my-bot/internal/llm"
 	"my-bot/internal/tasks"
-	"my-bot/internal/tools"
 
 	"golang.org/x/sync/errgroup"
 )
 
+type Orchestrator interface {
+	OnContentBegin(context.Context)
+	OnContentDelta(context.Context, string)
+	OnContentFinal(context.Context)
+	OnFinalResponse(context.Context, string)
+	BeforeToolUse(context.Context, string, []string)
+	DispatchTools(context.Context, []preparedToolCall) ([]llm.CallOutcome, error)
+	MaybeInterrupt(context.Context) *llm.ChatMessage
+}
+
 type HumanInputOrchestrator struct {
-	registry      *tools.Registry
 	sender        events.Outbound
 	inLoopInbox   inbox.Inbox[events.MessageEvent]
 	visionSupport bool
 }
 
-func NewHumanInputOrchestrator(registry *tools.Registry, sender events.Outbound, inLoopInbox inbox.Inbox[events.MessageEvent]) *HumanInputOrchestrator {
-	return &HumanInputOrchestrator{registry: registry, sender: sender, inLoopInbox: inLoopInbox}
+func NewHumanInputOrchestrator(sender events.Outbound, inLoopInbox inbox.Inbox[events.MessageEvent]) *HumanInputOrchestrator {
+	return &HumanInputOrchestrator{sender: sender, inLoopInbox: inLoopInbox}
 }
 
 func (o *HumanInputOrchestrator) WithVision(visionSupport bool) *HumanInputOrchestrator {
@@ -46,22 +54,30 @@ func (o *HumanInputOrchestrator) OnContentDelta(ctx context.Context, delta strin
 	o.sender.SendDelta(ctx, delta)
 }
 
-func (o *HumanInputOrchestrator) OnContentFinal(ctx context.Context, _ string) {
+func (o *HumanInputOrchestrator) OnContentFinal(ctx context.Context) {
 	if o.sender == nil {
 		return
 	}
 	o.sender.SendFinal(ctx)
 }
 
-func (o *HumanInputOrchestrator) OnFinalResponse(_ context.Context, _ string) {}
+func (o *HumanInputOrchestrator) OnFinalResponse(context.Context, string) {}
 
-func (o *HumanInputOrchestrator) BeforeToolUse(_ context.Context, _ string) {}
-
-func (o *HumanInputOrchestrator) DispatchTools(ctx context.Context, calls []llm.ToolCall) ([]llm.CallOutcome, error) {
-	return runDispatch(ctx, o.registry, calls)
+func (o *HumanInputOrchestrator) BeforeToolUse(ctx context.Context, content string, descriptions []string) {
+	if o.sender == nil || len(descriptions) == 0 {
+		return
+	}
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		o.sender.SendDelta(ctx, "\n")
+	}
+	o.sender.SendDelta(ctx, strings.Join(descriptions, "\n"))
 }
 
-func (o *HumanInputOrchestrator) MaybeInterrupt(ctx context.Context) *llm.ChatMessage {
+func (o *HumanInputOrchestrator) DispatchTools(ctx context.Context, calls []preparedToolCall) ([]llm.CallOutcome, error) {
+	return runDispatch(ctx, calls)
+}
+
+func (o *HumanInputOrchestrator) MaybeInterrupt(context.Context) *llm.ChatMessage {
 	if inject := o.drainInLoopInput(); inject != nil {
 		slog.Debug("in-loop user input injected after tool dispatch")
 		return inject
@@ -113,19 +129,18 @@ func (o *HumanInputOrchestrator) drainInLoopInput() *llm.ChatMessage {
 }
 
 type BackgroundOrchestrator struct {
-	registry *tools.Registry
-	sender   events.Outbound
+	sender events.Outbound
 }
 
-func NewBackgroundOrchestrator(registry *tools.Registry, sender events.Outbound) *BackgroundOrchestrator {
-	return &BackgroundOrchestrator{registry: registry, sender: sender}
+func NewBackgroundOrchestrator(sender events.Outbound) *BackgroundOrchestrator {
+	return &BackgroundOrchestrator{sender: sender}
 }
 
-func (o *BackgroundOrchestrator) OnContentBegin(_ context.Context) {}
+func (o *BackgroundOrchestrator) OnContentBegin(context.Context) {}
 
-func (o *BackgroundOrchestrator) OnContentDelta(_ context.Context, _ string) {}
+func (o *BackgroundOrchestrator) OnContentDelta(context.Context, string) {}
 
-func (o *BackgroundOrchestrator) OnContentFinal(_ context.Context, _ string) {}
+func (o *BackgroundOrchestrator) OnContentFinal(context.Context) {}
 
 func (o *BackgroundOrchestrator) OnFinalResponse(ctx context.Context, content string) {
 	const noReport = "NO_REPORT"
@@ -135,45 +150,44 @@ func (o *BackgroundOrchestrator) OnFinalResponse(ctx context.Context, content st
 	o.sender.Send(ctx, content)
 }
 
-func (o *BackgroundOrchestrator) BeforeToolUse(_ context.Context, _ string) {}
+func (o *BackgroundOrchestrator) BeforeToolUse(context.Context, string, []string) {}
 
-func (o *BackgroundOrchestrator) DispatchTools(ctx context.Context, calls []llm.ToolCall) ([]llm.CallOutcome, error) {
-	return runDispatch(ctx, o.registry, calls)
+func (o *BackgroundOrchestrator) DispatchTools(ctx context.Context, calls []preparedToolCall) ([]llm.CallOutcome, error) {
+	return runDispatch(ctx, calls)
 }
 
-func (o *BackgroundOrchestrator) MaybeInterrupt(_ context.Context) *llm.ChatMessage {
+func (o *BackgroundOrchestrator) MaybeInterrupt(context.Context) *llm.ChatMessage {
 	return nil
 }
 
 type SubagentOrchestrator struct {
-	registry *tools.Registry
-	emit     *tasks.Emitter
-	input    <-chan string
+	emit  *tasks.Emitter
+	input <-chan string
 }
 
-func NewSubagentOrchestrator(registry *tools.Registry, emit *tasks.Emitter, input <-chan string) *SubagentOrchestrator {
-	return &SubagentOrchestrator{registry: registry, emit: emit, input: input}
+func NewSubagentOrchestrator(emit *tasks.Emitter, input <-chan string) *SubagentOrchestrator {
+	return &SubagentOrchestrator{emit: emit, input: input}
 }
 
-func (o *SubagentOrchestrator) OnContentBegin(_ context.Context) {}
+func (o *SubagentOrchestrator) OnContentBegin(context.Context) {}
 
-func (o *SubagentOrchestrator) OnContentDelta(_ context.Context, delta string) {
+func (o *SubagentOrchestrator) OnContentDelta(ctx context.Context, delta string) {
 	if delta != "" && o.emit != nil {
 		o.emit.Output(delta)
 	}
 }
 
-func (o *SubagentOrchestrator) OnContentFinal(_ context.Context, _ string) {}
+func (o *SubagentOrchestrator) OnContentFinal(context.Context) {}
 
-func (o *SubagentOrchestrator) OnFinalResponse(_ context.Context, content string) {}
+func (o *SubagentOrchestrator) OnFinalResponse(context.Context, string) {}
 
-func (o *SubagentOrchestrator) BeforeToolUse(_ context.Context, _ string) {}
+func (o *SubagentOrchestrator) BeforeToolUse(context.Context, string, []string) {}
 
-func (o *SubagentOrchestrator) DispatchTools(ctx context.Context, calls []llm.ToolCall) ([]llm.CallOutcome, error) {
-	return runDispatch(ctx, o.registry, calls)
+func (o *SubagentOrchestrator) DispatchTools(ctx context.Context, calls []preparedToolCall) ([]llm.CallOutcome, error) {
+	return runDispatch(ctx, calls)
 }
 
-func (o *SubagentOrchestrator) MaybeInterrupt(ctx context.Context) *llm.ChatMessage {
+func (o *SubagentOrchestrator) MaybeInterrupt(context.Context) *llm.ChatMessage {
 	return o.drainInput()
 }
 
@@ -208,53 +222,53 @@ func appendVisionImagePart(parts []map[string]any, image events.ImageData) []map
 	})
 }
 
-func execOne(ctx context.Context, r *tools.Registry, tc llm.ToolCall) llm.CallOutcome {
-	handler, ok := r.Handler(tc.Name)
-	if !ok {
-		return llm.CallOutcome{ToolMsg: llm.ToolResultMessage(tc.ID, fmt.Sprintf("unknown tool %q", tc.Name))}
+func execOne(ctx context.Context, call preparedToolCall) llm.CallOutcome {
+	if call.err != nil {
+		slog.Debug("tool call prepare error", "tool", call.call.Name, "id", call.call.ID, "err", call.err)
+		return llm.CallOutcome{Err: call.err}
 	}
-	slog.Debug("tool call start", "tool", tc.Name, "id", tc.ID, "args", string(tc.Args))
-	result, err := handler(ctx, tc.Args)
+	slog.Debug("tool call start", "tool", call.call.Name, "id", call.call.ID, "args", string(call.call.Args))
+	result, err := call.tool.Execute(ctx)
 	if err != nil {
-		slog.Debug("tool call error", "tool", tc.Name, "id", tc.ID, "err", err)
+		slog.Debug("tool call error", "tool", call.call.Name, "id", call.call.ID, "err", err)
 		return llm.CallOutcome{Err: err}
 	}
-	slog.Debug("tool call done", "tool", tc.Name, "id", tc.ID, "result", result.Text)
+	slog.Debug("tool call done", "tool", call.call.Name, "id", call.call.ID, "result", result.Text)
 	if result.Blocks != nil {
 		toolText := result.Text
 		if strings.TrimSpace(toolText) == "" {
-			toolText = fmt.Sprintf("%s returned non-text content. A follow-up user message contains the multimodal payload.", tc.Name)
+			toolText = fmt.Sprintf("%s returned non-text content. A follow-up user message contains the multimodal payload.", call.call.Name)
 		}
 		followup := llm.UserBlocksMessage(
-			fmt.Sprintf("[TOOL OUTPUT FROM %s]\nInspect the attached content and continue with the task.", tc.ID),
+			fmt.Sprintf("[TOOL OUTPUT FROM %s]\nInspect the attached content and continue with the task.", call.call.ID),
 			result.Blocks,
 		)
 		return llm.CallOutcome{
-			ToolMsg:  llm.ToolResultMessage(tc.ID, toolText),
+			ToolMsg:  llm.ToolResultMessage(call.call.ID, toolText),
 			Followup: &followup,
 		}
 	}
-	return llm.CallOutcome{ToolMsg: llm.ToolResultMessage(tc.ID, result.Text)}
+	return llm.CallOutcome{ToolMsg: llm.ToolResultMessage(call.call.ID, result.Text)}
 }
 
-func runDispatch(ctx context.Context, r *tools.Registry, calls []llm.ToolCall) ([]llm.CallOutcome, error) {
+func runDispatch(ctx context.Context, calls []preparedToolCall) ([]llm.CallOutcome, error) {
 	results := make([]llm.CallOutcome, len(calls))
 
 	if len(calls) == 1 {
-		results[0] = execOne(ctx, r, calls[0])
+		results[0] = execOne(ctx, calls[0])
 		return results, nil
 	}
 
 	var seqMu sync.Mutex
 	g, gctx := errgroup.WithContext(ctx)
-	for i, tc := range calls {
-		i, tc := i, tc
+	for i, call := range calls {
+		i, call := i, call
 		g.Go(func() error {
-			if r.IsParallel(tc.Name) {
-				results[i] = execOne(gctx, r, tc)
+			if call.parallel {
+				results[i] = execOne(gctx, call)
 			} else {
 				seqMu.Lock()
-				results[i] = execOne(gctx, r, tc)
+				results[i] = execOne(gctx, call)
 				seqMu.Unlock()
 			}
 			return nil

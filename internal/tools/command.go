@@ -38,37 +38,45 @@ func (s *CommandToolset) Register(r *Registry) {
 			},
 			"required": []string{"command"},
 		},
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
+	}, func(args []byte) (PreparedTool, error) {
 		var p struct {
 			Command        string `json:"command"`
 			TimeoutSeconds int    `json:"timeout"`
 		}
 		p.TimeoutSeconds = 60
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, fmt.Errorf("parse run_command args: %w", err)
+			return PreparedTool{}, fmt.Errorf("parse run_command args: %w", err)
 		}
-		snap, err := s.tasks.Start(ctx, tasks.StartOptions{
-			Description: p.Command,
-			Driver:      tasks.NewProcessDriver(s.rt, p.Command),
-		})
-		if err != nil {
-			return ErrorResult(fmt.Errorf("start command %q: %w", p.Command, err)), nil
+		if p.Command == "" {
+			return PreparedTool{}, fmt.Errorf("run_command command must not be empty")
 		}
-		if p.TimeoutSeconds > 0 {
-			if p.TimeoutSeconds > 600 {
-				p.TimeoutSeconds = 600
-			}
-			got, err := s.tasks.Await(ctx, snap.TaskID, time.Duration(p.TimeoutSeconds)*time.Second)
-			if err != nil {
-				return ErrorResult(fmt.Errorf("await command task %s: %w", snap.TaskID, err)), nil
-			}
-			if got.Status != tasks.StatusRunning {
-				result := TextResult(formatTaskSnapshot(got))
-				s.tasks.Remove(ctx, snap.TaskID)
-				return result, nil
-			}
+		if p.TimeoutSeconds > 600 {
+			p.TimeoutSeconds = 600
 		}
-		return TextResult(MarshalResult(map[string]any{"task_id": snap.TaskID})), nil
+		return PreparedTool{
+			Description: fmt.Sprintf("Running command %q", p.Command),
+			Execute: func(ctx context.Context) (ToolResult, error) {
+				snap, err := s.tasks.Start(ctx, tasks.StartOptions{
+					Description: p.Command,
+					Driver:      tasks.NewProcessDriver(s.rt, p.Command),
+				})
+				if err != nil {
+					return ErrorResult(fmt.Errorf("start command %q: %w", p.Command, err)), nil
+				}
+				if p.TimeoutSeconds > 0 {
+					got, err := s.tasks.Await(ctx, snap.TaskID, time.Duration(p.TimeoutSeconds)*time.Second)
+					if err != nil {
+						return ErrorResult(fmt.Errorf("await command task %s: %w", snap.TaskID, err)), nil
+					}
+					if got.Status != tasks.StatusRunning {
+						result := TextResult(formatTaskSnapshot(got))
+						s.tasks.Remove(ctx, snap.TaskID)
+						return result, nil
+					}
+				}
+				return TextResult(MarshalResult(map[string]any{"task_id": snap.TaskID})), nil
+			},
+		}, nil
 	})
 
 	r.Register(ToolSchema{
@@ -84,18 +92,26 @@ func (s *CommandToolset) Register(r *Registry) {
 			},
 			"required": []string{"task_id"},
 		},
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
+	}, func(args []byte) (PreparedTool, error) {
 		var p struct {
 			TaskID string `json:"task_id"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, fmt.Errorf("parse get_task args: %w", err)
+			return PreparedTool{}, fmt.Errorf("parse get_task args: %w", err)
 		}
-		snap, _, err := s.tasks.Get(ctx, p.TaskID, true)
-		if err != nil {
-			return ErrorResult(fmt.Errorf("get task %s: %w", p.TaskID, err)), nil
+		if p.TaskID == "" {
+			return PreparedTool{}, fmt.Errorf("get_task task_id must not be empty")
 		}
-		return TextResult(formatTaskSnapshot(snap)), nil
+		return PreparedTool{
+			Description: fmt.Sprintf("Inspecting task %s", p.TaskID),
+			Execute: func(ctx context.Context) (ToolResult, error) {
+				snap, _, err := s.tasks.Get(ctx, p.TaskID, true)
+				if err != nil {
+					return ErrorResult(fmt.Errorf("get task %s: %w", p.TaskID, err)), nil
+				}
+				return TextResult(formatTaskSnapshot(snap)), nil
+			},
+		}, nil
 	})
 
 	r.Register(ToolSchema{
@@ -116,27 +132,35 @@ func (s *CommandToolset) Register(r *Registry) {
 			},
 			"required": []string{"task_id"},
 		},
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
+	}, func(args []byte) (PreparedTool, error) {
 		var p struct {
 			TaskID         string `json:"task_id"`
 			TimeoutSeconds int    `json:"timeout"`
 		}
 		p.TimeoutSeconds = 60
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, fmt.Errorf("parse await_task args: %w", err)
+			return PreparedTool{}, fmt.Errorf("parse await_task args: %w", err)
+		}
+		if p.TaskID == "" {
+			return PreparedTool{}, fmt.Errorf("await_task task_id must not be empty")
 		}
 		if p.TimeoutSeconds > 600 {
 			p.TimeoutSeconds = 600
 		}
-		snap, err := s.tasks.Await(ctx, p.TaskID, time.Duration(p.TimeoutSeconds)*time.Second)
-		if err != nil {
-			return ErrorResult(fmt.Errorf("await task %s: %w", p.TaskID, err)), nil
-		}
-		result := TextResult(formatTaskSnapshot(snap))
-		if snap.Status != tasks.StatusRunning {
-			s.tasks.Remove(ctx, snap.TaskID)
-		}
-		return result, nil
+		return PreparedTool{
+			Description: fmt.Sprintf("Waiting up to %d seconds for task %s", p.TimeoutSeconds, p.TaskID),
+			Execute: func(ctx context.Context) (ToolResult, error) {
+				snap, err := s.tasks.Await(ctx, p.TaskID, time.Duration(p.TimeoutSeconds)*time.Second)
+				if err != nil {
+					return ErrorResult(fmt.Errorf("await task %s: %w", p.TaskID, err)), nil
+				}
+				result := TextResult(formatTaskSnapshot(snap))
+				if snap.Status != tasks.StatusRunning {
+					s.tasks.Remove(ctx, snap.TaskID)
+				}
+				return result, nil
+			},
+		}, nil
 	})
 
 	r.Register(ToolSchema{
@@ -146,12 +170,21 @@ func (s *CommandToolset) Register(r *Registry) {
 			"type":       "object",
 			"properties": map[string]any{},
 		},
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
-		snaps, err := s.tasks.List(ctx)
-		if err != nil {
-			return ErrorResult(fmt.Errorf("list tasks: %w", err)), nil
+	}, func(args []byte) (PreparedTool, error) {
+		var p struct{}
+		if err := json.Unmarshal(args, &p); err != nil {
+			return PreparedTool{}, fmt.Errorf("parse list_tasks args: %w", err)
 		}
-		return TextResult(MarshalResult(snaps)), nil
+		return PreparedTool{
+			Description: "Listing session tasks",
+			Execute: func(ctx context.Context) (ToolResult, error) {
+				snaps, err := s.tasks.List(ctx)
+				if err != nil {
+					return ErrorResult(fmt.Errorf("list tasks: %w", err)), nil
+				}
+				return TextResult(MarshalResult(snaps)), nil
+			},
+		}, nil
 	})
 
 	r.Register(ToolSchema{
@@ -167,23 +200,31 @@ func (s *CommandToolset) Register(r *Registry) {
 			},
 			"required": []string{"task_id"},
 		},
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
+	}, func(args []byte) (PreparedTool, error) {
 		var p struct {
 			TaskID string `json:"task_id"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, fmt.Errorf("parse kill_task args: %w", err)
+			return PreparedTool{}, fmt.Errorf("parse kill_task args: %w", err)
 		}
-		if _, err := s.tasks.Kill(ctx, p.TaskID); err != nil {
-			var snapErr error
-			if _, _, snapErr = s.tasks.Get(ctx, p.TaskID, false); snapErr != nil {
-				return ErrorResult(fmt.Errorf("kill task %s: %w", p.TaskID, err)), nil
-			}
+		if p.TaskID == "" {
+			return PreparedTool{}, fmt.Errorf("kill_task task_id must not be empty")
 		}
-		if err := s.tasks.Remove(ctx, p.TaskID); err != nil {
-			return ErrorResult(fmt.Errorf("remove task %s after kill: %w", p.TaskID, err)), nil
-		}
-		return TextResult(MarshalResult(map[string]any{"task_id": p.TaskID, "status": "killed"})), nil
+		return PreparedTool{
+			Description: fmt.Sprintf("Killing task %s", p.TaskID),
+			Execute: func(ctx context.Context) (ToolResult, error) {
+				if _, err := s.tasks.Kill(ctx, p.TaskID); err != nil {
+					var snapErr error
+					if _, _, snapErr = s.tasks.Get(ctx, p.TaskID, false); snapErr != nil {
+						return ErrorResult(fmt.Errorf("kill task %s: %w", p.TaskID, err)), nil
+					}
+				}
+				if err := s.tasks.Remove(ctx, p.TaskID); err != nil {
+					return ErrorResult(fmt.Errorf("remove task %s after kill: %w", p.TaskID, err)), nil
+				}
+				return TextResult(MarshalResult(map[string]any{"task_id": p.TaskID, "status": "killed"})), nil
+			},
+		}, nil
 	})
 
 	r.Register(ToolSchema{
@@ -203,17 +244,28 @@ func (s *CommandToolset) Register(r *Registry) {
 			},
 			"required": []string{"task_id", "input"},
 		},
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
+	}, func(args []byte) (PreparedTool, error) {
 		var p struct {
 			TaskID string `json:"task_id"`
 			Input  string `json:"input"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, fmt.Errorf("parse write_to_task args: %w", err)
+			return PreparedTool{}, fmt.Errorf("parse write_to_task args: %w", err)
 		}
-		if err := s.tasks.WriteInput(ctx, p.TaskID, p.Input); err != nil {
-			return ErrorResult(fmt.Errorf("write input to task %s: %w", p.TaskID, err)), nil
+		if p.TaskID == "" {
+			return PreparedTool{}, fmt.Errorf("write_to_task task_id must not be empty")
 		}
-		return TextResult(MarshalResult(map[string]any{"task_id": p.TaskID, "written": len(p.Input)})), nil
+		if p.Input == "" {
+			return PreparedTool{}, fmt.Errorf("write_to_task input must not be empty")
+		}
+		return PreparedTool{
+			Description: fmt.Sprintf("Writing to task %s", p.TaskID),
+			Execute: func(ctx context.Context) (ToolResult, error) {
+				if err := s.tasks.WriteInput(ctx, p.TaskID, p.Input); err != nil {
+					return ErrorResult(fmt.Errorf("write input to task %s: %w", p.TaskID, err)), nil
+				}
+				return TextResult(MarshalResult(map[string]any{"task_id": p.TaskID, "written": len(p.Input)})), nil
+			},
+		}, nil
 	})
 }

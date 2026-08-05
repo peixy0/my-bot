@@ -68,20 +68,28 @@ func (d *DefaultToolset) registerWebSearch(r *Registry) {
 			},
 			"required": []string{"query"},
 		}),
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
+	}, func(args []byte) (PreparedTool, error) {
 		var p struct {
 			Query string `json:"query"`
 			Page  int    `json:"page"`
 		}
 		p.Page = 1
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, fmt.Errorf("parse web_search args: %w", err)
+			return PreparedTool{}, fmt.Errorf("parse web_search args: %w", err)
 		}
-		results, err := d.webSearch.Search(ctx, p.Query, p.Page)
-		if err != nil {
-			return ErrorResult(fmt.Errorf("web_search query %q page %d: %w", p.Query, p.Page, err)), nil
+		if p.Query == "" {
+			return PreparedTool{}, fmt.Errorf("web_search query must not be empty")
 		}
-		return TextResult(MarshalResult(results)), nil
+		return PreparedTool{
+			Description: fmt.Sprintf("Searching the web for %q on page %d", p.Query, p.Page),
+			Execute: func(ctx context.Context) (ToolResult, error) {
+				results, err := d.webSearch.Search(ctx, p.Query, p.Page)
+				if err != nil {
+					return ErrorResult(fmt.Errorf("web_search query %q page %d: %w", p.Query, p.Page, err)), nil
+				}
+				return TextResult(MarshalResult(results)), nil
+			},
+		}, nil
 	})
 }
 
@@ -100,15 +108,22 @@ func (d *DefaultToolset) registerFetch(r *Registry) {
 			},
 			"required": []string{"url"},
 		}),
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
+	}, func(args []byte) (PreparedTool, error) {
 		var p struct {
 			URL string `json:"url"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, fmt.Errorf("parse fetch args: %w", err)
+			return PreparedTool{}, fmt.Errorf("parse fetch args: %w", err)
 		}
-
-		return d.fetcher.Fetch(ctx, p.URL)
+		if p.URL == "" {
+			return PreparedTool{}, fmt.Errorf("fetch url must not be empty")
+		}
+		return PreparedTool{
+			Description: fmt.Sprintf("Fetching %s", p.URL),
+			Execute: func(ctx context.Context) (ToolResult, error) {
+				return d.fetcher.Fetch(ctx, p.URL)
+			},
+		}, nil
 	})
 }
 
@@ -137,7 +152,7 @@ func (d *DefaultToolset) registerReadFile(r *Registry) {
 			},
 			"required": []string{"filename"},
 		}),
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
+	}, func(args []byte) (PreparedTool, error) {
 		var p struct {
 			Filename  string `json:"filename"`
 			StartLine int    `json:"start_line"`
@@ -146,13 +161,21 @@ func (d *DefaultToolset) registerReadFile(r *Registry) {
 		p.StartLine = 1
 		p.Limit = 500
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, fmt.Errorf("parse read_file args: %w", err)
+			return PreparedTool{}, fmt.Errorf("parse read_file args: %w", err)
 		}
-		res, err := d.rt.ReadFile(ctx, p.Filename, p.StartLine, p.Limit)
-		if err != nil {
-			return ErrorResult(fmt.Errorf("read file %s: %w", p.Filename, err)), nil
+		if p.Filename == "" {
+			return PreparedTool{}, fmt.Errorf("read_file filename must not be empty")
 		}
-		return TextResult(formatReadFileResult(p.Filename, res)), nil
+		return PreparedTool{
+			Description: fmt.Sprintf("Reading %s from line %d", p.Filename, p.StartLine),
+			Execute: func(ctx context.Context) (ToolResult, error) {
+				res, err := d.rt.ReadFile(ctx, p.Filename, p.StartLine, p.Limit)
+				if err != nil {
+					return ErrorResult(fmt.Errorf("read file %s: %w", p.Filename, err)), nil
+				}
+				return TextResult(formatReadFileResult(p.Filename, res)), nil
+			},
+		}, nil
 	})
 }
 
@@ -174,18 +197,29 @@ func (d *DefaultToolset) registerWriteFile(r *Registry) {
 			},
 			"required": []string{"filename", "content"},
 		}),
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
+	}, func(args []byte) (PreparedTool, error) {
 		var p struct {
 			Filename string `json:"filename"`
 			Content  string `json:"content"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, fmt.Errorf("parse write_file args: %w", err)
+			return PreparedTool{}, fmt.Errorf("parse write_file args: %w", err)
 		}
-		if err := d.rt.WriteFile(ctx, p.Filename, p.Content); err != nil {
-			return ErrorResult(fmt.Errorf("write file %s: %w", p.Filename, err)), nil
+		if p.Filename == "" {
+			return PreparedTool{}, fmt.Errorf("write_file filename must not be empty")
 		}
-		return TextResult(fmt.Sprintf("wrote %s", p.Filename)), nil
+		if p.Content == "" {
+			return PreparedTool{}, fmt.Errorf("write_file content must not be empty")
+		}
+		return PreparedTool{
+			Description: fmt.Sprintf("Writing to %s", p.Filename),
+			Execute: func(ctx context.Context) (ToolResult, error) {
+				if err := d.rt.WriteFile(ctx, p.Filename, p.Content); err != nil {
+					return ErrorResult(fmt.Errorf("write file %s: %w", p.Filename, err)), nil
+				}
+				return TextResult(fmt.Sprintf("wrote %s", p.Filename)), nil
+			},
+		}, nil
 	})
 }
 
@@ -207,18 +241,29 @@ func (d *DefaultToolset) registerAppendFile(r *Registry) {
 			},
 			"required": []string{"filename", "content"},
 		}),
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
+	}, func(args []byte) (PreparedTool, error) {
 		var p struct {
 			Filename string `json:"filename"`
 			Content  string `json:"content"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, fmt.Errorf("parse append_file args: %w", err)
+			return PreparedTool{}, fmt.Errorf("parse append_file args: %w", err)
 		}
-		if err := d.rt.AppendFile(ctx, p.Filename, p.Content); err != nil {
-			return ErrorResult(fmt.Errorf("append file %s: %w", p.Filename, err)), nil
+		if p.Filename == "" {
+			return PreparedTool{}, fmt.Errorf("append_file filename must not be empty")
 		}
-		return TextResult(fmt.Sprintf("append %s", p.Filename)), nil
+		if p.Content == "" {
+			return PreparedTool{}, fmt.Errorf("append_file content must not be empty")
+		}
+		return PreparedTool{
+			Description: fmt.Sprintf("Appending to %s", p.Filename),
+			Execute: func(ctx context.Context) (ToolResult, error) {
+				if err := d.rt.AppendFile(ctx, p.Filename, p.Content); err != nil {
+					return ErrorResult(fmt.Errorf("append file %s: %w", p.Filename, err)), nil
+				}
+				return TextResult(fmt.Sprintf("append %s", p.Filename)), nil
+			},
+		}, nil
 	})
 }
 
@@ -254,7 +299,7 @@ func (d *DefaultToolset) registerEditFile(r *Registry) {
 			},
 			"required": []string{"filename", "edits"},
 		}),
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
+	}, func(args []byte) (PreparedTool, error) {
 		var p struct {
 			Filename string `json:"filename"`
 			Edits    []struct {
@@ -263,16 +308,30 @@ func (d *DefaultToolset) registerEditFile(r *Registry) {
 			} `json:"edits"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, fmt.Errorf("parse edit_file args: %w", err)
+			return PreparedTool{}, fmt.Errorf("parse edit_file args: %w", err)
+		}
+		if p.Filename == "" {
+			return PreparedTool{}, fmt.Errorf("edit_file filename must not be empty")
+		}
+		if len(p.Edits) == 0 {
+			return PreparedTool{}, fmt.Errorf("edit_file edits must not be empty")
 		}
 		edits := make([]runtime.Edit, len(p.Edits))
 		for i, e := range p.Edits {
+			if e.Search == "" {
+				return PreparedTool{}, fmt.Errorf("edit_file edit %d search must not be empty", i+1)
+			}
 			edits[i] = runtime.Edit{Search: e.Search, Replace: e.Replace}
 		}
-		if err := d.rt.EditFile(ctx, p.Filename, edits); err != nil {
-			return ErrorResult(fmt.Errorf("edit file %s: %w", p.Filename, err)), nil
-		}
-		return TextResult(fmt.Sprintf("edited %s", p.Filename)), nil
+		return PreparedTool{
+			Description: fmt.Sprintf("Applying %d edits to %s", len(edits), p.Filename),
+			Execute: func(ctx context.Context) (ToolResult, error) {
+				if err := d.rt.EditFile(ctx, p.Filename, edits); err != nil {
+					return ErrorResult(fmt.Errorf("edit file %s: %w", p.Filename, err)), nil
+				}
+				return TextResult(fmt.Sprintf("edited %s", p.Filename)), nil
+			},
+		}, nil
 	})
 }
 
@@ -309,7 +368,7 @@ func (d *DefaultToolset) registerGrep(r *Registry) {
 			},
 			"required": []string{"pattern"},
 		}),
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
+	}, func(args []byte) (PreparedTool, error) {
 		var p struct {
 			Pattern          string `json:"pattern"`
 			Path             string `json:"path"`
@@ -319,7 +378,10 @@ func (d *DefaultToolset) registerGrep(r *Registry) {
 		}
 		p.SurroundingLines = 2
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, fmt.Errorf("parse grep args: %w", err)
+			return PreparedTool{}, fmt.Errorf("parse grep args: %w", err)
+		}
+		if p.Pattern == "" {
+			return PreparedTool{}, fmt.Errorf("grep pattern must not be empty")
 		}
 		var sb strings.Builder
 		sb.WriteString("rg -n")
@@ -336,17 +398,26 @@ func (d *DefaultToolset) registerGrep(r *Registry) {
 		if p.Path != "" {
 			fmt.Fprintf(&sb, " %q", p.Path)
 		}
-		res, err := d.rt.Execute(ctx, sb.String())
-		if err != nil {
-			return ErrorResult(fmt.Errorf("run grep command: %w", err)), nil
+		path := p.Path
+		if path == "" {
+			path = "."
 		}
-		if res.ReturnCode == 1 {
-			return TextResult("no matches"), nil
-		}
-		if res.ReturnCode != 0 {
-			return ErrorResult(fmt.Errorf("%s", res.Stderr)), nil
-		}
-		return TextResult(res.Stdout), nil
+		return PreparedTool{
+			Description: fmt.Sprintf("Searching %s for %q", path, p.Pattern),
+			Execute: func(ctx context.Context) (ToolResult, error) {
+				res, err := d.rt.Execute(ctx, sb.String())
+				if err != nil {
+					return ErrorResult(fmt.Errorf("run grep command: %w", err)), nil
+				}
+				if res.ReturnCode == 1 {
+					return TextResult("no matches"), nil
+				}
+				if res.ReturnCode != 0 {
+					return ErrorResult(fmt.Errorf("%s", res.Stderr)), nil
+				}
+				return TextResult(res.Stdout), nil
+			},
+		}, nil
 	})
 }
 
@@ -365,18 +436,26 @@ func (d *DefaultToolset) registerGlob(r *Registry) {
 			},
 			"required": []string{"pattern"},
 		}),
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
+	}, func(args []byte) (PreparedTool, error) {
 		var p struct {
 			Pattern string `json:"pattern"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, fmt.Errorf("parse glob args: %w", err)
+			return PreparedTool{}, fmt.Errorf("parse glob args: %w", err)
 		}
-		result, err := d.rt.Glob(ctx, p.Pattern)
-		if err != nil {
-			return ErrorResult(fmt.Errorf("glob pattern %q: %w", p.Pattern, err)), nil
+		if p.Pattern == "" {
+			return PreparedTool{}, fmt.Errorf("glob pattern must not be empty")
 		}
-		return TextResult(MarshalResult(result)), nil
+		return PreparedTool{
+			Description: fmt.Sprintf("Finding files matching %q", p.Pattern),
+			Execute: func(ctx context.Context) (ToolResult, error) {
+				result, err := d.rt.Glob(ctx, p.Pattern)
+				if err != nil {
+					return ErrorResult(fmt.Errorf("glob pattern %q: %w", p.Pattern, err)), nil
+				}
+				return TextResult(MarshalResult(result)), nil
+			},
+		}, nil
 	})
 }
 
@@ -395,31 +474,39 @@ func (d *DefaultToolset) registerReadImage(r *Registry) {
 			},
 			"required": []string{"filename"},
 		}),
-	}, func(ctx context.Context, args []byte) (ToolResult, error) {
+	}, func(args []byte) (PreparedTool, error) {
 		var p struct {
 			Filename string `json:"filename"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return ToolResult{}, fmt.Errorf("parse read_image args: %w", err)
+			return PreparedTool{}, fmt.Errorf("parse read_image args: %w", err)
 		}
-		data, err := d.rt.ReadRawBytes(ctx, p.Filename)
-		if err != nil {
-			return ErrorResult(fmt.Errorf("read image %s: %w", p.Filename, err)), nil
+		if p.Filename == "" {
+			return PreparedTool{}, fmt.Errorf("read_image filename must not be empty")
 		}
-		if len(data) > d.cfg.Context.MaxImageBytes {
-			return ErrorResult(fmt.Errorf("image too large: %d bytes", len(data))), nil
-		}
-		mimeType := detectImageMIME(data)
-		b64 := base64.StdEncoding.EncodeToString(data)
-		return ImageResult([]map[string]any{
-			{
-				"type": "image_url",
-				"image_url": map[string]any{
-					"url":    fmt.Sprintf("data:%s;base64,%s", mimeType, b64),
-					"detail": "auto",
-				},
+		return PreparedTool{
+			Description: fmt.Sprintf("Reading image %s", p.Filename),
+			Execute: func(ctx context.Context) (ToolResult, error) {
+				data, err := d.rt.ReadRawBytes(ctx, p.Filename)
+				if err != nil {
+					return ErrorResult(fmt.Errorf("read image %s: %w", p.Filename, err)), nil
+				}
+				if len(data) > d.cfg.Context.MaxImageBytes {
+					return ErrorResult(fmt.Errorf("image too large: %d bytes", len(data))), nil
+				}
+				mimeType := detectImageMIME(data)
+				b64 := base64.StdEncoding.EncodeToString(data)
+				return ImageResult([]map[string]any{
+					{
+						"type": "image_url",
+						"image_url": map[string]any{
+							"url":    fmt.Sprintf("data:%s;base64,%s", mimeType, b64),
+							"detail": "auto",
+						},
+					},
+				}), nil
 			},
-		}), nil
+		}, nil
 	})
 }
 

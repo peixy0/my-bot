@@ -16,20 +16,20 @@ func MarshalResult(v any) string {
 }
 
 type Registry struct {
-	schemas  map[string]ToolSchema
-	handlers map[string]ToolHandler
+	schemas   map[string]ToolSchema
+	preparers map[string]ToolPreparer
 }
 
 func NewRegistry() *Registry {
 	return &Registry{
-		schemas:  make(map[string]ToolSchema),
-		handlers: make(map[string]ToolHandler),
+		schemas:   make(map[string]ToolSchema),
+		preparers: make(map[string]ToolPreparer),
 	}
 }
 
-func (r *Registry) Register(schema ToolSchema, handler ToolHandler) {
+func (r *Registry) Register(schema ToolSchema, preparer ToolPreparer) {
 	r.schemas[schema.Name] = schema
-	r.handlers[schema.Name] = handler
+	r.preparers[schema.Name] = preparer
 }
 
 type Toolset interface {
@@ -40,9 +40,9 @@ func (r *Registry) RegisterToolset(t Toolset) {
 	t.Register(r)
 }
 
-func (r *Registry) Handler(name string) (ToolHandler, bool) {
-	h, ok := r.handlers[name]
-	return h, ok
+func (r *Registry) Get(name string) (ToolPreparer, bool) {
+	preparer, ok := r.preparers[name]
+	return preparer, ok
 }
 
 func (r *Registry) IsParallel(name string) bool {

@@ -27,6 +27,13 @@ type Agent struct {
 	limiter  *rate.Limiter
 }
 
+type preparedToolCall struct {
+	call     llm.ToolCall
+	tool     tools.PreparedTool
+	parallel bool
+	err      error
+}
+
 func NewAgent(client llm.CompletionClient, limiter *rate.Limiter) *Agent {
 	provider, _ := client.(*llm.OpenAIProvider)
 	return &Agent{client: client, provider: provider, limiter: limiter}
@@ -39,13 +46,43 @@ func (a *Agent) Models(ctx context.Context) ([]string, error) {
 	return a.provider.Models(ctx)
 }
 
+func prepareToolCalls(r *tools.Registry, calls []llm.ToolCall) []preparedToolCall {
+	prepared := make([]preparedToolCall, len(calls))
+	for i, call := range calls {
+		preparer, found := r.Get(call.Name)
+		var tool tools.PreparedTool
+		var err error
+		if !found {
+			err = fmt.Errorf("unknown tool %q", call.Name)
+			tool = tools.PreparedTool{
+				Description: fmt.Sprintf("Calling unknown tool: %q", call.Name),
+				Execute: func(ctx context.Context) (tools.ToolResult, error) {
+					return tools.ToolResult{}, err
+				},
+			}
+		} else {
+			tool, err = preparer(call.Args)
+		}
+		prepared[i] = preparedToolCall{call: call, tool: tool, parallel: r.IsParallel(call.Name), err: err}
+	}
+	return prepared
+}
+
+func toolDescriptions(calls []preparedToolCall) []string {
+	descriptions := make([]string, len(calls))
+	for i, call := range calls {
+		descriptions[i] = call.tool.Description
+	}
+	return descriptions
+}
+
 func (a *Agent) Run(
 	ctx context.Context,
 	abortCh <-chan struct{},
 	cfg *config.Config,
 	systemPrompt string,
 	conv *llm.Conversation,
-	orch llm.Orchestrator,
+	orch Orchestrator,
 	reg *tools.Registry,
 ) error {
 	abortCtx, abortCancel := context.WithCancel(ctx)
@@ -116,13 +153,18 @@ func (a *Agent) Run(
 			}
 			assistantMsg := llm.AssistantMessage(resp.Content, resp.ReasoningContent, resp.ToolCalls)
 			conv.Messages = append(conv.Messages, assistantMsg)
-			orch.OnContentFinal(ctx, resp.Content)
+			orch.OnContentFinal(ctx)
 			orch.OnFinalResponse(ctx, resp.Content)
 			return nil
 		}
 
-		orch.BeforeToolUse(ctx, resp.Content)
-		outcomes, err := orch.DispatchTools(abortCtx, resp.ToolCalls)
+		prepared := prepareToolCalls(reg, resp.ToolCalls)
+		var toolDesc []string
+		if cfg.Tool.EnableDescriptiveOutput {
+			toolDesc = toolDescriptions(prepared)
+		}
+		orch.BeforeToolUse(abortCtx, resp.Content, toolDesc)
+		outcomes, err := orch.DispatchTools(abortCtx, prepared)
 		if err != nil {
 			return err
 		}
@@ -153,7 +195,7 @@ func (a *Agent) Run(
 
 		assistantMsg := llm.AssistantMessage(resp.Content, resp.ReasoningContent, toolCalls)
 		conv.Messages = append(conv.Messages, assistantMsg)
-		orch.OnContentFinal(ctx, resp.Content)
+		orch.OnContentFinal(ctx)
 
 		if threshold := int(float64(cfg.LLM.ContextWindow) * cfg.Context.CompressionThreshold); threshold > 0 && int(conv.TotalTokens) >= threshold {
 			slog.Debug("context compression triggered", "tokens", conv.TotalTokens, "context_window", cfg.LLM.ContextWindow)
@@ -269,7 +311,7 @@ func (l *AgentLoop) TotalTokens() int64 { return l.conv.TotalTokens }
 
 func (l *AgentLoop) ResetConv() { l.conv = llm.NewConversation() }
 
-func (l *AgentLoop) Run(ctx context.Context, abortCh <-chan struct{}, reg *tools.Registry, orch llm.Orchestrator, prompt llm.SystemPrompt, content any) error {
+func (l *AgentLoop) Run(ctx context.Context, abortCh <-chan struct{}, reg *tools.Registry, orch Orchestrator, prompt llm.SystemPrompt, content any) error {
 	l.conv.Messages = append(l.conv.Messages, llm.ChatMessage{Role: "user", Content: content})
 	return l.agent.Run(ctx, abortCh, l.cfg, prompt.Build(ctx), l.conv, orch, reg)
 }

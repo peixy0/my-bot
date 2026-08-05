@@ -18,7 +18,7 @@ func NewSessionRegistry(
 ) *tools.Registry {
 	reg := tools.NewRegistry()
 	registerBaseTools(reg, env.Rt, env.Skills, env.Cfg, cmdTools)
-	browserClient.Register(reg)
+	reg.RegisterToolset(browserClient)
 	registerOutboundTools(reg, sender)
 	registerMetaTools(reg, env, taskManager)
 	return reg
@@ -33,7 +33,7 @@ func NewSubagentRegistry(
 ) *tools.Registry {
 	reg := tools.NewRegistry()
 	registerBaseTools(reg, rt, skills, cfg, cmdTools)
-	browserClient.Register(reg)
+	reg.RegisterToolset(browserClient)
 	return reg
 }
 

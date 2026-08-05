@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"encoding/base64"
+	"slices"
 	"strings"
 	"testing"
 
@@ -74,19 +75,122 @@ func newTestClient(caller BrokerCaller) Client {
 	return newClient(caller, testRuntime{tmpPath: "tmp/screenshot-test.png"}, 0)
 }
 
+func executeTool(t *testing.T, registry *tools.Registry, name, args string) tools.ToolResult {
+	t.Helper()
+	prepared, err := prepareRegisteredTool(t, registry, name, args)
+	if err != nil {
+		t.Fatalf("%s unexpected preparation error: %v", name, err)
+	}
+	result, err := prepared.Execute(context.Background())
+	if err != nil {
+		t.Fatalf("%s unexpected execution error: %v", name, err)
+	}
+	return result
+}
+
+func prepareRegisteredTool(t *testing.T, registry *tools.Registry, name, args string) (tools.PreparedTool, error) {
+	t.Helper()
+	preparer, ok := registry.Get(name)
+	if !ok {
+		t.Fatalf("%s was not registered", name)
+	}
+	return preparer([]byte(args))
+}
+
+func TestToolsetRegistersAllBrowserTools(t *testing.T) {
+	registry := tools.NewRegistry()
+	newTestClient(&toolsetClient{}).Register(registry)
+
+	want := []string{
+		"browser_back",
+		"browser_click",
+		"browser_close_tab",
+		"browser_evaluate",
+		"browser_forward",
+		"browser_inspect",
+		"browser_navigate",
+		"browser_network_detail",
+		"browser_network_list",
+		"browser_network_start",
+		"browser_network_stop",
+		"browser_new_tab",
+		"browser_press_key",
+		"browser_reload",
+		"browser_screenshot",
+		"browser_scroll",
+		"browser_set_value",
+		"browser_snapshot",
+		"browser_tabs",
+		"browser_wait",
+	}
+	got := registry.Names()
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Fatalf("unexpected browser tools:\ngot:  %v\nwant: %v", got, want)
+	}
+}
+
+func TestToolsetParameterErrorsMatchDefaultToolsetStyle(t *testing.T) {
+	registry := tools.NewRegistry()
+	newTestClient(&toolsetClient{}).Register(registry)
+
+	tests := []struct {
+		name string
+		args string
+		want string
+	}{
+		{name: "browser_tabs", args: `{`, want: "parse browser_tabs args:"},
+		{name: "browser_navigate", args: `{"url":"https://example.com"}`, want: "browser_navigate tab must not be empty"},
+		{name: "browser_navigate", args: `{"tab":"tab-1"}`, want: "browser_navigate url must not be empty"},
+		{name: "browser_evaluate", args: `{"tab":"tab-1"}`, want: "browser_evaluate script must not be empty"},
+		{name: "browser_wait", args: `{"tab":"tab-1","seconds":31}`, want: "browser_wait seconds must be greater than 0 and at most 30"},
+		{name: "browser_network_detail", args: `{"tab":"tab-1"}`, want: "browser_network_detail request_id must not be empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name+"_"+tt.want, func(t *testing.T) {
+			_, err := prepareRegisteredTool(t, registry, tt.name, tt.args)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("expected error containing %q, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestToolsetDescriptionsOmitTabDetails(t *testing.T) {
+	registry := tools.NewRegistry()
+	newTestClient(&toolsetClient{}).Register(registry)
+
+	tests := []struct {
+		name string
+		args string
+		want string
+	}{
+		{name: "browser_click", args: `{"tab":"tab-1","element_ref":"42"}`, want: "Clicking in browser"},
+		{name: "browser_press_key", args: `{"tab":"tab-1","key":"Enter"}`, want: "Pressing keys in browser"},
+		{name: "browser_navigate", args: `{"tab":"tab-1","url":"https://example.com/path"}`, want: `Navigating to "https://example.com/path" in browser`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prepared, err := prepareRegisteredTool(t, registry, tt.name, tt.args)
+			if err != nil {
+				t.Fatalf("prepare %s: %v", tt.name, err)
+			}
+			if prepared.Description != tt.want {
+				t.Fatalf("unexpected description: got %q, want %q", prepared.Description, tt.want)
+			}
+			if strings.Contains(prepared.Description, "tab-1") {
+				t.Fatalf("description leaked tab detail: %q", prepared.Description)
+			}
+		})
+	}
+}
+
 func TestToolsetRoutesOwnedScope(t *testing.T) {
 	client := &toolsetClient{}
 	registry := tools.NewRegistry()
 	newTestClient(client).Register(registry)
 
-	handler, ok := registry.Handler("browser_evaluate")
-	if !ok {
-		t.Fatal("browser_evaluate was not registered")
-	}
-	result, err := handler(context.Background(), []byte(`{"tab":"tab-1","script":"location.href"}`))
-	if err != nil {
-		t.Fatalf("unexpected handler error: %v", err)
-	}
+	result := executeTool(t, registry, "browser_evaluate", `{"tab":"tab-1","script":"location.href"}`)
 	if result.Text != `{"ok":true}` {
 		t.Fatalf("unexpected result: %s", result.Text)
 	}
@@ -104,16 +208,9 @@ func TestToolsetRejectsEmptyScript(t *testing.T) {
 	registry := tools.NewRegistry()
 	newTestClient(client).Register(registry)
 
-	handler, ok := registry.Handler("browser_evaluate")
-	if !ok {
-		t.Fatal("browser_evaluate was not registered")
-	}
-	result, err := handler(context.Background(), []byte(`{"script":" "}`))
-	if err != nil {
-		t.Fatalf("unexpected handler error: %v", err)
-	}
-	if result.Text == "" {
-		t.Fatal("expected tool error result")
+	_, err := prepareRegisteredTool(t, registry, "browser_evaluate", `{"tab":"tab-1","script":""}`)
+	if err == nil {
+		t.Fatal("expected preparation error")
 	}
 	if len(client.calls) != 0 {
 		t.Fatal("expected no broker calls")
@@ -125,16 +222,9 @@ func TestToolsetScrollRejectsBadDirection(t *testing.T) {
 	registry := tools.NewRegistry()
 	newTestClient(client).Register(registry)
 
-	handler, ok := registry.Handler("browser_scroll")
-	if !ok {
-		t.Fatal("browser_scroll was not registered")
-	}
-	result, err := handler(context.Background(), []byte(`{"tab":"tab-1","direction":"left"}`))
-	if err != nil {
-		t.Fatalf("unexpected handler error: %v", err)
-	}
-	if result.Text == "" {
-		t.Fatal("expected tool error result")
+	_, err := prepareRegisteredTool(t, registry, "browser_scroll", `{"tab":"tab-1","direction":"left"}`)
+	if err == nil {
+		t.Fatal("expected preparation error")
 	}
 	if len(client.calls) != 0 {
 		t.Fatal("expected no broker calls")
@@ -146,14 +236,7 @@ func TestToolsetScrollDefaultsAmount(t *testing.T) {
 	registry := tools.NewRegistry()
 	newTestClient(client).Register(registry)
 
-	handler, ok := registry.Handler("browser_scroll")
-	if !ok {
-		t.Fatal("browser_scroll was not registered")
-	}
-	result, err := handler(context.Background(), []byte(`{"tab":"tab-1","direction":"down"}`))
-	if err != nil {
-		t.Fatalf("unexpected handler error: %v", err)
-	}
+	result := executeTool(t, registry, "browser_scroll", `{"tab":"tab-1","direction":"down"}`)
 	if result.Text != `{"ok":true}` {
 		t.Fatalf("unexpected result: %s", result.Text)
 	}
@@ -164,6 +247,13 @@ func TestToolsetScrollDefaultsAmount(t *testing.T) {
 	if call.action != "scroll" {
 		t.Fatalf("expected action 'scroll', got %q", call.action)
 	}
+	params, ok := call.params.(*scrollParams)
+	if !ok {
+		t.Fatalf("expected scroll params, got %T", call.params)
+	}
+	if params.Amount != 500 {
+		t.Fatalf("expected default amount 500, got %.0f", params.Amount)
+	}
 }
 
 func TestToolsetBackForwardRegistered(t *testing.T) {
@@ -172,14 +262,7 @@ func TestToolsetBackForwardRegistered(t *testing.T) {
 	newTestClient(client).Register(registry)
 
 	for _, name := range []string{"browser_back", "browser_forward", "browser_reload"} {
-		handler, ok := registry.Handler(name)
-		if !ok {
-			t.Fatalf("%s was not registered", name)
-		}
-		result, err := handler(context.Background(), []byte(`{"tab":"tab-1"}`))
-		if err != nil {
-			t.Fatalf("%s unexpected handler error: %v", name, err)
-		}
+		result := executeTool(t, registry, name, `{"tab":"tab-1"}`)
 		if result.Text != `{"ok":true}` {
 			t.Fatalf("%s unexpected result: %s", name, result.Text)
 		}
@@ -194,16 +277,9 @@ func TestToolsetRejectsLongWait(t *testing.T) {
 	registry := tools.NewRegistry()
 	newTestClient(client).Register(registry)
 
-	handler, ok := registry.Handler("browser_wait")
-	if !ok {
-		t.Fatal("browser_wait was not registered")
-	}
-	result, err := handler(context.Background(), []byte(`{"seconds":31}`))
-	if err != nil {
-		t.Fatalf("unexpected handler error: %v", err)
-	}
-	if result.Text == "" {
-		t.Fatal("expected tool error result")
+	_, err := prepareRegisteredTool(t, registry, "browser_wait", `{"seconds":31}`)
+	if err == nil {
+		t.Fatal("expected preparation error")
 	}
 	if len(client.calls) != 0 {
 		t.Fatal("expected no broker calls")
@@ -215,14 +291,13 @@ func TestToolsetScreenshotRegistered(t *testing.T) {
 	registry := tools.NewRegistry()
 	newTestClient(client).Register(registry)
 
-	handler, ok := registry.Handler("browser_screenshot")
-	if !ok {
-		t.Fatal("browser_screenshot was not registered")
+	_, err := prepareRegisteredTool(t, registry, "browser_screenshot", `{"tab":"tab-1"}`)
+	if err != nil {
+		t.Fatalf("unexpected preparation error: %v", err)
 	}
 	if len(client.calls) != 0 {
 		t.Fatal("expected no broker calls before invocation")
 	}
-	_ = handler
 }
 
 func TestToolsetScreenshotRejectsEmptyTab(t *testing.T) {
@@ -230,16 +305,9 @@ func TestToolsetScreenshotRejectsEmptyTab(t *testing.T) {
 	registry := tools.NewRegistry()
 	newTestClient(client).Register(registry)
 
-	handler, ok := registry.Handler("browser_screenshot")
-	if !ok {
-		t.Fatal("browser_screenshot was not registered")
-	}
-	result, err := handler(context.Background(), []byte(`{"selector":"#main"}`))
-	if err != nil {
-		t.Fatalf("unexpected handler error: %v", err)
-	}
-	if !strings.HasPrefix(result.Text, "error:") {
-		t.Fatalf("expected error result, got: %s", result.Text)
+	_, err := prepareRegisteredTool(t, registry, "browser_screenshot", `{"selector":"#main"}`)
+	if err == nil {
+		t.Fatal("expected preparation error")
 	}
 	if len(client.calls) != 0 {
 		t.Fatal("expected no broker calls")
@@ -252,14 +320,7 @@ func TestToolsetScreenshotSavesToPath(t *testing.T) {
 	registry := tools.NewRegistry()
 	newTestClient(client).Register(registry)
 
-	handler, ok := registry.Handler("browser_screenshot")
-	if !ok {
-		t.Fatal("browser_screenshot was not registered")
-	}
-	result, err := handler(context.Background(), []byte(`{"tab":"tab-1","full_page":true}`))
-	if err != nil {
-		t.Fatalf("unexpected handler error: %v", err)
-	}
+	result := executeTool(t, registry, "browser_screenshot", `{"tab":"tab-1","full_page":true}`)
 	if len(client.calls) != 1 {
 		t.Fatalf("expected 1 broker call, got %d", len(client.calls))
 	}
@@ -278,14 +339,7 @@ func TestToolsetScreenshotTmpFileDefault(t *testing.T) {
 	registry := tools.NewRegistry()
 	newTestClient(client).Register(registry)
 
-	handler, ok := registry.Handler("browser_screenshot")
-	if !ok {
-		t.Fatal("browser_screenshot was not registered")
-	}
-	result, err := handler(context.Background(), []byte(`{"tab":"tab-1"}`))
-	if err != nil {
-		t.Fatalf("unexpected handler error: %v", err)
-	}
+	result := executeTool(t, registry, "browser_screenshot", `{"tab":"tab-1"}`)
 	if !strings.Contains(result.Text, "screenshot-test.png") {
 		t.Fatalf("expected tmp path in result, got: %s", result.Text)
 	}
@@ -296,14 +350,7 @@ func TestToolsetScreenshotRejectsEmptyData(t *testing.T) {
 	registry := tools.NewRegistry()
 	newTestClient(client).Register(registry)
 
-	handler, ok := registry.Handler("browser_screenshot")
-	if !ok {
-		t.Fatal("browser_screenshot was not registered")
-	}
-	result, err := handler(context.Background(), []byte(`{"tab":"tab-1"}`))
-	if err != nil {
-		t.Fatalf("unexpected handler error: %v", err)
-	}
+	result := executeTool(t, registry, "browser_screenshot", `{"tab":"tab-1"}`)
 	if !strings.HasPrefix(result.Text, "error:") {
 		t.Fatalf("expected error result, got: %s", result.Text)
 	}
