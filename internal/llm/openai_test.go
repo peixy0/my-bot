@@ -471,3 +471,72 @@ func TestOpenAIProvider_ExtraBodySkipsDuplicateKeys(t *testing.T) {
 		t.Fatalf("expected presence_penalty=0.3, got %v", requestBody["presence_penalty"])
 	}
 }
+
+func TestOpenAIProvider_AssistantReasoningContentSentOnReplay(t *testing.T) {
+	var requestBodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		requestBodies = append(requestBodies, body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeSSE(t, w, map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "ok"}, "finish_reason": "stop"}}})
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewOpenAIProvider(server.URL, "", server.Client())
+	messages := []ChatMessage{
+		UserMessage("hi"),
+		AssistantMessage("prev answer", "private chain of thought", nil),
+	}
+	if _, err := provider.Complete(context.Background(), CompletionRequest{Model: "m", Messages: messages}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	msgs, ok := requestBodies[0]["messages"].([]any)
+	if !ok || len(msgs) != 2 {
+		t.Fatalf("expected 2 messages in request, got %#v", requestBodies[0]["messages"])
+	}
+	assistant, ok := msgs[1].(map[string]any)
+	if !ok {
+		t.Fatalf("expected second message to be object, got %#v", msgs[1])
+	}
+	if assistant["role"] != "assistant" {
+		t.Fatalf("expected assistant role, got %#v", assistant["role"])
+	}
+	if got := assistant["reasoning_content"]; got != "private chain of thought" {
+		t.Fatalf("expected reasoning_content in request, got %#v (full: %#v)", got, assistant)
+	}
+	if assistant["content"] != "prev answer" {
+		t.Fatalf("expected content in request, got %#v", assistant["content"])
+	}
+}
+
+func TestOpenAIProvider_EmptyReasoningContentOmittedFromRequest(t *testing.T) {
+	var requestBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeSSE(t, w, map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "ok"}, "finish_reason": "stop"}}})
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider := NewOpenAIProvider(server.URL, "", server.Client())
+	if _, err := provider.Complete(context.Background(), CompletionRequest{
+		Model:    "m",
+		Messages: []ChatMessage{UserMessage("hi"), AssistantMessage("answer", "", nil)},
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	msgs := requestBody["messages"].([]any)
+	assistant := msgs[1].(map[string]any)
+	if _, present := assistant["reasoning_content"]; present {
+		t.Fatalf("expected reasoning_content to be omitted when empty, got %#v", assistant)
+	}
+}
