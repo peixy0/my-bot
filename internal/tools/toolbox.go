@@ -81,7 +81,7 @@ func (d *DefaultToolset) registerWebSearch(r *Registry) {
 			return PreparedTool{}, fmt.Errorf("web_search query must not be empty")
 		}
 		return PreparedTool{
-			Description: fmt.Sprintf("Searching the web for %q on page %d", p.Query, p.Page),
+			Description: fmt.Sprintf("Searching the web for %q", p.Query),
 			Execute: func(ctx context.Context) (ToolResult, error) {
 				results, err := d.webSearch.Search(ctx, p.Query, p.Page)
 				if err != nil {
@@ -167,7 +167,7 @@ func (d *DefaultToolset) registerReadFile(r *Registry) {
 			return PreparedTool{}, fmt.Errorf("read_file filename must not be empty")
 		}
 		return PreparedTool{
-			Description: fmt.Sprintf("Reading %s from line %d", p.Filename, p.StartLine),
+			Description: fmt.Sprintf("Reading %s", p.Filename),
 			Execute: func(ctx context.Context) (ToolResult, error) {
 				res, err := d.rt.ReadFile(ctx, p.Filename, p.StartLine, p.Limit)
 				if err != nil {
@@ -324,7 +324,7 @@ func (d *DefaultToolset) registerEditFile(r *Registry) {
 			edits[i] = runtime.Edit{Search: e.Search, Replace: e.Replace}
 		}
 		return PreparedTool{
-			Description: fmt.Sprintf("Applying %d edits to %s", len(edits), p.Filename),
+			Description: fmt.Sprintf("Editing %s", p.Filename),
 			Execute: func(ctx context.Context) (ToolResult, error) {
 				if err := d.rt.EditFile(ctx, p.Filename, edits); err != nil {
 					return ErrorResult(fmt.Errorf("edit file %s: %w", p.Filename, err)), nil

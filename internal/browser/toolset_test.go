@@ -170,7 +170,7 @@ func TestToolsetDescriptionsOmitTabDetails(t *testing.T) {
 	}{
 		{name: "browser_click", args: `{"tab":"tab-1","element_ref":"42"}`, want: "Clicking in browser"},
 		{name: "browser_press_key", args: `{"tab":"tab-1","key":"Enter"}`, want: "Pressing keys in browser"},
-		{name: "browser_navigate", args: `{"tab":"tab-1","url":"https://example.com/path"}`, want: `Navigating to "https://example.com/path" in browser`},
+		{name: "browser_navigate", args: `{"tab":"tab-1","url":"https://example.com/path"}`, want: `Navigating to https://example.com/path in browser`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

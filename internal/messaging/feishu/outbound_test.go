@@ -28,20 +28,12 @@ func TestStreamingCardPayload(t *testing.T) {
 		t.Fatalf("expected body map, got %#v", payload["body"])
 	}
 	elements, ok := body["elements"].([]map[string]any)
-	if !ok || len(elements) != 2 {
-		t.Fatalf("expected markdown and footer elements, got %#v", body["elements"])
+	if !ok || len(elements) != 1 {
+		t.Fatalf("expected only markdown element (no footer in streaming mode), got %#v", body["elements"])
 	}
 	element := elements[0]
 	if element["tag"] != "markdown" || element["content"] != "hello" || element["element_id"] != streamingElementID {
 		t.Fatalf("unexpected streaming element: %#v", element)
-	}
-	footer := elements[1]
-	if footer["tag"] != "div" {
-		t.Fatalf("unexpected footer container: %#v", footer)
-	}
-	text, ok := footer["text"].(map[string]any)
-	if !ok || text["tag"] != "plain_text" || text["content"] != "" || text["text_size"] != "notation" || text["text_color"] != "grey" || text["element_id"] != streamingFooterElementID {
-		t.Fatalf("unexpected footer element: %#v", footer)
 	}
 }
 

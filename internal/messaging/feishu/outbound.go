@@ -121,18 +121,19 @@ func (o *Outbound) SendFinal(ctx context.Context, metadata *events.ResponseMetad
 				updateFailed = true
 			}
 		}
-		if footer != "" {
-			if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
-				return o.updateStreamingCardElement(ctx, stream, streamingFooterElementID, footer)
-			}); err != nil {
-				slog.Warn("feishu streaming card footer update failed", "err", err, "chat_id", o.chatID, "card_id", stream.cardID)
-				updateFailed = true
-			}
-		}
 		if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
 			return o.closeStreamingCard(ctx, stream)
 		}); err != nil {
 			slog.Warn("feishu streaming card close failed", "err", err, "chat_id", o.chatID, "card_id", stream.cardID)
+			updateFailed = true
+		}
+		if footer != "" {
+			if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
+				return o.insertCardElement(ctx, stream, footer)
+			}); err != nil {
+				slog.Warn("feishu streaming card footer insert failed", "err", err, "chat_id", o.chatID, "card_id", stream.cardID)
+				updateFailed = true
+			}
 		}
 	}
 	if hasText && (stream == nil || updateFailed) {
@@ -249,6 +250,39 @@ func (o *Outbound) closeStreamingCard(ctx context.Context, stream *streamingCard
 	return nil
 }
 
+func (o *Outbound) insertCardElement(ctx context.Context, stream *streamingCard, footer string) error {
+	stream.sequence++
+	element, err := util.ToJSON([]map[string]any{{
+		"tag": "div",
+		"text": map[string]any{
+			"tag":        "plain_text",
+			"content":    footer,
+			"text_size":  "notation",
+			"text_color": "grey",
+		},
+	}})
+	if err != nil {
+		return fmt.Errorf("marshal footer element: %w", err)
+	}
+	req := larkcardkit.NewCreateCardElementReqBuilder().
+		CardId(stream.cardID).
+		Body(larkcardkit.NewCreateCardElementReqBodyBuilder().
+			Type("append").
+			Uuid(uuid.NewString()).
+			Elements(string(element)).
+			Sequence(stream.sequence).
+			Build()).
+		Build()
+	resp, err := o.client.Cardkit.V1.CardElement.Create(ctx, req)
+	if err != nil {
+		return fmt.Errorf("insert footer element: %w", err)
+	}
+	if !resp.Success() {
+		return fmt.Errorf("insert footer element: %s", resp.CodeError.String())
+	}
+	return nil
+}
+
 func cardPayload(content, footer string, streaming bool) map[string]any {
 	elements := []map[string]any{
 		{
@@ -257,7 +291,7 @@ func cardPayload(content, footer string, streaming bool) map[string]any {
 			"element_id": streamingElementID,
 		},
 	}
-	if footer != "" || streaming {
+	if footer != "" {
 		elements = append(elements, map[string]any{
 			"tag": "div",
 			"text": map[string]any{
@@ -265,7 +299,6 @@ func cardPayload(content, footer string, streaming bool) map[string]any {
 				"content":    footer,
 				"text_size":  "notation",
 				"text_color": "grey",
-				"element_id": streamingFooterElementID,
 			},
 		})
 	}

@@ -377,7 +377,7 @@ func (p *newTabParams) describe() string {
 	if p.URL == "" {
 		return "Creating a blank page"
 	}
-	return fmt.Sprintf("Navigating to %q in browser", p.URL)
+	return fmt.Sprintf("Navigating to %s in browser", p.URL)
 }
 
 type closeTabParams struct {
@@ -401,7 +401,7 @@ func (p *navigateParams) validate() error {
 	return requireBrowserParam("browser_navigate", "url", p.URL)
 }
 func (p *navigateParams) describe() string {
-	return fmt.Sprintf("Navigating to %q in browser", p.URL)
+	return fmt.Sprintf("Navigating to %s in browser", p.URL)
 }
 
 type snapshotParams struct {
