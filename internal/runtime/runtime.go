@@ -51,6 +51,7 @@ func (h *ProcessHandle) ExitCode() *int   { return h.fnExitCode() }
 
 type Runtime interface {
 	Truncate(ctx context.Context, text string, limit int) string
+	TruncateTail(ctx context.Context, text string, limit int) string
 	Execute(ctx context.Context, command string) (ExecResult, error)
 	Spawn(ctx context.Context, command string) (*ProcessHandle, error)
 	ReadRawBytes(ctx context.Context, filename string) ([]byte, error)
@@ -85,6 +86,33 @@ func truncateWithRedirection(
 		return fmt.Sprintf("[output truncated; showing the first %d chars]\n\n%s", len(short), short)
 	}
 	return fmt.Sprintf("[output truncated; showing the first %d chars; full output saved to %s]\n\n%s", len(short), path, short)
+}
+
+func truncateTail(text string, maxChars int) (string, bool) {
+	if maxChars <= 0 {
+		return "", text != ""
+	}
+	if len(text) <= maxChars {
+		return text, false
+	}
+	return text[len(text)-maxChars:], true
+}
+
+func truncateTailWithRedirection(
+	ctx context.Context,
+	rt Runtime,
+	text string,
+	maxChars int,
+) string {
+	short, cut := truncateTail(text, maxChars)
+	if !cut {
+		return text
+	}
+	path, err := writeTmpFile(ctx, rt, text)
+	if err != nil {
+		return fmt.Sprintf("[output truncated; showing the last %d chars]\n\n%s", len(short), short)
+	}
+	return fmt.Sprintf("[output truncated; showing the last %d chars; full output saved to %s]\n\n%s", len(short), path, short)
 }
 
 func writeTmpFile(ctx context.Context, rt Runtime, content string) (string, error) {

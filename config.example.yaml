@@ -42,7 +42,7 @@ container:
 
 tool:
   enable_descriptive_output: true
-  max_output_chars: 100000
+  max_output_chars: 20000
   web_search_api: ""
   fetch_proxy: ""
 

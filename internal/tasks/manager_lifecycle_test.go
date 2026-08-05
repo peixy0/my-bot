@@ -5,10 +5,16 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"my-bot/internal/runtime"
 )
 
+func newTestManager(maxOutputChars int) *Manager {
+	return NewManager(runtime.NewHostRuntime(maxOutputChars), maxOutputChars)
+}
+
 func TestManager_StartAndGetRunning(t *testing.T) {
-	manager := NewManager(1024)
+	manager := newTestManager(1024)
 	defer mustShutdown(t, manager)
 
 	started := make(chan struct{}, 1)
@@ -44,7 +50,7 @@ func TestManager_StartAndGetRunning(t *testing.T) {
 }
 
 func TestManager_EmitOutputAccumulates(t *testing.T) {
-	manager := NewManager(1024)
+	manager := newTestManager(1024)
 	defer mustShutdown(t, manager)
 
 	done := make(chan struct{})
@@ -71,8 +77,32 @@ func TestManager_EmitOutputAccumulates(t *testing.T) {
 	}
 }
 
+func TestManager_EmitOutputKeepsTail(t *testing.T) {
+	t.Chdir(t.TempDir())
+	manager := newTestManager(5)
+	defer mustShutdown(t, manager)
+
+	driver := FuncDriver(func(_ context.Context, _ TaskInfo, emit *Emitter) (Controller, error) {
+		emit.Output("hello")
+		emit.Complete(TaskResult{Output: " world"})
+		return nil, nil
+	})
+	snap, err := manager.Start(context.Background(), StartOptions{Description: "tail", Driver: driver})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	got, err := manager.Await(context.Background(), snap.TaskID, 2*time.Second)
+	if err != nil {
+		t.Fatalf("await: %v", err)
+	}
+	if !strings.Contains(got.Output, "[output truncated; showing the last 5 chars; full output saved to ") || !strings.HasSuffix(got.Output, "\n\nworld") {
+		t.Fatalf("unexpected truncated output: %q", got.Output)
+	}
+}
+
 func TestManager_CompleteWithErrorMarksFailed(t *testing.T) {
-	manager := NewManager(1024)
+	manager := newTestManager(1024)
 	defer mustShutdown(t, manager)
 
 	done := make(chan struct{})
@@ -98,7 +128,7 @@ func TestManager_CompleteWithErrorMarksFailed(t *testing.T) {
 }
 
 func TestManager_CompleteSuccessMarksExited(t *testing.T) {
-	manager := NewManager(1024)
+	manager := newTestManager(1024)
 	defer mustShutdown(t, manager)
 
 	done := make(chan struct{})
@@ -121,7 +151,7 @@ func TestManager_CompleteSuccessMarksExited(t *testing.T) {
 }
 
 func TestManager_KillCallsControllerKill(t *testing.T) {
-	manager := NewManager(1024)
+	manager := newTestManager(1024)
 	defer mustShutdown(t, manager)
 
 	started := make(chan struct{}, 1)
@@ -173,7 +203,7 @@ func (c *trackKillController) WriteInput(string) error { return ErrInputUnsuppor
 func (c *trackKillController) Kill() error             { c.onKill(); return nil }
 
 func TestManager_RemoveNonexistentTask(t *testing.T) {
-	manager := NewManager(1024)
+	manager := newTestManager(1024)
 	defer mustShutdown(t, manager)
 
 	err := manager.Remove(context.Background(), "no-such-task")
@@ -183,7 +213,7 @@ func TestManager_RemoveNonexistentTask(t *testing.T) {
 }
 
 func TestManager_ListReturnsCreationOrder(t *testing.T) {
-	manager := NewManager(1024)
+	manager := newTestManager(1024)
 	defer mustShutdown(t, manager)
 
 	for i := 0; i < 3; i++ {
@@ -213,7 +243,7 @@ func TestManager_ListReturnsCreationOrder(t *testing.T) {
 }
 
 func TestManager_WriteInputNonexistentTask(t *testing.T) {
-	manager := NewManager(1024)
+	manager := newTestManager(1024)
 	defer mustShutdown(t, manager)
 
 	err := manager.WriteInput(context.Background(), "no-such-task", "hello")
@@ -223,7 +253,7 @@ func TestManager_WriteInputNonexistentTask(t *testing.T) {
 }
 
 func TestManager_WriteInputNotRunning(t *testing.T) {
-	manager := NewManager(1024)
+	manager := newTestManager(1024)
 	defer mustShutdown(t, manager)
 
 	done := make(chan struct{})
@@ -243,7 +273,7 @@ func TestManager_WriteInputNotRunning(t *testing.T) {
 }
 
 func TestManager_WriteInputToController(t *testing.T) {
-	manager := NewManager(1024)
+	manager := newTestManager(1024)
 	defer mustShutdown(t, manager)
 
 	inputCh := make(chan string, 1)
@@ -283,7 +313,7 @@ func (c *pipeController) WriteInput(input string) error {
 func (c *pipeController) Kill() error { return nil }
 
 func TestManager_ShutdownWaitsForRunningTasks(t *testing.T) {
-	manager := NewManager(1024)
+	manager := newTestManager(1024)
 
 	started := make(chan struct{}, 1)
 	driver := FuncDriver(func(taskCtx context.Context, _ TaskInfo, emit *Emitter) (Controller, error) {

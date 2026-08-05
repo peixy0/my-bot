@@ -5,8 +5,32 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+func TestHostRuntimeTruncateTailSavesFullOutput(t *testing.T) {
+	t.Chdir(t.TempDir())
+	rt := NewHostRuntime(1024)
+	got := rt.TruncateTail(context.Background(), "hello world", 5)
+	if !strings.Contains(got, "[output truncated; showing the last 5 chars; full output saved to ") || !strings.HasSuffix(got, "\n\nworld") {
+		t.Fatalf("unexpected truncated output: %q", got)
+	}
+	entries, err := os.ReadDir("tmp")
+	if err != nil {
+		t.Fatalf("read tmp: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected one saved output, got %d", len(entries))
+	}
+	full, err := os.ReadFile(filepath.Join("tmp", entries[0].Name()))
+	if err != nil {
+		t.Fatalf("read full output: %v", err)
+	}
+	if string(full) != "hello world" {
+		t.Fatalf("unexpected full output: %q", full)
+	}
+}
 
 func TestHostRuntimeGlobUsesPatternDirectly(t *testing.T) {
 	root := t.TempDir()

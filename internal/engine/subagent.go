@@ -50,7 +50,7 @@ func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task 
 		ctrl := newAgentTaskController(input, cancel)
 		go func() {
 			defer cancel()
-			taskManager := tasks.NewManager(cfg.Tool.MaxOutputChars)
+			taskManager := tasks.NewManager(r.env.Rt, cfg.Tool.MaxOutputChars)
 			cmdTools := tools.NewCommandToolset(r.env.Rt, taskManager)
 			browserClient := r.env.BrowserBroker.NewClient()
 			defer func() {

@@ -70,11 +70,10 @@ internal/
     fetch.go             ← HTTP fetch with optional proxy
     format.go            ← read_file / skill / task snapshot formatters
     markdown.go          ← ParseFrontmatter
-  tasks/                 ← event-driven TaskManager, drivers, retention, tailBuffer
+  tasks/                 ← event-driven TaskManager, drivers, output retention
     types.go             ← Snapshot, Driver/Controller interfaces, Emitter
     manager.go           ← single-owner Manager loop
     driver.go            ← NewProcessDriver (per-task goroutines reporting into Manager)
-    buffer.go            ← tailBuffer (keep last N bytes)
   util/
     encode.go            ← ToJSON / ToJSONIndent (HTML escape off)
   api/

@@ -309,7 +309,7 @@ func TestSubagentToolset_DoesNotForwardSubagentToolContent(t *testing.T) {
 	cfg := &config.Config{}
 	reg := tools.NewRegistry()
 
-	manager := tasks.NewManager(1000)
+	manager := tasks.NewManager(rt, 1000)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -352,7 +352,7 @@ func TestFleetToolset_ReturnsAllChildTaskIDs(t *testing.T) {
 	rt := &nullRuntime{}
 	cfg := &config.Config{Tool: config.ToolConfig{MaxOutputChars: 1000}}
 	reg := tools.NewRegistry()
-	manager := tasks.NewManager(1000)
+	manager := tasks.NewManager(rt, 1000)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -612,6 +612,9 @@ type nullRuntime struct{}
 func (r *nullRuntime) Truncate(_ context.Context, text string, _ int) string {
 	return text
 }
+func (r *nullRuntime) TruncateTail(_ context.Context, text string, _ int) string {
+	return text
+}
 func (r *nullRuntime) Execute(_ context.Context, _ string) (runtime.ExecResult, error) {
 	return runtime.ExecResult{}, nil
 }
@@ -639,7 +642,7 @@ func TestSubagentRegistry_HasNoMetaTools(t *testing.T) {
 	rt := &nullRuntime{}
 	skills := tools.NewSkillLoader("")
 	cfg := &config.Config{}
-	manager := tasks.NewManager(1000)
+	manager := tasks.NewManager(rt, 1000)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()

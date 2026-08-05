@@ -14,7 +14,7 @@ import (
 func newCommandTestToolset(t *testing.T) (*CommandToolset, *tasks.Manager, *Registry) {
 	t.Helper()
 	rt := runtime.NewHostRuntime(4096)
-	manager := tasks.NewManager(4096)
+	manager := tasks.NewManager(rt, 4096)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()

@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"my-bot/internal/runtime"
 )
 
 type Manager struct {
+	rt             runtime.Runtime
 	maxOutputChars int
 	rootCtx        context.Context
 	rootCancel     context.CancelFunc
@@ -85,7 +88,7 @@ type taskState struct {
 	startedAt     time.Time
 	completedAt   time.Time
 	errText       string
-	output        tailBuffer
+	output        string
 	controller    Controller
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -94,9 +97,10 @@ type taskState struct {
 	killRequested bool
 }
 
-func NewManager(maxOutputChars int) *Manager {
+func NewManager(rt runtime.Runtime, maxOutputChars int) *Manager {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	m := &Manager{
+		rt:             rt,
 		maxOutputChars: maxOutputChars,
 		rootCtx:        rootCtx,
 		rootCancel:     rootCancel,
@@ -127,7 +131,6 @@ func (m *Manager) loop() {
 				info:         info,
 				status:       StatusRunning,
 				startedAt:    time.Now(),
-				output:       newTailBuffer(m.maxOutputChars),
 				ctx:          taskCtx,
 				cancel:       cancel,
 				stopRootLink: stopRootLink,
@@ -142,19 +145,19 @@ func (m *Manager) loop() {
 				state.errText = err.Error()
 				state.status = StatusFailed
 				close(state.done)
-				req.resp <- startResp{snap: snapshotOf(state, true), err: nil}
+				req.resp <- startResp{snap: m.snapshotOf(state, true), err: nil}
 				close(req.resp)
 				continue
 			}
 			state.controller = controller
-			req.resp <- startResp{snap: snapshotOf(state, true)}
+			req.resp <- startResp{snap: m.snapshotOf(state, true)}
 			close(req.resp)
 		case emitReq:
 			task := tasks[req.taskID]
 			if task == nil || task.status != StatusRunning {
 				continue
 			}
-			task.output.Append(req.data)
+			appendTaskOutput(task, req.data)
 		case completeReq:
 			task := tasks[req.taskID]
 			if task == nil || task.status != StatusRunning {
@@ -162,7 +165,7 @@ func (m *Manager) loop() {
 			}
 			task.completedAt = time.Now()
 			if req.result.Output != "" {
-				task.output.Append(req.result.Output)
+				appendTaskOutput(task, req.result.Output)
 			}
 			if req.result.Error != "" {
 				task.errText = req.result.Error
@@ -187,7 +190,7 @@ func (m *Manager) loop() {
 				continue
 			}
 			req.resp <- getResp{
-				snap: snapshotOf(task, req.includeOutput),
+				snap: m.snapshotOf(task, req.includeOutput),
 				done: doneRef{done: task.done, ok: true},
 			}
 			close(req.resp)
@@ -195,7 +198,7 @@ func (m *Manager) loop() {
 			out := make([]Snapshot, 0, len(order))
 			for _, id := range order {
 				if task := tasks[id]; task != nil {
-					out = append(out, snapshotOf(task, false))
+					out = append(out, m.snapshotOf(task, false))
 				}
 			}
 			req.resp <- out
@@ -219,7 +222,7 @@ func (m *Manager) loop() {
 			}
 			err := task.controller.WriteInput(req.input)
 			if err == nil {
-				task.output.Append(req.input)
+				appendTaskOutput(task, req.input)
 			}
 			req.resp <- err
 			close(req.resp)
@@ -231,12 +234,12 @@ func (m *Manager) loop() {
 				continue
 			}
 			if task.controller == nil {
-				req.resp <- terminateResp{snap: snapshotOf(task, true)}
+				req.resp <- terminateResp{snap: m.snapshotOf(task, true)}
 				close(req.resp)
 				continue
 			}
 			err := task.controller.Kill()
-			req.resp <- terminateResp{snap: snapshotOf(task, true), err: err}
+			req.resp <- terminateResp{snap: m.snapshotOf(task, true), err: err}
 			close(req.resp)
 		case removeReq:
 			task := tasks[req.taskID]
@@ -285,7 +288,7 @@ func (m *Manager) maybeSignalShutdownDone(tasks map[string]*taskState) {
 	}
 }
 
-func snapshotOf(task *taskState, includeOutput bool) Snapshot {
+func (m *Manager) snapshotOf(task *taskState, includeOutput bool) Snapshot {
 	var elapsed float64
 	if task.completedAt.IsZero() {
 		elapsed = time.Since(task.startedAt).Seconds()
@@ -300,9 +303,13 @@ func snapshotOf(task *taskState, includeOutput bool) Snapshot {
 		ElapsedSeconds: &elapsed,
 	}
 	if includeOutput {
-		snap.Output = task.output.String("output")
+		snap.Output = m.rt.TruncateTail(m.rootCtx, task.output, m.maxOutputChars)
 	}
 	return snap
+}
+
+func appendTaskOutput(task *taskState, text string) {
+	task.output += text
 }
 
 func removeTask(tasks map[string]*taskState, order *[]string, taskID string) {

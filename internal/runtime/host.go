@@ -24,6 +24,10 @@ func (r *HostRuntime) Truncate(ctx context.Context, text string, limit int) stri
 	return truncateWithRedirection(ctx, r, text, limit)
 }
 
+func (r *HostRuntime) TruncateTail(ctx context.Context, text string, limit int) string {
+	return truncateTailWithRedirection(ctx, r, text, limit)
+}
+
 func (r *HostRuntime) Execute(ctx context.Context, command string) (ExecResult, error) {
 	cmd := exec.CommandContext(ctx, "bash", "-l", "-c", command)
 	var stdout, stderr bytes.Buffer

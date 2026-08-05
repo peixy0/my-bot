@@ -33,6 +33,10 @@ func (r *ContainerRuntime) Truncate(ctx context.Context, text string, limit int)
 	return truncateWithRedirection(ctx, r, text, limit)
 }
 
+func (r *ContainerRuntime) TruncateTail(ctx context.Context, text string, limit int) string {
+	return truncateTailWithRedirection(ctx, r, text, limit)
+}
+
 func (r *ContainerRuntime) buildExecArgs(withStdin bool, command ...string) []string {
 	args := []string{r.runtimeBin, "exec"}
 	if withStdin {

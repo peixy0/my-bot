@@ -50,6 +50,9 @@ type testRuntime struct {
 }
 
 func (rt testRuntime) Truncate(_ context.Context, text string, _ int) string { return text }
+func (rt testRuntime) TruncateTail(_ context.Context, text string, _ int) string {
+	return text
+}
 func (rt testRuntime) Execute(_ context.Context, _ string) (runtime.ExecResult, error) {
 	return runtime.ExecResult{}, nil
 }

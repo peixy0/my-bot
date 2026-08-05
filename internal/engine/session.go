@@ -32,7 +32,7 @@ type sessionTools struct {
 }
 
 func newSessionTools(env SessionEnv) *sessionTools {
-	taskManager := tasks.NewManager(env.Cfg.Tool.MaxOutputChars)
+	taskManager := tasks.NewManager(env.Rt, env.Cfg.Tool.MaxOutputChars)
 	browserClient := env.BrowserBroker.NewClient()
 	return &sessionTools{
 		env:           env,

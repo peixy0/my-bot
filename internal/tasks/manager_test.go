@@ -7,7 +7,7 @@ import (
 )
 
 func TestStartDetachesTaskLifetimeFromCallerContext(t *testing.T) {
-	manager := NewManager(1024)
+	manager := newTestManager(1024)
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
