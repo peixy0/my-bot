@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -336,7 +337,7 @@ func (a *streamAccumulator) response() CompletionResponse {
 }
 
 func isRetryable(err error) bool {
-	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, net.ErrClosed) {
 		return true
 	}
 	if apiErr, ok := err.(*APIError); ok {
