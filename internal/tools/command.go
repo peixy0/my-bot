@@ -53,8 +53,12 @@ func (s *CommandToolset) Register(r *Registry) {
 		if p.TimeoutSeconds > 600 {
 			p.TimeoutSeconds = 600
 		}
+		cmdExcerpt := p.Command
+		if len(cmdExcerpt) > 40 {
+			cmdExcerpt = cmdExcerpt[:40] + "..."
+		}
 		return PreparedTool{
-			Description: fmt.Sprintf("Running command %q", p.Command),
+			Description: fmt.Sprintf("Running command %q", cmdExcerpt),
 			Execute: func(ctx context.Context) (ToolResult, error) {
 				snap, err := s.tasks.Start(ctx, tasks.StartOptions{
 					Description: p.Command,

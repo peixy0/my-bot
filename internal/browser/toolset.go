@@ -80,7 +80,6 @@ func (c *ExtensionClient) Register(registry *tools.Registry) {
 	c.registerEvaluate(registry)
 	c.registerInspect(registry)
 	c.registerScroll(registry)
-	c.registerHistory(registry)
 	c.registerScreenshot(registry)
 	c.registerNetwork(registry)
 }
@@ -91,17 +90,6 @@ func (c *ExtensionClient) registerTabs(registry *tools.Registry) {
 		Description:   "List only the browser tabs owned by this agent. Each returned tab may be used for later browser actions. Tab refs persist until the tab is closed.",
 		ParameterDesc: map[string]any{"type": "object", "properties": map[string]any{}},
 	}, c.prepareTabs)
-
-	registry.Register(tools.ToolSchema{
-		Name:        "browser_new_tab",
-		Description: "Create a new browser tab owned by this agent and optionally navigate it. Prefer this over creating a tab then navigating separately — SPAs may intercept navigation after page load, so passing the final URL at creation time is more reliable.",
-		ParameterDesc: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"url": map[string]any{"type": "string", "description": "Absolute URL to open. Defaults to about:blank. Pass the final destination URL here to avoid SPA navigation intercept."},
-			},
-		},
-	}, c.prepareNewTab)
 
 	registry.Register(tools.ToolSchema{
 		Name:        "browser_close_tab",
@@ -118,14 +106,22 @@ func (c *ExtensionClient) registerTabs(registry *tools.Registry) {
 
 func (c *ExtensionClient) registerNavigate(registry *tools.Registry) {
 	registry.Register(tools.ToolSchema{
-		Name:        "browser_navigate",
-		Description: "Navigate a tab to a URL. After navigation call browser_snapshot to confirm the actual URL — SPAs may intercept or redirect, so the final URL can differ from the requested one.",
+		Name: "browser_navigate",
+		Description: "Navigate a tab: go to a URL, open a new tab, or traverse history.\n\n" +
+			"Actions:\n" +
+			"• 'go' (default) — navigate tab to url. Requires tab + url.\n" +
+			"• 'new' — create a new tab. url is optional (defaults to about:blank).\n" +
+			"• 'back' — go back in history. Requires tab.\n" +
+			"• 'forward' — go forward in history. Requires tab.\n" +
+			"• 'reload' — reload the page. Requires tab.\n\n" +
+			"After navigation, call browser_snapshot to confirm the actual URL — SPAs may redirect.",
 		ParameterDesc: map[string]any{
 			"type":     "object",
-			"required": []string{"tab", "url"},
+			"required": []string{},
 			"properties": map[string]any{
-				"tab": map[string]any{"type": "string", "description": "A tab returned by browser_tabs."},
-				"url": map[string]any{"type": "string", "description": "Absolute URL to navigate to."},
+				"tab":    map[string]any{"type": "string", "description": "A tab returned by browser_tabs. Required except when action='new'."},
+				"url":    map[string]any{"type": "string", "description": "Absolute URL. Required for action='go', optional for action='new'."},
+				"action": map[string]any{"type": "string", "description": "One of: go, new, back, forward, reload. Defaults to 'go'."},
 			},
 		},
 	}, c.prepareNavigate)
@@ -246,44 +242,6 @@ func (c *ExtensionClient) registerScroll(registry *tools.Registry) {
 	}, c.prepareScroll)
 }
 
-func (c *ExtensionClient) registerHistory(registry *tools.Registry) {
-	registry.Register(tools.ToolSchema{
-		Name:        "browser_back",
-		Description: "Navigate back one page in the tab's browser history stack. Uses CDP Page.getNavigationHistory + Page.navigateToHistoryEntry.\n\nNOTE: SPA internal navigation may NOT create browser history entries. This only works for actual page-level navigations.",
-		ParameterDesc: map[string]any{
-			"type":     "object",
-			"required": []string{"tab"},
-			"properties": map[string]any{
-				"tab": map[string]any{"type": "string", "description": "A tab returned by browser_tabs."},
-			},
-		},
-	}, c.prepareBack)
-
-	registry.Register(tools.ToolSchema{
-		Name:        "browser_forward",
-		Description: "Navigate forward one page in the tab's browser history stack. Uses CDP Page.getNavigationHistory + Page.navigateToHistoryEntry.\n\nNOTE: Only works for actual page-level navigations, not SPA internal routing.",
-		ParameterDesc: map[string]any{
-			"type":     "object",
-			"required": []string{"tab"},
-			"properties": map[string]any{
-				"tab": map[string]any{"type": "string", "description": "A tab returned by browser_tabs."},
-			},
-		},
-	}, c.prepareForward)
-
-	registry.Register(tools.ToolSchema{
-		Name:        "browser_reload",
-		Description: "Reload the current page in the tab via CDP Page.reload(). Useful to reset SPA state or refresh dynamic content.",
-		ParameterDesc: map[string]any{
-			"type":     "object",
-			"required": []string{"tab"},
-			"properties": map[string]any{
-				"tab": map[string]any{"type": "string", "description": "A tab returned by browser_tabs."},
-			},
-		},
-	}, c.prepareReload)
-}
-
 func (c *ExtensionClient) registerScreenshot(registry *tools.Registry) {
 	registry.Register(tools.ToolSchema{
 		Name:        "browser_screenshot",
@@ -302,53 +260,23 @@ func (c *ExtensionClient) registerScreenshot(registry *tools.Registry) {
 
 func (c *ExtensionClient) registerNetwork(registry *tools.Registry) {
 	registry.Register(tools.ToolSchema{
-		Name:        "browser_network_start",
-		Description: "Start capturing network requests on a tab. Use before navigation to capture all requests, or at any point to begin monitoring. Network capture persists until browser_network_stop is called or the tab is closed. Maximum 200 entries per tab.",
+		Name: "browser_network",
+		Description: "Capture and inspect network requests on a tab.\n\n" +
+			"Actions:\n" +
+			"• 'start' — start capturing. Max 200 entries. Requires tab.\n" +
+			"• 'stop' — stop capturing. Requires tab.\n" +
+			"• 'list' — list captured requests (URL, method, status, mime type, headers). Requires tab.\n" +
+			"• 'detail' — get response body of a specific request. Requires tab + request_id.",
 		ParameterDesc: map[string]any{
 			"type":     "object",
 			"required": []string{"tab"},
-			"properties": map[string]any{
-				"tab": map[string]any{"type": "string", "description": "A tab returned by browser_tabs."},
-			},
-		},
-	}, c.prepareNetworkStart)
-
-	registry.Register(tools.ToolSchema{
-		Name:        "browser_network_stop",
-		Description: "Stop capturing network requests on a tab.",
-		ParameterDesc: map[string]any{
-			"type":     "object",
-			"required": []string{"tab"},
-			"properties": map[string]any{
-				"tab": map[string]any{"type": "string", "description": "A tab returned by browser_tabs."},
-			},
-		},
-	}, c.prepareNetworkStop)
-
-	registry.Register(tools.ToolSchema{
-		Name:        "browser_network_list",
-		Description: "List captured network requests from a tab. Each entry includes URL, method, status, mime type, and headers. Response bodies are NOT included — use browser_network_detail to fetch a specific body.",
-		ParameterDesc: map[string]any{
-			"type":     "object",
-			"required": []string{"tab"},
-			"properties": map[string]any{
-				"tab": map[string]any{"type": "string", "description": "A tab returned by browser_tabs."},
-			},
-		},
-	}, c.prepareNetworkList)
-
-	registry.Register(tools.ToolSchema{
-		Name:        "browser_network_detail",
-		Description: "Get the full response body for a captured network request. The request_id comes from browser_network_list output.",
-		ParameterDesc: map[string]any{
-			"type":     "object",
-			"required": []string{"tab", "request_id"},
 			"properties": map[string]any{
 				"tab":        map[string]any{"type": "string", "description": "A tab returned by browser_tabs."},
-				"request_id": map[string]any{"type": "string", "description": "Request ID from browser_network_list output."},
+				"action":     map[string]any{"type": "string", "description": "One of: start, stop, list, detail. Defaults to 'list'."},
+				"request_id": map[string]any{"type": "string", "description": "Request ID from a list response. Required for action='detail'."},
 			},
 		},
-	}, c.prepareNetworkDetail)
+	}, c.prepareNetwork)
 }
 
 type browserParams interface {
@@ -368,18 +296,6 @@ type tabsParams struct{}
 func (*tabsParams) validate() error  { return nil }
 func (*tabsParams) describe() string { return "Listing browser tabs" }
 
-type newTabParams struct {
-	URL string `json:"url"`
-}
-
-func (*newTabParams) validate() error { return nil }
-func (p *newTabParams) describe() string {
-	if p.URL == "" {
-		return "Creating a blank page"
-	}
-	return fmt.Sprintf("Navigating to %s in browser", p.URL)
-}
-
 type closeTabParams struct {
 	Tab string `json:"tab"`
 }
@@ -390,18 +306,55 @@ func (p *closeTabParams) validate() error {
 func (*closeTabParams) describe() string { return "Closing browser tab" }
 
 type navigateParams struct {
-	Tab string `json:"tab"`
-	URL string `json:"url"`
+	Tab    string `json:"tab"`
+	URL    string `json:"url"`
+	Action string `json:"action"`
 }
 
 func (p *navigateParams) validate() error {
-	if err := requireBrowserParam("browser_navigate", "tab", p.Tab); err != nil {
-		return err
+	switch p.Action {
+	case "new":
+	case "back", "forward", "reload":
+		return requireBrowserParam("browser_navigate", "tab", p.Tab)
+	default:
+		if p.Action != "" && p.Action != "go" {
+			return fmt.Errorf("browser_navigate unknown action %q", p.Action)
+		}
+		if err := requireBrowserParam("browser_navigate", "tab", p.Tab); err != nil {
+			return err
+		}
+		return requireBrowserParam("browser_navigate", "url", p.URL)
 	}
-	return requireBrowserParam("browser_navigate", "url", p.URL)
+	return nil
 }
+
+func (p *navigateParams) extensionAction() string {
+	switch p.Action {
+	case "new":
+		return "new_tab"
+	case "back", "forward", "reload":
+		return p.Action
+	default:
+		return "navigate"
+	}
+}
+
 func (p *navigateParams) describe() string {
-	return fmt.Sprintf("Navigating to %s in browser", p.URL)
+	switch p.Action {
+	case "new":
+		if p.URL != "" {
+			return fmt.Sprintf("Navigating to %s in browser", p.URL)
+		}
+		return "Creating a blank page"
+	case "back":
+		return "Navigating backward in browser"
+	case "forward":
+		return "Navigating forward in browser"
+	case "reload":
+		return "Reloading in browser"
+	default:
+		return fmt.Sprintf("Navigating to %s in browser", p.URL)
+	}
 }
 
 type snapshotParams struct {
@@ -527,33 +480,6 @@ func (p *scrollParams) describe() string {
 	return fmt.Sprintf("Scrolling %s in browser", p.Direction)
 }
 
-type backParams struct {
-	Tab string `json:"tab"`
-}
-
-func (p *backParams) validate() error {
-	return requireBrowserParam("browser_back", "tab", p.Tab)
-}
-func (*backParams) describe() string { return "Navigating backward in browser" }
-
-type forwardParams struct {
-	Tab string `json:"tab"`
-}
-
-func (p *forwardParams) validate() error {
-	return requireBrowserParam("browser_forward", "tab", p.Tab)
-}
-func (*forwardParams) describe() string { return "Navigating forward in browser" }
-
-type reloadParams struct {
-	Tab string `json:"tab"`
-}
-
-func (p *reloadParams) validate() error {
-	return requireBrowserParam("browser_reload", "tab", p.Tab)
-}
-func (*reloadParams) describe() string { return "Reloading in browser" }
-
 type screenshotParams struct {
 	Tab      string `json:"tab"`
 	Selector string `json:"selector"`
@@ -573,46 +499,43 @@ func (p *screenshotParams) describe() string {
 	return "Capturing viewport screenshot in browser"
 }
 
-type networkStartParams struct {
-	Tab string `json:"tab"`
-}
-
-func (p *networkStartParams) validate() error {
-	return requireBrowserParam("browser_network_start", "tab", p.Tab)
-}
-func (*networkStartParams) describe() string { return "Starting network capture in browser" }
-
-type networkStopParams struct {
-	Tab string `json:"tab"`
-}
-
-func (p *networkStopParams) validate() error {
-	return requireBrowserParam("browser_network_stop", "tab", p.Tab)
-}
-func (*networkStopParams) describe() string { return "Stopping network capture in browser" }
-
-type networkListParams struct {
-	Tab string `json:"tab"`
-}
-
-func (p *networkListParams) validate() error {
-	return requireBrowserParam("browser_network_list", "tab", p.Tab)
-}
-func (*networkListParams) describe() string { return "Listing network requests in browser" }
-
-type networkDetailParams struct {
+type networkParams struct {
 	Tab       string `json:"tab"`
+	Action    string `json:"action"`
 	RequestID string `json:"request_id"`
 }
 
-func (p *networkDetailParams) validate() error {
-	if err := requireBrowserParam("browser_network_detail", "tab", p.Tab); err != nil {
+func (p *networkParams) validate() error {
+	if err := requireBrowserParam("browser_network", "tab", p.Tab); err != nil {
 		return err
 	}
-	return requireBrowserParam("browser_network_detail", "request_id", p.RequestID)
+	if p.Action == "detail" {
+		return requireBrowserParam("browser_network", "request_id", p.RequestID)
+	}
+	if p.Action != "" && p.Action != "start" && p.Action != "stop" && p.Action != "list" {
+		return fmt.Errorf("browser_network unknown action %q", p.Action)
+	}
+	return nil
 }
-func (p *networkDetailParams) describe() string {
-	return fmt.Sprintf("Reading network request in browser")
+
+func (p *networkParams) extensionAction() string {
+	if p.Action == "" || p.Action == "list" {
+		return "network_list"
+	}
+	return "network_" + p.Action
+}
+
+func (p *networkParams) describe() string {
+	switch p.Action {
+	case "start":
+		return "Starting network capture in browser"
+	case "stop":
+		return "Stopping network capture in browser"
+	case "detail":
+		return "Reading network request in browser"
+	default:
+		return "Listing network requests in browser"
+	}
 }
 
 func decodeBrowserParams[T browserParams](args []byte, toolName string, params T) error {
@@ -642,16 +565,26 @@ func (c *ExtensionClient) prepareTabs(args []byte) (tools.PreparedTool, error) {
 	return prepareBrowserCall(c, args, "browser_tabs", "tabs", &tabsParams{})
 }
 
-func (c *ExtensionClient) prepareNewTab(args []byte) (tools.PreparedTool, error) {
-	return prepareBrowserCall(c, args, "browser_new_tab", "new_tab", &newTabParams{})
-}
-
 func (c *ExtensionClient) prepareCloseTab(args []byte) (tools.PreparedTool, error) {
 	return prepareBrowserCall(c, args, "browser_close_tab", "close_tab", &closeTabParams{})
 }
 
 func (c *ExtensionClient) prepareNavigate(args []byte) (tools.PreparedTool, error) {
-	return prepareBrowserCall(c, args, "browser_navigate", "navigate", &navigateParams{})
+	params := &navigateParams{}
+	if err := decodeBrowserParams(args, "browser_navigate", params); err != nil {
+		return tools.PreparedTool{}, err
+	}
+	action := params.extensionAction()
+	return tools.PreparedTool{
+		Description: params.describe(),
+		Execute: func(ctx context.Context) (tools.ToolResult, error) {
+			result, err := c.call(ctx, action, params)
+			if err != nil {
+				return tools.ErrorResult(fmt.Errorf("browser_navigate: %w", err)), nil
+			}
+			return tools.TextResult(c.truncate(ctx, result)), nil
+		},
+	}, nil
 }
 
 func (c *ExtensionClient) prepareSnapshot(args []byte) (tools.PreparedTool, error) {
@@ -686,18 +619,6 @@ func (c *ExtensionClient) prepareScroll(args []byte) (tools.PreparedTool, error)
 	return prepareBrowserCall(c, args, "browser_scroll", "scroll", &scrollParams{Amount: 500})
 }
 
-func (c *ExtensionClient) prepareBack(args []byte) (tools.PreparedTool, error) {
-	return prepareBrowserCall(c, args, "browser_back", "back", &backParams{})
-}
-
-func (c *ExtensionClient) prepareForward(args []byte) (tools.PreparedTool, error) {
-	return prepareBrowserCall(c, args, "browser_forward", "forward", &forwardParams{})
-}
-
-func (c *ExtensionClient) prepareReload(args []byte) (tools.PreparedTool, error) {
-	return prepareBrowserCall(c, args, "browser_reload", "reload", &reloadParams{})
-}
-
 func (c *ExtensionClient) prepareScreenshot(args []byte) (tools.PreparedTool, error) {
 	params := &screenshotParams{}
 	if err := decodeBrowserParams(args, "browser_screenshot", params); err != nil {
@@ -726,18 +647,20 @@ func (c *ExtensionClient) prepareScreenshot(args []byte) (tools.PreparedTool, er
 	}, nil
 }
 
-func (c *ExtensionClient) prepareNetworkStart(args []byte) (tools.PreparedTool, error) {
-	return prepareBrowserCall(c, args, "browser_network_start", "network_start", &networkStartParams{})
-}
-
-func (c *ExtensionClient) prepareNetworkStop(args []byte) (tools.PreparedTool, error) {
-	return prepareBrowserCall(c, args, "browser_network_stop", "network_stop", &networkStopParams{})
-}
-
-func (c *ExtensionClient) prepareNetworkList(args []byte) (tools.PreparedTool, error) {
-	return prepareBrowserCall(c, args, "browser_network_list", "network_list", &networkListParams{})
-}
-
-func (c *ExtensionClient) prepareNetworkDetail(args []byte) (tools.PreparedTool, error) {
-	return prepareBrowserCall(c, args, "browser_network_detail", "network_detail", &networkDetailParams{})
+func (c *ExtensionClient) prepareNetwork(args []byte) (tools.PreparedTool, error) {
+	params := &networkParams{}
+	if err := decodeBrowserParams(args, "browser_network", params); err != nil {
+		return tools.PreparedTool{}, err
+	}
+	action := params.extensionAction()
+	return tools.PreparedTool{
+		Description: params.describe(),
+		Execute: func(ctx context.Context) (tools.ToolResult, error) {
+			result, err := c.call(ctx, action, params)
+			if err != nil {
+				return tools.ErrorResult(fmt.Errorf("browser_network: %w", err)), nil
+			}
+			return tools.TextResult(c.truncate(ctx, result)), nil
+		},
+	}, nil
 }

@@ -105,20 +105,13 @@ func TestToolsetRegistersAllBrowserTools(t *testing.T) {
 	newTestClient(&toolsetClient{}).Register(registry)
 
 	want := []string{
-		"browser_back",
 		"browser_click",
 		"browser_close_tab",
 		"browser_evaluate",
-		"browser_forward",
 		"browser_inspect",
 		"browser_navigate",
-		"browser_network_detail",
-		"browser_network_list",
-		"browser_network_start",
-		"browser_network_stop",
-		"browser_new_tab",
+		"browser_network",
 		"browser_press_key",
-		"browser_reload",
 		"browser_screenshot",
 		"browser_scroll",
 		"browser_set_value",
@@ -147,7 +140,7 @@ func TestToolsetParameterErrorsMatchDefaultToolsetStyle(t *testing.T) {
 		{name: "browser_navigate", args: `{"tab":"tab-1"}`, want: "browser_navigate url must not be empty"},
 		{name: "browser_evaluate", args: `{"tab":"tab-1"}`, want: "browser_evaluate script must not be empty"},
 		{name: "browser_wait", args: `{"tab":"tab-1","seconds":31}`, want: "browser_wait seconds must be greater than 0 and at most 30"},
-		{name: "browser_network_detail", args: `{"tab":"tab-1"}`, want: "browser_network_detail request_id must not be empty"},
+		{name: "browser_network", args: `{"tab":"tab-1","action":"detail"}`, want: "browser_network request_id must not be empty"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name+"_"+tt.want, func(t *testing.T) {
@@ -264,14 +257,19 @@ func TestToolsetBackForwardRegistered(t *testing.T) {
 	registry := tools.NewRegistry()
 	newTestClient(client).Register(registry)
 
-	for _, name := range []string{"browser_back", "browser_forward", "browser_reload"} {
-		result := executeTool(t, registry, name, `{"tab":"tab-1"}`)
+	for _, action := range []string{"back", "forward", "reload"} {
+		result := executeTool(t, registry, "browser_navigate", `{"tab":"tab-1","action":"`+action+`"}`)
 		if result.Text != `{"ok":true}` {
-			t.Fatalf("%s unexpected result: %s", name, result.Text)
+			t.Fatalf("%s unexpected result: %s", action, result.Text)
 		}
 	}
 	if len(client.calls) != 3 {
 		t.Fatalf("expected 3 broker calls, got %d", len(client.calls))
+	}
+	for i, wantAction := range []string{"back", "forward", "reload"} {
+		if client.calls[i].action != wantAction {
+			t.Fatalf("call %d: expected action %q, got %q", i, wantAction, client.calls[i].action)
+		}
 	}
 }
 
