@@ -98,7 +98,7 @@ func (o *mockOrchestrator) OnContentDelta(context.Context, string) {}
 func (o *mockOrchestrator) OnContentFinal(_ context.Context, metadata *events.ResponseMetadata) {
 	o.finalMetadata = append(o.finalMetadata, metadata)
 }
-func (o *mockOrchestrator) OnFinalResponse(ctx context.Context, content string) {
+func (o *mockOrchestrator) OnFinalResponse(ctx context.Context, content string, metadata *events.ResponseMetadata) {
 	o.finalResponses = append(o.finalResponses, content)
 }
 func (o *mockOrchestrator) BeforeToolUse(ctx context.Context, content string, descriptions []string) {

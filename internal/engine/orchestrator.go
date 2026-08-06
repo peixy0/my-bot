@@ -20,7 +20,7 @@ type Orchestrator interface {
 	OnContentBegin(context.Context)
 	OnContentDelta(context.Context, string)
 	OnContentFinal(context.Context, *events.ResponseMetadata)
-	OnFinalResponse(context.Context, string)
+	OnFinalResponse(context.Context, string, *events.ResponseMetadata)
 	BeforeToolUse(context.Context, string, []string)
 	DispatchTools(context.Context, []preparedToolCall) ([]llm.CallOutcome, error)
 	MaybeInterrupt(context.Context) *llm.ChatMessage
@@ -61,7 +61,7 @@ func (o *HumanInputOrchestrator) OnContentFinal(ctx context.Context, metadata *e
 	o.sender.SendFinal(ctx, metadata)
 }
 
-func (o *HumanInputOrchestrator) OnFinalResponse(context.Context, string) {}
+func (o *HumanInputOrchestrator) OnFinalResponse(context.Context, string, *events.ResponseMetadata) {}
 
 func (o *HumanInputOrchestrator) BeforeToolUse(ctx context.Context, content string, descriptions []string) {
 	if o.sender == nil || len(descriptions) == 0 {
@@ -142,12 +142,12 @@ func (o *BackgroundOrchestrator) OnContentDelta(context.Context, string) {}
 
 func (o *BackgroundOrchestrator) OnContentFinal(context.Context, *events.ResponseMetadata) {}
 
-func (o *BackgroundOrchestrator) OnFinalResponse(ctx context.Context, content string) {
+func (o *BackgroundOrchestrator) OnFinalResponse(ctx context.Context, content string, metadata *events.ResponseMetadata) {
 	const noReport = "NO_REPORT"
 	if o.sender == nil || content == "" || strings.HasSuffix(strings.TrimSpace(content), noReport) {
 		return
 	}
-	o.sender.Send(ctx, content)
+	o.sender.SendFull(ctx, content, metadata)
 }
 
 func (o *BackgroundOrchestrator) BeforeToolUse(context.Context, string, []string) {}
@@ -179,7 +179,7 @@ func (o *SubagentOrchestrator) OnContentDelta(ctx context.Context, delta string)
 
 func (o *SubagentOrchestrator) OnContentFinal(context.Context, *events.ResponseMetadata) {}
 
-func (o *SubagentOrchestrator) OnFinalResponse(context.Context, string) {}
+func (o *SubagentOrchestrator) OnFinalResponse(context.Context, string, *events.ResponseMetadata) {}
 
 func (o *SubagentOrchestrator) BeforeToolUse(context.Context, string, []string) {}
 

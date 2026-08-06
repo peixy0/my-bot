@@ -154,8 +154,9 @@ func (a *Agent) Run(
 			}
 			assistantMsg := llm.AssistantMessage(resp.Content, resp.ReasoningContent, resp.ToolCalls)
 			conv.Messages = append(conv.Messages, assistantMsg)
-			orch.OnContentFinal(ctx, responseMetadata(model, cfg.LLM.ContextWindow, resp))
-			orch.OnFinalResponse(ctx, resp.Content)
+			metadata := responseMetadata(model, cfg.LLM.ContextWindow, resp)
+			orch.OnContentFinal(ctx, metadata)
+			orch.OnFinalResponse(ctx, resp.Content, metadata)
 			return nil
 		}
 

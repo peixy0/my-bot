@@ -54,7 +54,16 @@ func NewOutbound(client *lark.Client, rt runtime.Runtime, chatID, messageID stri
 
 func (o *Outbound) Send(ctx context.Context, text string) {
 	if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
-		return o.SendText(ctx, text)
+		return o.sendCard(ctx, text, "")
+	}); err != nil {
+		slog.Warn("feishu send failed", "err", err, "chat_id", o.chatID)
+	}
+}
+
+func (o *Outbound) SendFull(ctx context.Context, text string, metadata *events.ResponseMetadata) {
+	footer := formatResponseMetadata(metadata)
+	if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
+		return o.sendCard(ctx, text, footer)
 	}); err != nil {
 		slog.Warn("feishu send failed", "err", err, "chat_id", o.chatID)
 	}
@@ -143,10 +152,6 @@ func (o *Outbound) SendFinal(ctx context.Context, metadata *events.ResponseMetad
 			slog.Warn("feishu send failed", "err", err, "chat_id", o.chatID)
 		}
 	}
-}
-
-func (o *Outbound) SendText(ctx context.Context, text string) error {
-	return o.sendCard(ctx, text, "")
 }
 
 func (o *Outbound) sendCard(ctx context.Context, text, footer string) error {

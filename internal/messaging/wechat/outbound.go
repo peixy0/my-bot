@@ -46,6 +46,10 @@ func (o *Outbound) Send(ctx context.Context, text string) {
 	}
 }
 
+func (o *Outbound) SendFull(ctx context.Context, text string, _ *events.ResponseMetadata) {
+	o.Send(ctx, text)
+}
+
 func (o *Outbound) SendBegin(_ context.Context) {}
 
 func (o *Outbound) SendDelta(_ context.Context, text string) {

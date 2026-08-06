@@ -19,6 +19,7 @@ type Outbound interface {
 	SendBegin(ctx context.Context)
 	SendDelta(ctx context.Context, text string)
 	SendFinal(ctx context.Context, metadata *ResponseMetadata)
+	SendFull(ctx context.Context, text string, metadata *ResponseMetadata)
 	StartThinking(ctx context.Context)
 	EndThinking(ctx context.Context)
 }

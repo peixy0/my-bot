@@ -30,6 +30,9 @@ type mockSender struct {
 func (s *mockSender) Send(_ context.Context, msg string) {
 	s.sent = append(s.sent, msg)
 }
+func (s *mockSender) SendFull(_ context.Context, msg string, _ *events.ResponseMetadata) {
+	s.sent = append(s.sent, msg)
+}
 func (s *mockSender) SendBegin(_ context.Context) {
 	s.begins++
 }
@@ -109,12 +112,12 @@ func TestBackgroundOrchestrator_NoReport(t *testing.T) {
 		t.Errorf("expected no send for non-terminal background content, got deltas=%v finals=%d", sender.deltas, sender.finals)
 	}
 
-	orch.OnFinalResponse(context.Background(), "all done NO_REPORT")
+	orch.OnFinalResponse(context.Background(), "all done NO_REPORT", nil)
 	if len(sender.sent) != 0 || len(sender.deltas) != 0 || sender.finals != 0 {
 		t.Errorf("expected no send for NO_REPORT, got sent=%v deltas=%v finals=%d", sender.sent, sender.deltas, sender.finals)
 	}
 
-	orch.OnFinalResponse(context.Background(), "hello world")
+	orch.OnFinalResponse(context.Background(), "hello world", nil)
 	if len(sender.sent) != 1 || sender.sent[0] != "hello world" {
 		t.Errorf("expected 'hello world' sent by batch, got %v", sender.sent)
 	}
