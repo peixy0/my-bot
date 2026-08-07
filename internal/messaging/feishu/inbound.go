@@ -38,6 +38,7 @@ const (
 	dedupTTL       = 5 * time.Minute
 	enqueueTimeout = 5 * time.Second
 	postImageLimit = 4
+	fileTimeout    = 60 * time.Second
 )
 
 var (
@@ -48,6 +49,16 @@ var (
 type postData struct {
 	text   string
 	images []events.ImageData
+}
+
+type fileContent struct {
+	FileKey  string `json:"file_key"`
+	FileName string `json:"file_name"`
+}
+
+type fileData struct {
+	name string
+	data []byte
 }
 
 func NewInbound(cfg Config, agentInbox inbox.Inbox[events.AgentEvent], rt runtime.Runtime) *Inbound {
@@ -91,6 +102,8 @@ func (i *Inbound) onMessageReceive(ctx context.Context, event *larkim.P2MessageR
 		go i.processImageMessage(context.WithoutCancel(ctx), chatID, msgID, msg, outbound)
 	case "post":
 		go i.processPostMessage(context.WithoutCancel(ctx), chatID, msgID, msg, outbound)
+	case "file":
+		go i.processFileMessage(context.WithoutCancel(ctx), chatID, msgID, msg, outbound)
 	default:
 		slog.Warn("unsupported feishu message type", "type", *msg.MessageType, "chat_id", chatID, "message_id", msgID)
 	}
@@ -131,6 +144,70 @@ func (i *Inbound) readImageDataByKey(ctx context.Context, msgID, imageKey string
 		return events.ImageData{}, err
 	}
 	return events.ImageData{Data: data, MIMEType: http.DetectContentType(data)}, nil
+}
+
+func parseFileContent(content string) (fileContent, error) {
+	var body fileContent
+	if err := json.Unmarshal([]byte(content), &body); err != nil {
+		return fileContent{}, fmt.Errorf("unmarshal file msg body: %w", err)
+	}
+	if strings.TrimSpace(body.FileKey) == "" {
+		return fileContent{}, errors.New("file_key is missing")
+	}
+	return body, nil
+}
+
+func readFile(reader io.Reader) ([]byte, error) {
+	if reader == nil {
+		return nil, errors.New("file resource is empty")
+	}
+	return io.ReadAll(reader)
+}
+
+func (i *Inbound) readFileData(ctx context.Context, msgID, content string) (fileData, error) {
+	body, err := parseFileContent(content)
+	if err != nil {
+		return fileData{}, err
+	}
+	var result fileData
+	err = messaging.CallWithTimeout(ctx, fileTimeout, func(ctx context.Context) error {
+		req := larkim.NewGetMessageResourceReqBuilder().
+			MessageId(msgID).
+			FileKey(body.FileKey).
+			Type("file").
+			Build()
+		resp, err := i.client.Im.MessageResource.Get(ctx, req)
+		if err != nil {
+			return err
+		}
+		if !resp.Success() {
+			return fmt.Errorf("get file resource: %s", resp.CodeError.String())
+		}
+		result.data, err = readFile(resp.File)
+		if err != nil {
+			return err
+		}
+		result.name = body.FileName
+		if strings.TrimSpace(result.name) == "" {
+			result.name = resp.FileName
+		}
+		return nil
+	})
+	if err != nil {
+		return fileData{}, err
+	}
+	if strings.TrimSpace(result.name) == "" {
+		result.name = "unnamed file"
+	}
+	return result, nil
+}
+
+func formatFileMessage(name, path string, size int) string {
+	return fmt.Sprintf("[RECEIVED FILE]\nfilename: %q\npath: %s\nsize: %d bytes", name, path, size)
+}
+
+func (i *Inbound) saveFileData(ctx context.Context, data []byte) (string, error) {
+	return i.rt.WriteTmpFile(ctx, string(data))
 }
 
 func (i *Inbound) processTextMessage(
@@ -259,6 +336,30 @@ func (i *Inbound) processImageMessage(
 		ChatID:    chatID,
 		MessageID: msgID,
 		ImageData: []events.ImageData{data},
+		Sender:    outbound,
+	})
+}
+
+func (i *Inbound) processFileMessage(
+	ctx context.Context,
+	chatID, msgID string,
+	msg *larkim.EventMessage,
+	outbound *Outbound,
+) {
+	file, err := i.readFileData(ctx, msgID, *msg.Content)
+	if err != nil {
+		i.sendError(ctx, outbound, "failed to read file data", "couldn't process your file", err)
+		return
+	}
+	path, err := i.saveFileData(ctx, file.data)
+	if err != nil {
+		i.sendError(ctx, outbound, "failed to save file data", "couldn't save your file", err)
+		return
+	}
+	i.enqueue(ctx, events.TextInputEvent{
+		ChatID:    chatID,
+		MessageID: msgID,
+		Message:   formatFileMessage(file.name, path, len(file.data)),
 		Sender:    outbound,
 	})
 }

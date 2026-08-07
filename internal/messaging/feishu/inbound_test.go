@@ -1,13 +1,28 @@
 package feishu
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
 	"testing"
 
+	"my-bot/internal/runtime"
+
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 )
+
+type recordingRuntime struct {
+	runtime.Runtime
+	content string
+	path    string
+	err     error
+}
+
+func (r *recordingRuntime) WriteTmpFile(ctx context.Context, content string) (string, error) {
+	r.content = content
+	return r.path, r.err
+}
 
 func TestReplaceMentionKeys(t *testing.T) {
 	key := "@_user_1"
@@ -63,5 +78,66 @@ func TestReadPostDataRequiresContentV2(t *testing.T) {
 	_, err := (&Inbound{}).readPostData(context.Background(), "chat", "msg", `{"content":[[{"tag":"text","text":"legacy"}]]}`)
 	if !errors.Is(err, errMissingPostContentV2) {
 		t.Fatalf("expected missing content_v2 error, got %v", err)
+	}
+}
+
+func TestParseFileContent(t *testing.T) {
+	content, err := parseFileContent("{\"file_key\":\"file-key\",\"file_name\":\"../../report\\n.pdf\"}")
+	if err != nil {
+		t.Fatalf("parse file content: %v", err)
+	}
+	if content.FileKey != "file-key" || content.FileName != "../../report\n.pdf" {
+		t.Fatalf("unexpected file content: %+v", content)
+	}
+}
+
+func TestParseFileContentRequiresFileKey(t *testing.T) {
+	for _, content := range []string{
+		`{"file_name":"report.pdf"}`,
+		`{"file_key":"   "}`,
+		`not-json`,
+	} {
+		if _, err := parseFileContent(content); err == nil {
+			t.Fatalf("expected error for %q", content)
+		}
+	}
+}
+
+func TestReadFile(t *testing.T) {
+	data, err := readFile(strings.NewReader("123456"))
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if string(data) != "123456" {
+		t.Fatalf("unexpected data: %q", data)
+	}
+
+	if _, err := readFile(nil); err == nil {
+		t.Fatal("expected nil reader error")
+	}
+}
+
+func TestFormatFileMessage(t *testing.T) {
+	got := formatFileMessage("report\n.pdf", "./tmp/output-id", 42)
+	want := "[RECEIVED FILE]\nfilename: \"report\\n.pdf\"\npath: ./tmp/output-id\nsize: 42 bytes"
+	if got != want {
+		t.Fatalf("unexpected file message:\n%s", got)
+	}
+}
+
+func TestSaveFileDataUsesRuntimeTmpFile(t *testing.T) {
+	rt := &recordingRuntime{path: "./tmp/output-id"}
+	inbound := &Inbound{rt: rt}
+	data := []byte{0, 1, 2, 255}
+
+	path, err := inbound.saveFileData(context.Background(), data)
+	if err != nil {
+		t.Fatalf("save file data: %v", err)
+	}
+	if path != rt.path {
+		t.Fatalf("path = %q, want %q", path, rt.path)
+	}
+	if !bytes.Equal([]byte(rt.content), data) {
+		t.Fatalf("saved data = %v, want %v", []byte(rt.content), data)
 	}
 }
