@@ -94,7 +94,7 @@ func (i *Inbound) onMessageReceive(ctx context.Context, event *larkim.P2MessageR
 	}
 
 	chatID := *msg.ChatId
-	outbound := NewOutbound(i.client, i.rt, chatID, msgID)
+	outbound := NewOutbound(i.client, i.rt, chatID)
 	switch *msg.MessageType {
 	case "text":
 		go i.processTextMessage(context.WithoutCancel(ctx), chatID, msgID, msg, outbound)

@@ -1,10 +1,17 @@
 package feishu
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"my-bot/internal/events"
+	"my-bot/internal/tools"
+
+	lark "github.com/larksuite/oapi-sdk-go/v3"
 )
 
 func TestStreamingCardPayload(t *testing.T) {
@@ -88,5 +95,43 @@ func TestFormatResponseMetadataOmitsUnavailableValues(t *testing.T) {
 	}
 	if got := formatResponseMetadata(&events.ResponseMetadata{}); got != "" {
 		t.Fatalf("expected zero metadata to be empty, got %q", got)
+	}
+}
+
+func TestAddReactionRequiresExplicitMessageID(t *testing.T) {
+	reg := tools.NewRegistry()
+	NewOutbound(nil, nil, "chat-1").Register(reg)
+	preparer, ok := reg.Get("add_reaction")
+	if !ok {
+		t.Fatal("expected add_reaction tool")
+	}
+	if _, err := preparer([]byte(`{"emoji":"OK"}`)); err == nil {
+		t.Fatal("expected missing message_id to fail")
+	}
+	if _, err := preparer([]byte(`{"message_id":"message-2","emoji":"OK"}`)); err != nil {
+		t.Fatalf("prepare add_reaction: %v", err)
+	}
+}
+
+func TestAddReactionUsesProvidedMessageID(t *testing.T) {
+	var reactionPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "auth") {
+			_, _ = w.Write([]byte(`{"code":0,"tenant_access_token":"token","expire":7200}`))
+			return
+		}
+		reactionPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"code":0,"data":{}}`))
+	}))
+	defer server.Close()
+
+	client := lark.NewClient("app", "secret", lark.WithOpenBaseUrl(server.URL))
+	outbound := NewOutbound(client, nil, "chat-1")
+	if err := outbound.addReaction(context.Background(), "message-2", "OK"); err != nil {
+		t.Fatalf("add reaction: %v", err)
+	}
+	if !strings.Contains(reactionPath, "/messages/message-2/reactions") {
+		t.Fatalf("expected target message ID in path, got %q", reactionPath)
 	}
 }

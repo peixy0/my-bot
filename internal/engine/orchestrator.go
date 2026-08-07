@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -78,54 +77,19 @@ func (o *HumanInputOrchestrator) DispatchTools(ctx context.Context, calls []prep
 }
 
 func (o *HumanInputOrchestrator) MaybeInterrupt(context.Context) *llm.ChatMessage {
-	if inject := o.drainInLoopInput(); inject != nil {
-		slog.Debug("in-loop user input injected after tool dispatch")
-		return inject
-	}
-	return nil
-}
-
-func (o *HumanInputOrchestrator) drainInLoopInput() *llm.ChatMessage {
-	var items []events.MessageEvent
-	for {
-		msg, ok := o.inLoopInbox.TryReceive()
-		if !ok {
-			break
-		}
-		items = append(items, msg)
-	}
+	items := drainMessageInbox(o.inLoopInbox)
 	if len(items) == 0 {
 		return nil
 	}
-	var sb strings.Builder
-	sb.WriteString("[USER MESSAGE INTERRUPTING YOUR CURRENT WORK]\n")
-	sb.WriteString("The user sent additional message while you were working. Read carefully and adjust your plan immediately if it changes what you should do next:\n\n")
-	var imageParts []map[string]any
-	for _, item := range items {
-		switch ev := item.(type) {
-		case events.TextInputEvent:
-			sb.WriteString(ev.Message)
-			sb.WriteString("\n\n")
-		case events.ImageInputEvent:
-			if !o.visionSupport {
-				continue
-			}
-			if strings.TrimSpace(ev.Message) != "" {
-				sb.WriteString(ev.Message)
-				sb.WriteString("\n\n")
-			}
-			for _, image := range ev.ImageData {
-				imageParts = appendVisionImagePart(imageParts, image)
-			}
-		}
+	inject := buildMessageBatch(
+		items,
+		o.visionSupport,
+		"[USER MESSAGE INTERRUPTING YOUR CURRENT WORK]\nThe user sent additional message while you were working. Read carefully and adjust your plan immediately if it changes what you should do next:",
+	)
+	if inject != nil {
+		slog.Debug("in-loop user input injected after tool dispatch")
 	}
-	text := strings.TrimSpace(sb.String())
-	if len(imageParts) == 0 {
-		msg := llm.UserMessage(text)
-		return &msg
-	}
-	msg := llm.UserBlocksMessage(text, imageParts)
-	return &msg
+	return inject
 }
 
 type BackgroundOrchestrator struct {
@@ -210,16 +174,6 @@ func (o *SubagentOrchestrator) drainInput() *llm.ChatMessage {
 			return &msg
 		}
 	}
-}
-
-func appendVisionImagePart(parts []map[string]any, image events.ImageData) []map[string]any {
-	return append(parts, map[string]any{
-		"type": "image_url",
-		"image_url": map[string]any{
-			"url":    fmt.Sprintf("data:%s;base64,%s", image.MIMEType, base64.StdEncoding.EncodeToString(image.Data)),
-			"detail": "auto",
-		},
-	})
 }
 
 func execOne(ctx context.Context, call preparedToolCall) llm.CallOutcome {

@@ -28,13 +28,12 @@ const (
 )
 
 type Outbound struct {
-	client    *lark.Client
-	rt        runtime.Runtime
-	chatID    string
-	messageID string
-	partial   strings.Builder
-	stream    *streamingCard
-	lastPush  time.Time
+	client   *lark.Client
+	rt       runtime.Runtime
+	chatID   string
+	partial  strings.Builder
+	stream   *streamingCard
+	lastPush time.Time
 }
 
 type streamingCard struct {
@@ -42,13 +41,12 @@ type streamingCard struct {
 	sequence int
 }
 
-func NewOutbound(client *lark.Client, rt runtime.Runtime, chatID, messageID string) *Outbound {
+func NewOutbound(client *lark.Client, rt runtime.Runtime, chatID string) *Outbound {
 	return &Outbound{
-		client:    client,
-		rt:        rt,
-		chatID:    chatID,
-		messageID: messageID,
-		lastPush:  time.Time{},
+		client:   client,
+		rt:       rt,
+		chatID:   chatID,
+		lastPush: time.Time{},
 	}
 }
 
@@ -418,9 +416,9 @@ func (o *Outbound) sendFile(ctx context.Context, name string, data []byte) error
 	return nil
 }
 
-func (o *Outbound) addReaction(ctx context.Context, emoji string) error {
+func (o *Outbound) addReaction(ctx context.Context, messageID, emoji string) error {
 	req := larkim.NewCreateMessageReactionReqBuilder().
-		MessageId(o.messageID).
+		MessageId(messageID).
 		Body(larkim.NewCreateMessageReactionReqBodyBuilder().
 			ReactionType(larkim.NewEmojiBuilder().EmojiType(emoji).Build()).
 			Build()).

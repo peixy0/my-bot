@@ -51,8 +51,8 @@ func TestHumanInputOrchestrator_DrainInLoopInputTextOnly(t *testing.T) {
 	inLoopInbox := inbox.NewMemory[events.MessageEvent](32)
 	orch := NewHumanInputOrchestrator(sender, inLoopInbox)
 
-	inLoopInbox.TryPublish(events.TextInputEvent{ChatID: "chat", Message: "stop doing that"})
-	inLoopInbox.TryPublish(events.TextInputEvent{ChatID: "chat", Message: "do this instead"})
+	inLoopInbox.TryPublish(events.TextInputEvent{ChatID: "chat", MessageID: "m1", Message: "stop doing that"})
+	inLoopInbox.TryPublish(events.TextInputEvent{ChatID: "chat", MessageID: "m2", Message: "do this instead"})
 
 	interrupt := orch.MaybeInterrupt(context.Background())
 	if interrupt == nil {
@@ -68,6 +68,9 @@ func TestHumanInputOrchestrator_DrainInLoopInputTextOnly(t *testing.T) {
 	if !strings.Contains(content, "stop doing that") || !strings.Contains(content, "do this instead") {
 		t.Fatalf("expected drained text inputs in content, got %q", content)
 	}
+	if !strings.Contains(content, "MESSAGE ID: m1") || !strings.Contains(content, "MESSAGE ID: m2") {
+		t.Fatalf("expected message IDs in content, got %q", content)
+	}
 }
 
 func TestHumanInputOrchestrator_DrainInLoopInputWithImageUsesMultipart(t *testing.T) {
@@ -75,8 +78,8 @@ func TestHumanInputOrchestrator_DrainInLoopInputWithImageUsesMultipart(t *testin
 	inLoopInbox := inbox.NewMemory[events.MessageEvent](32)
 	orch := NewHumanInputOrchestrator(sender, inLoopInbox).WithVision(true)
 
-	inLoopInbox.TryPublish(events.TextInputEvent{ChatID: "chat", Message: "stop doing that"})
-	inLoopInbox.TryPublish(events.ImageInputEvent{ChatID: "chat", Message: "see image", ImageData: []events.ImageData{
+	inLoopInbox.TryPublish(events.TextInputEvent{ChatID: "chat", MessageID: "m1", Message: "stop doing that"})
+	inLoopInbox.TryPublish(events.ImageInputEvent{ChatID: "chat", MessageID: "m2", Message: "see image", ImageData: []events.ImageData{
 		{Data: []byte{1, 2, 3}, MIMEType: "image/png"},
 		{Data: []byte{4, 5, 6}, MIMEType: "image/jpeg"},
 	}})
@@ -100,6 +103,10 @@ func TestHumanInputOrchestrator_DrainInLoopInputWithImageUsesMultipart(t *testin
 	}
 	if content[2]["type"] != "image_url" {
 		t.Fatalf("expected final content part to be image_url, got %+v", content[2])
+	}
+	text := content[0]["text"].(string)
+	if !strings.Contains(text, "MESSAGE ID: m1") || !strings.Contains(text, "MESSAGE ID: m2") {
+		t.Fatalf("expected message IDs before images, got %q", text)
 	}
 }
 

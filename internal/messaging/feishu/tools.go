@@ -21,24 +21,32 @@ func (o *Outbound) Register(r *tools.Registry) {
 func (o *Outbound) registerAddReaction(r *tools.Registry) {
 	r.Register(tools.ToolSchema{
 		Name:        "add_reaction",
-		Description: "Add an emoji reaction to the triggering message.",
+		Description: "Add an emoji reaction to a Feishu message using its message ID.",
 		ParameterDesc: (map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"message_id": map[string]any{
+					"type":        "string",
+					"description": "The target message ID shown in the user message.",
+				},
 				"emoji": map[string]any{
 					"type":        "string",
 					"enum":        []string{"OK", "THUMBSUP", "MUSCLE", "LOL", "THINKING", "Shrug", "Fire", "Coffee", "PARTY", "CAKE", "HEART"},
 					"description": "The emoji type to react with. OK, THUMBSUP, MUSCLE, LOL, THINKING, Shrug, Fire, Coffee, PARTY, CAKE, HEART",
 				},
 			},
-			"required": []string{"emoji"},
+			"required": []string{"message_id", "emoji"},
 		}),
 	}, func(args []byte) (tools.PreparedTool, error) {
 		var p struct {
-			Emoji string `json:"emoji"`
+			MessageID string `json:"message_id"`
+			Emoji     string `json:"emoji"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
 			return tools.PreparedTool{}, fmt.Errorf("parse add_reaction args: %w", err)
+		}
+		if p.MessageID == "" {
+			return tools.PreparedTool{}, fmt.Errorf("message_id must not be empty")
 		}
 		if p.Emoji == "" {
 			return tools.PreparedTool{}, fmt.Errorf("emoji must not be empty")
@@ -47,9 +55,9 @@ func (o *Outbound) registerAddReaction(r *tools.Registry) {
 			Description: fmt.Sprintf("Adding %s reaction", p.Emoji),
 			Execute: func(ctx context.Context) (tools.ToolResult, error) {
 				if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
-					return o.addReaction(ctx, p.Emoji)
+					return o.addReaction(ctx, p.MessageID, p.Emoji)
 				}); err != nil {
-					slog.Warn("feishu add reaction failed", "err", err, "chat_id", o.chatID, "message_id", o.messageID)
+					slog.Warn("feishu add reaction failed", "err", err, "chat_id", o.chatID, "message_id", p.MessageID)
 					return tools.ErrorResult(err), nil
 				}
 				return tools.TextResult("reaction added"), nil

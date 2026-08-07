@@ -47,6 +47,9 @@ func newConfigTestWorker(cfg *config.Config) *ConversationWorker {
 }
 
 func newStubSession(worker *ConversationWorker) *chatSession {
+	if worker.Control == nil {
+		worker.Control = inbox.NewMemory[events.WorkerEvent](1)
+	}
 	return &chatSession{chatID: "chat-1", worker: worker}
 }
 
@@ -223,7 +226,7 @@ func TestSchedulerDumpCommandQueuesUUIDDump(t *testing.T) {
 		Sender: out,
 	})
 
-	msg, err := worker.Events.Receive(context.Background())
+	msg, err := worker.Control.Receive(context.Background())
 	if err != nil {
 		t.Fatalf("receive dump event: %v", err)
 	}
@@ -299,7 +302,7 @@ func TestSchedulerResumeCommandQueuesResume(t *testing.T) {
 		Sender: out,
 	})
 
-	msg, err := worker.Events.Receive(context.Background())
+	msg, err := worker.Control.Receive(context.Background())
 	if err != nil {
 		t.Fatalf("receive resume event: %v", err)
 	}
@@ -353,7 +356,7 @@ func TestSchedulerModelCommandQueuesConfigChange(t *testing.T) {
 		Sender: &captureOutbound{},
 	})
 
-	msg, err := worker.Events.Receive(context.Background())
+	msg, err := worker.Control.Receive(context.Background())
 	if err != nil {
 		t.Fatalf("receive config event: %v", err)
 	}
@@ -461,6 +464,66 @@ func TestSchedulerRunReturnsRebootAfterWritingRestoreMarker(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(sessionDir, ".checkpoint")); err != nil {
 		t.Fatalf("expected restore marker: %v", err)
 	}
+}
+
+func TestSchedulerRebootContinuesAfterPartialDumpFailure(t *testing.T) {
+	ctx := context.Background()
+	sessionDir := t.TempDir()
+	cfg := &config.Config{
+		Workspace: config.WorkspaceConfig{SessionDir: sessionDir},
+		Tool:      config.ToolConfig{MaxOutputChars: 1000},
+	}
+	s := NewScheduler(
+		SessionEnv{Cfg: cfg, Agent: NewAgent(nil, nil), BrowserBroker: browser.NewNoopBroker()},
+		inbox.NewMemory[events.AgentEvent](1),
+		nil,
+	)
+	good := s.getOrCreateSession(ctx, "good")
+	good.worker.loop.conv = &llm.Conversation{Messages: []llm.ChatMessage{{Role: "user", Content: "keep"}}}
+	bad := s.getOrCreateSession(ctx, "bad")
+	bad.worker.loop.conv = &llm.Conversation{Messages: []llm.ChatMessage{{Role: "user", Content: make(chan int)}}}
+	out := &captureOutbound{}
+
+	err := s.handleRebootCommand(ctx, events.TextInputEvent{Sender: out})
+	if !errors.Is(err, ErrReboot) {
+		t.Fatalf("expected reboot despite dump failure, got %v", err)
+	}
+	if len(out.messages) != 1 || out.messages[0] != "dumped 1/2 session(s); rebooting with 1 error(s)" {
+		t.Fatalf("unexpected reboot response: %v", out.messages)
+	}
+	if _, err := os.Stat(filepath.Join(sessionDir, ".checkpoint")); err != nil {
+		t.Fatalf("expected checkpoint for successful session: %v", err)
+	}
+	s.closeAllSessions()
+}
+
+func TestSchedulerRebootContinuesAfterCheckpointFailure(t *testing.T) {
+	ctx := context.Background()
+	sessionDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(sessionDir, ".checkpoint"), 0700); err != nil {
+		t.Fatalf("create checkpoint blocker: %v", err)
+	}
+	cfg := &config.Config{
+		Workspace: config.WorkspaceConfig{SessionDir: sessionDir},
+		Tool:      config.ToolConfig{MaxOutputChars: 1000},
+	}
+	s := NewScheduler(
+		SessionEnv{Cfg: cfg, Agent: NewAgent(nil, nil), BrowserBroker: browser.NewNoopBroker()},
+		inbox.NewMemory[events.AgentEvent](1),
+		nil,
+	)
+	session := s.getOrCreateSession(ctx, "chat-1")
+	session.worker.loop.conv = &llm.Conversation{Messages: []llm.ChatMessage{{Role: "user", Content: "keep"}}}
+	out := &captureOutbound{}
+
+	err := s.handleRebootCommand(ctx, events.TextInputEvent{Sender: out})
+	if !errors.Is(err, ErrReboot) {
+		t.Fatalf("expected reboot despite checkpoint failure, got %v", err)
+	}
+	if len(out.messages) != 1 || out.messages[0] != "dumped 1/1 session(s); rebooting with 1 error(s)" {
+		t.Fatalf("unexpected reboot response: %v", out.messages)
+	}
+	s.closeAllSessions()
 }
 
 func TestSchedulerRestoreSessionsRestoresAndDeletesMarker(t *testing.T) {
@@ -599,7 +662,7 @@ func TestSchedulerVisionCommandReportsCurrentSetting(t *testing.T) {
 		Sender: out,
 	})
 
-	msg, err := worker.Events.Receive(context.Background())
+	msg, err := worker.Control.Receive(context.Background())
 	if err != nil {
 		t.Fatalf("receive config event: %v", err)
 	}
@@ -631,7 +694,7 @@ func TestSchedulerVisionCommandTogglesWorkerSetting(t *testing.T) {
 		ChatID: "chat-1",
 		Sender: out,
 	})
-	msg, err := worker.Events.Receive(context.Background())
+	msg, err := worker.Control.Receive(context.Background())
 	if err != nil {
 		t.Fatalf("receive config event: %v", err)
 	}
@@ -653,7 +716,7 @@ func TestSchedulerVisionCommandTogglesWorkerSetting(t *testing.T) {
 		ChatID: "chat-1",
 		Sender: out,
 	})
-	msg, err = worker.Events.Receive(context.Background())
+	msg, err = worker.Control.Receive(context.Background())
 	if err != nil {
 		t.Fatalf("receive config event: %v", err)
 	}
@@ -689,7 +752,7 @@ func TestWorkerVisionConfigChangeRejectsInvalidValue(t *testing.T) {
 		Sender: out,
 	})
 
-	msg, err := worker.Events.Receive(context.Background())
+	msg, err := worker.Control.Receive(context.Background())
 	if err != nil {
 		t.Fatalf("receive config event: %v", err)
 	}
@@ -722,7 +785,7 @@ func TestWorkerGenerationConfigCommands(t *testing.T) {
 			ChatID: "chat-1",
 			Sender: out,
 		})
-		msg, err := worker.Events.Receive(context.Background())
+		msg, err := worker.Control.Receive(context.Background())
 		if err != nil {
 			t.Fatalf("receive config event: %v", err)
 		}

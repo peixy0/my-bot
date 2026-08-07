@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -55,13 +56,6 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 		})
 	case "reboot":
 		return s.handleRebootCommand(ctx, e)
-	case "dumpall":
-		restores, err := s.dumpAllSessions(ctx)
-		if err != nil {
-			e.Sender.Send(ctx, fmt.Sprintf("error dumping session: %v", err))
-			return nil
-		}
-		e.Sender.Send(ctx, fmt.Sprintf("dumped %d session(s)", len(restores)))
 	case "dump":
 		session, ok := s.sessions[e.ChatID]
 		if !ok {
@@ -132,20 +126,18 @@ func (s *Scheduler) handleModelsCommand(ctx context.Context, e events.TextInputE
 	e.Sender.Send(ctx, "available models:\n- "+strings.Join(models, "\n- "))
 }
 
-func (s *Scheduler) dumpAllSessions(ctx context.Context) ([]restoreSession, error) {
+func (s *Scheduler) stopAndDumpAllSessions(ctx context.Context) ([]restoreSession, []error) {
 	restores := make([]restoreSession, 0, len(s.sessions))
+	var failures []error
 	for chatID, session := range s.sessions {
-		session.tryAbort()
 		dumpID := uuid.NewString()
-		if err := session.snapshot(ctx, dumpID); err != nil {
-			return []restoreSession{}, fmt.Errorf("fail to dump %s: %w", chatID, err)
+		if err := session.stopAndSnapshot(ctx, dumpID); err != nil {
+			failures = append(failures, fmt.Errorf("dump %s: %w", chatID, err))
+			continue
 		}
 		restores = append(restores, restoreSession{ChatID: chatID, DumpID: dumpID})
 	}
-	if err := s.writeCheckpoint(restores); err != nil {
-		return []restoreSession{}, fmt.Errorf("fail to write checkpoint: %w", err)
-	}
-	return restores, nil
+	return restores, failures
 }
 
 func (s *Scheduler) handleRebootCommand(ctx context.Context, e events.TextInputEvent) error {
@@ -153,12 +145,19 @@ func (s *Scheduler) handleRebootCommand(ctx context.Context, e events.TextInputE
 		e.Sender.Send(ctx, fmt.Sprintf("rebooting"))
 		return ErrReboot
 	}
-	restores, err := s.dumpAllSessions(ctx)
-	if err != nil {
-		e.Sender.Send(ctx, fmt.Sprintf("reboot cancelled: %v", err))
-		return nil
+	total := len(s.sessions)
+	restores, failures := s.stopAndDumpAllSessions(ctx)
+	if err := s.writeCheckpoint(restores); err != nil {
+		failures = append(failures, fmt.Errorf("write checkpoint: %w", err))
 	}
-	e.Sender.Send(ctx, fmt.Sprintf("dumped %d session(s); rebooting", len(restores)))
+	for _, err := range failures {
+		slog.Error("reboot snapshot failed", "err", err)
+	}
+	if len(failures) == 0 {
+		e.Sender.Send(ctx, fmt.Sprintf("dumped %d session(s); rebooting", len(restores)))
+		return ErrReboot
+	}
+	e.Sender.Send(ctx, fmt.Sprintf("dumped %d/%d session(s); rebooting with %d error(s)", len(restores), total, len(failures)))
 	return ErrReboot
 }
 

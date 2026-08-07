@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -19,6 +18,7 @@ import (
 
 const (
 	workerEventBuf  = 64
+	controlEventBuf = 64
 	messageInboxBuf = 32
 )
 
@@ -34,6 +34,7 @@ type ConversationWorker struct {
 	tools *sessionTools
 
 	Events       *inbox.Memory[events.WorkerEvent]
+	Control      *inbox.Memory[events.WorkerEvent]
 	MessageInbox *inbox.Memory[events.MessageEvent]
 
 	abortCh chan struct{}
@@ -56,6 +57,7 @@ func newConversationWorker(
 		skills:       env.Skills,
 		tools:        tools,
 		Events:       inbox.NewMemory[events.WorkerEvent](workerEventBuf),
+		Control:      inbox.NewMemory[events.WorkerEvent](controlEventBuf),
 		MessageInbox: inbox.NewMemory[events.MessageEvent](messageInboxBuf),
 		abortCh:      make(chan struct{}),
 	}
@@ -129,7 +131,17 @@ func (w *ConversationWorker) SetContextWindow(value int64) {
 func (w *ConversationWorker) Run(ctx context.Context) error {
 	slog.Debug("worker started", "chat_id", w.chatID)
 	for {
+		if event, ok := w.Control.TryReceive(); ok {
+			if w.handleControlEvent(ctx, event) {
+				return nil
+			}
+			continue
+		}
 		select {
+		case event := <-w.Control.C():
+			if w.handleControlEvent(ctx, event) {
+				return nil
+			}
 		case e := <-w.Events.C():
 			w.stopHeartbeat()
 			if hb, ok := e.(events.HeartbeatEvent); ok {
@@ -140,9 +152,10 @@ func (w *ConversationWorker) Run(ctx context.Context) error {
 			}
 			w.scheduleHeartbeat()
 		case e := <-w.MessageInbox.C():
-			slog.Debug("message input", "chat_id", w.chatID, "event", fmt.Sprintf("%T", e))
+			messages := drainMessageInbox(w.MessageInbox, e)
+			slog.Debug("message batch", "chat_id", w.chatID, "count", len(messages))
 			w.stopHeartbeat()
-			if err := w.handleMessage(ctx, e); err != nil {
+			if err := w.processMessages(ctx, messages); err != nil {
 				slog.Error("message input", "chat_id", w.chatID, "err", err)
 			}
 			w.scheduleHeartbeat()
@@ -153,94 +166,100 @@ func (w *ConversationWorker) Run(ctx context.Context) error {
 	}
 }
 
+func (w *ConversationWorker) handleControlEvent(ctx context.Context, event events.WorkerEvent) bool {
+	w.stopHeartbeat()
+	exit, err := w.processControlEvent(ctx, event)
+	if err != nil {
+		slog.Error("control event handler", "chat_id", w.chatID, "event", fmt.Sprintf("%T", event), "err", err)
+	}
+	if !exit {
+		w.scheduleHeartbeat()
+	}
+	return exit
+}
+
+func (w *ConversationWorker) processControlEvent(ctx context.Context, event events.WorkerEvent) (bool, error) {
+	switch ev := event.(type) {
+	case events.NewSessionEvent:
+		return false, w.processNewSession(ctx, ev)
+	case events.ConfigQueryEvent:
+		return false, w.processConfigQuery(ctx, ev)
+	case events.ConfigChangeEvent:
+		return false, w.processConfigChange(ctx, ev)
+	case events.DumpCommand:
+		return false, w.processDump(ctx, ev)
+	case events.ResumeCommand:
+		return false, w.processResume(ctx, ev)
+	case events.RebootCommand:
+		w.processReboot(ev)
+		return true, nil
+	default:
+		return false, fmt.Errorf("unexpected control event type %T", event)
+	}
+}
+
 func (w *ConversationWorker) handleEvent(ctx context.Context, e events.WorkerEvent) error {
 	switch ev := e.(type) {
 	case events.HeartbeatEvent:
 		return w.processHeartbeat(ctx, ev)
 	case events.CronEvent:
 		return w.processCron(ctx, ev)
-	case events.NewSessionEvent:
-		return w.processNewSession(ctx, ev)
-	case events.ConfigQueryEvent:
-		return w.processConfigQuery(ctx, ev)
-	case events.ConfigChangeEvent:
-		return w.processConfigChange(ctx, ev)
-	case events.DumpCommand:
-		return w.processDump(ctx, ev)
-	case events.ResumeCommand:
-		return w.processResume(ctx, ev)
 	case events.CompressCommand:
 		return w.processCompress(ctx, ev)
 	case events.QueuedInputEvent:
-		return w.processText(ctx, events.TextInputEvent(ev))
+		return w.processMessages(ctx, []events.MessageEvent{events.TextInputEvent(ev)})
 	default:
 		return fmt.Errorf("unexpected event type %T", e)
 	}
 }
 
-func (w *ConversationWorker) handleMessage(ctx context.Context, e events.MessageEvent) error {
-	switch ev := e.(type) {
-	case events.TextInputEvent:
-		return w.processText(ctx, ev)
-	case events.ImageInputEvent:
-		return w.processImage(ctx, ev)
-	default:
-		return fmt.Errorf("unexpected event type %T", e)
-	}
-}
-
-func (w *ConversationWorker) processText(ctx context.Context, ev events.TextInputEvent) error {
-	slog.Debug("text input", "chat_id", w.chatID, "msg_id", ev.MessageID, "len", len(ev.Message), "content", ev.Message)
-	prompt := llm.NewMainPrompt(w.skills, w.rt)
-	if err := w.maybeCompress(ctx); err != nil {
-		slog.Error("compress", "chat_id", w.chatID, "err", err)
-	}
-	reg := w.tools.BuildRegistry(ev.Sender)
-	orch := NewHumanInputOrchestrator(ev.Sender, w.MessageInbox).WithVision(w.VisionSupported())
-	ev.Sender.StartThinking(ctx)
-	defer ev.Sender.EndThinking(ctx)
-	err := w.loop.Run(ctx, w.abortCh, reg, orch, prompt, wrapUserMessage(ev.Message))
-	if err != nil {
-		ev.Sender.Send(ctx, errorMessage(err))
-	}
-	return err
-}
-
-func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageInputEvent) error {
-	if !w.VisionSupported() {
-		ev.Sender.Send(ctx, "Image processing is disabled for the current model")
+func (w *ConversationWorker) processMessages(ctx context.Context, messages []events.MessageEvent) error {
+	if len(messages) == 0 {
 		return nil
 	}
-	totalBytes := 0
-	for _, image := range ev.ImageData {
-		totalBytes += len(image.Data)
+	for _, message := range messages {
+		switch ev := message.(type) {
+		case events.TextInputEvent:
+			slog.Debug("text input", "chat_id", w.chatID, "msg_id", ev.MessageID, "len", len(ev.Message), "content", ev.Message)
+		case events.ImageInputEvent:
+			totalBytes := 0
+			for _, image := range ev.ImageData {
+				totalBytes += len(image.Data)
+			}
+			slog.Debug("image input", "chat_id", w.chatID, "msg_id", ev.MessageID, "count", len(ev.ImageData), "bytes", totalBytes)
+		default:
+			return fmt.Errorf("unexpected message type %T", message)
+		}
 	}
-	slog.Debug("image input", "chat_id", w.chatID, "msg_id", ev.MessageID, "count", len(ev.ImageData), "bytes", totalBytes)
+
+	sender := messageEventSender(messages[0])
+	batch := buildMessageBatch(messages, w.VisionSupported(), messageTime())
+	if batch == nil {
+		sender.Send(ctx, "Message cannot be processed for the current model")
+		return nil
+	}
 	prompt := llm.NewMainPrompt(w.skills, w.rt)
 	if err := w.maybeCompress(ctx); err != nil {
 		slog.Error("compress", "chat_id", w.chatID, "err", err)
 	}
-	content := []map[string]any{
-		{"type": "text", "text": wrapUserMessage(ev.Message)},
-	}
-	for _, image := range ev.ImageData {
-		content = append(content, map[string]any{
-			"type": "image_url",
-			"image_url": map[string]any{
-				"url":    fmt.Sprintf("data:%s;base64,%s", image.MIMEType, base64.StdEncoding.EncodeToString(image.Data)),
-				"detail": "auto",
-			},
-		})
-	}
-	reg := w.tools.BuildRegistry(ev.Sender)
-	orch := NewHumanInputOrchestrator(ev.Sender, w.MessageInbox).WithVision(true)
-	ev.Sender.StartThinking(ctx)
-	defer ev.Sender.EndThinking(ctx)
-	err := w.loop.Run(ctx, w.abortCh, reg, orch, prompt, content)
+	reg := w.tools.BuildRegistry(sender)
+	orch := NewHumanInputOrchestrator(sender, w.MessageInbox).WithVision(w.VisionSupported())
+	sender.StartThinking(ctx)
+	defer sender.EndThinking(ctx)
+	err := w.loop.Run(ctx, w.abortCh, reg, orch, prompt, batch.Content)
 	if err != nil {
-		ev.Sender.Send(ctx, errorMessage(err))
+		sender.Send(ctx, errorMessage(err))
 	}
 	return err
+}
+
+func (w *ConversationWorker) processReboot(request events.RebootCommand) {
+	w.stopHeartbeat()
+	err := w.loop.DumpConversation(w.conversationPath(request.ID))
+	select {
+	case request.Result <- err:
+	default:
+	}
 }
 
 func (w *ConversationWorker) processHeartbeat(ctx context.Context, ev events.HeartbeatEvent) error {
@@ -383,7 +402,11 @@ func (w *ConversationWorker) processConfigChange(ctx context.Context, ev events.
 func (w *ConversationWorker) runBackground(ctx context.Context, sender events.Outbound, prompt llm.SystemPrompt, content any) error {
 	reg := w.tools.BuildRegistry(sender)
 	orch := NewBackgroundOrchestrator(sender)
-	return w.loop.Run(ctx, w.abortCh, reg, orch, prompt, content)
+	err := w.loop.Run(ctx, w.abortCh, reg, orch, prompt, content)
+	if err != nil {
+		sender.Send(ctx, errorMessage(err))
+	}
+	return err
 }
 
 func (w *ConversationWorker) maybeCompress(ctx context.Context) error {
@@ -427,10 +450,11 @@ func (w *ConversationWorker) conversationPath(id string) string {
 }
 
 func wrapUserMessage(msg string) string {
-	now := time.Now()
-	return fmt.Sprintf("MESSAGE TIME: %s\n\n%s",
-		now.Format("Monday, 02 Jan 2006 15:04:05 -0700"),
-		msg)
+	return messageTime() + "\n\n" + msg
+}
+
+func messageTime() string {
+	return fmt.Sprintf("MESSAGE TIME: %s", time.Now().Format("Monday, 02 Jan 2006 15:04:05 -0700"))
 }
 
 func formatFloat(value float64) string {

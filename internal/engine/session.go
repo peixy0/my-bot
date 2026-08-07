@@ -109,17 +109,55 @@ func (s *chatSession) wait(ctx context.Context) error {
 }
 
 func (s *chatSession) publishEvent(ev events.WorkerEvent) bool {
-	if s.worker.Events.TryPublish(ev) {
+	target := s.worker.Events
+	if isControlEvent(ev) {
+		target = s.worker.Control
+	}
+	if target != nil && target.TryPublish(ev) {
 		return true
 	}
 	slog.Error("worker event dropped: channel full", "chat_id", s.chatID, "event", fmt.Sprintf("%T", ev))
 	return false
 }
 
+func isControlEvent(ev events.WorkerEvent) bool {
+	switch ev.(type) {
+	case events.NewSessionEvent,
+		events.ConfigQueryEvent,
+		events.ConfigChangeEvent,
+		events.DumpCommand,
+		events.ResumeCommand,
+		events.RebootCommand:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *chatSession) snapshot(ctx context.Context, id string) error {
 	result := make(chan error, 1)
 	if !s.publishEvent(events.DumpCommand{ID: id, Result: result}) {
 		return errors.New("snapshot request rejected")
+	}
+	select {
+	case err := <-result:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *chatSession) stopAndSnapshot(ctx context.Context, id string) error {
+	result := make(chan error, 1)
+	if !s.publishEvent(events.RebootCommand{ID: id, Result: result}) {
+		return errors.New("reboot request rejected")
+	}
+	select {
+	case err := <-result:
+		return err
+	case s.worker.abortCh <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 	select {
 	case err := <-result:
