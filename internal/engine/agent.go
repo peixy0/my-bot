@@ -200,8 +200,8 @@ func (a *Agent) Run(
 		orch.OnContentFinal(ctx, nil)
 
 		if threshold := int(float64(cfg.LLM.ContextWindow) * cfg.Context.CompressionThreshold); threshold > 0 && int(conv.TotalTokens) >= threshold {
-			slog.Debug("context compression triggered", "tokens", conv.TotalTokens, "context_window", cfg.LLM.ContextWindow)
-			if err := a.Compress(abortCtx, cfg, systemPrompt, conv); err != nil {
+			slog.Debug("in loop context compression start", "tokens", conv.TotalTokens, "context_window", cfg.LLM.ContextWindow)
+			if err := a.Compress(abortCtx, cfg, conv); err != nil {
 				if abortCtx.Err() == context.Canceled {
 					return ErrAborted
 				}
@@ -230,18 +230,17 @@ func responseMetadata(model string, contextWindow int64, resp llm.CompletionResp
 	}
 }
 
-func (a *Agent) Compress(ctx context.Context, cfg *config.Config, systemPrompt string, conv *llm.Conversation) error {
+func (a *Agent) Compress(ctx context.Context, cfg *config.Config, conv *llm.Conversation) error {
 	if len(conv.Messages) < 2 {
 		return nil
 	}
 
-	toEvict := conv.Messages[:len(conv.Messages)-1]
-	retained := conv.Messages[len(conv.Messages)-1]
+	retainedStart := findLastGroupStart(conv.Messages)
+	flatText := flattenMessages(conv.Messages, cfg.Context.CompressionToolResultTruncate)
 
-	compressMessages := buildCompressionMessages(systemPrompt, toEvict)
 	resp, err := a.client.Complete(ctx, llm.CompletionRequest{
 		Model:       cfg.LLM.Model,
-		Messages:    compressMessages,
+		Messages:    []llm.ChatMessage{{Role: "system", Content: compressionInstruction}, llm.UserMessage(flatText)},
 		MaxTokens:   cfg.Context.MaxOutputTokens,
 		Temperature: compressionTemperature,
 		TopP:        cfg.LLM.TopP,
@@ -256,10 +255,9 @@ func (a *Agent) Compress(ctx context.Context, cfg *config.Config, systemPrompt s
 	if anchor == "" {
 		return fmt.Errorf("got empty anchor")
 	}
-	conv.Messages = []llm.ChatMessage{
+	conv.Messages = append([]llm.ChatMessage{
 		{Role: "user", Content: "[CONTEXT ANCHOR]\n" + anchor},
-		retained,
-	}
+	}, conv.Messages[retainedStart:]...)
 	conv.TotalTokens = resp.TotalTokens
 	return nil
 }
@@ -274,7 +272,7 @@ const compressionInstruction = "You are compressing context for an autonomous AI
 	"- Escalate completed tasks from Active to Completed; remove fully resolved issues.\n" +
 	"- Be dense. Omit pleasantries, exploratory dead-ends, and superseded decisions.\n" +
 	"- Write in third-person past tense using the language of the original conversation.\n" +
-	"- The agent will have NO other context beyond this anchor and the retained latest message, so every section must be self-contained and actionable.\n\n" +
+	"- The agent will have NO other context beyond this anchor and the last message group, so every section must be self-contained and actionable.\n\n" +
 	"Output ONLY the updated anchor state using these Markdown sections, omitting any section that would be empty:\n\n" +
 	"## Intent\n" +
 	"The original goal and any refined sub-goals still in scope.\n\n" +
@@ -297,12 +295,94 @@ const compressionInstruction = "You are compressing context for an autonomous AI
 	"## Pending Issues\n" +
 	"Unresolved errors, blockers, or open questions."
 
-func buildCompressionMessages(systemPrompt string, messages []llm.ChatMessage) []llm.ChatMessage {
-	out := make([]llm.ChatMessage, 0, len(messages)+2)
-	out = append(out, llm.ChatMessage{Role: "system", Content: systemPrompt})
-	out = append(out, messages...)
-	out = append(out, llm.UserMessage(compressionInstruction))
-	return out
+func findLastGroupStart(messages []llm.ChatMessage) int {
+	if len(messages) == 0 {
+		return 0
+	}
+	i := len(messages) - 1
+	for i > 0 && messages[i].Role == "tool" {
+		i--
+	}
+	return i
+}
+
+func flattenMessages(messages []llm.ChatMessage, truncateLimit int) string {
+	var b strings.Builder
+	toolResults := map[string]string{}
+	for _, m := range messages {
+		if m.Role == "tool" {
+			result := contentToString(m.Content)
+			if truncateLimit > 0 && len(result) > truncateLimit {
+				result = result[:truncateLimit] + "..."
+			}
+			toolResults[m.ToolCallID] = result
+		}
+	}
+	for i, m := range messages {
+		if m.Role == "tool" {
+			continue
+		}
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		switch m.Role {
+		case "user":
+			b.WriteString("[USER]: ")
+			b.WriteString(contentToString(m.Content))
+		case "assistant":
+			b.WriteString("[ASSISTANT]: ")
+			b.WriteString(contentToString(m.Content))
+			for _, tc := range m.ToolCalls {
+				b.WriteString("\n[TOOL ")
+				b.WriteString(tc.Function.Name)
+				b.WriteString("(")
+				b.WriteString(tc.Function.Arguments)
+				b.WriteString(")]: ")
+				b.WriteString(toolResults[tc.ID])
+			}
+		default:
+			b.WriteString("[")
+			b.WriteString(m.Role)
+			b.WriteString("]: ")
+			b.WriteString(contentToString(m.Content))
+		}
+	}
+	return b.String()
+}
+
+func contentToString(content any) string {
+	switch v := content.(type) {
+	case string:
+		return v
+	case []map[string]any:
+		return contentPartsToString(v)
+	case nil:
+		return ""
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+func contentPartsToString[T any](parts []T) string {
+	var out []string
+	for _, part := range parts {
+		p, ok := any(part).(map[string]any)
+		if !ok {
+			out = append(out, fmt.Sprintf("%v", part))
+			continue
+		}
+		ptype, _ := p["type"].(string)
+		if ptype == "text" {
+			if text, ok := p["text"].(string); ok {
+				out = append(out, text)
+			} else {
+				out = append(out, ptype)
+			}
+		} else {
+			out = append(out, "["+ptype+"]")
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // AgentLoop manages a per-session conversation loop.
@@ -329,8 +409,8 @@ func (l *AgentLoop) Run(ctx context.Context, abortCh <-chan struct{}, reg *tools
 	return l.agent.Run(ctx, abortCh, l.cfg, prompt.Build(ctx), l.conv, orch, reg)
 }
 
-func (l *AgentLoop) Compress(ctx context.Context, prompt llm.SystemPrompt) error {
-	return l.agent.Compress(ctx, l.cfg, prompt.Build(ctx), l.conv)
+func (l *AgentLoop) Compress(ctx context.Context) error {
+	return l.agent.Compress(ctx, l.cfg, l.conv)
 }
 
 func (l *AgentLoop) DumpConversation(path string) error {

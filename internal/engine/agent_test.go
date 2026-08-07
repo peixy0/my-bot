@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,13 @@ import (
 	"my-bot/internal/llm"
 	"my-bot/internal/tools"
 )
+
+func truncateStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
 
 type mockClient struct {
 	responses []llm.CompletionResponse
@@ -424,18 +432,22 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 	if compressCall.temperature != compressionTemperature {
 		t.Fatalf("expected compression temperature %v, got %v", compressionTemperature, compressCall.temperature)
 	}
-	if len(compressCall.messages) != 3 {
-		t.Fatalf("expected system + evicted user + instruction, got %d messages", len(compressCall.messages))
+	if len(compressCall.messages) != 2 {
+		t.Fatalf("expected system + flattened user, got %d messages", len(compressCall.messages))
 	}
-	if compressCall.messages[0].Role != "system" || compressCall.messages[0].Content != "sys" {
-		t.Fatalf("expected compression to reuse active system prompt, got %#v", compressCall.messages[0])
+	sysContent, _ := compressCall.messages[0].Content.(string)
+	if compressCall.messages[0].Role != "system" || sysContent != compressionInstruction {
+		t.Fatalf("expected compression system prompt to be compressionInstruction, got role=%q content[:50]=%q", compressCall.messages[0].Role, truncateStr(sysContent, 50))
 	}
-	if compressCall.messages[1].Role != "user" || compressCall.messages[1].Content != "start" {
-		t.Fatalf("expected original user message in compression call, got %#v", compressCall.messages[1])
+	flatContent, _ := compressCall.messages[1].Content.(string)
+	if compressCall.messages[1].Role != "user" || flatContent == "" {
+		t.Fatalf("expected flattened conversation text as user message, got %#v", compressCall.messages[1])
 	}
-	instruction, _ := compressCall.messages[2].Content.(string)
-	if compressCall.messages[2].Role != "user" || instruction == "" {
-		t.Fatalf("expected final compression instruction, got %#v", compressCall.messages[2])
+	if !strings.Contains(flatContent, "[USER]:") {
+		t.Fatalf("expected flattened text to contain [USER]: tag, got %q", truncateStr(flatContent, 100))
+	}
+	if !strings.Contains(flatContent, "[ASSISTANT]:") {
+		t.Fatalf("expected flattened text to contain [ASSISTANT]: tag, got %q", truncateStr(flatContent, 100))
 	}
 
 	finalCall := client.calls[2]

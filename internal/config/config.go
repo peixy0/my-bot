@@ -112,9 +112,10 @@ type WorkspaceConfig struct {
 }
 
 type ContextConfig struct {
-	MaxImageBytes        int     `yaml:"max_image_bytes"`
-	MaxOutputTokens      int64   `yaml:"max_output_tokens"`
-	CompressionThreshold float64 `yaml:"compression_threshold"`
+	MaxImageBytes                 int     `yaml:"max_image_bytes"`
+	MaxOutputTokens               int64   `yaml:"max_output_tokens"`
+	CompressionThreshold          float64 `yaml:"compression_threshold"`
+	CompressionToolResultTruncate int     `yaml:"compression_tool_result_truncate"`
 }
 
 type FeishuConfig struct {
@@ -160,9 +161,10 @@ type LLMOverride struct {
 }
 
 type ContextOverride struct {
-	MaxImageBytes        *int     `yaml:"max_image_bytes,omitempty"`
-	MaxOutputTokens      *int64   `yaml:"max_output_tokens,omitempty"`
-	CompressionThreshold *float64 `yaml:"compression_threshold,omitempty"`
+	MaxImageBytes                 *int     `yaml:"max_image_bytes,omitempty"`
+	MaxOutputTokens               *int64   `yaml:"max_output_tokens,omitempty"`
+	CompressionThreshold          *float64 `yaml:"compression_threshold,omitempty"`
+	CompressionToolResultTruncate *int     `yaml:"compression_tool_result_truncate,omitempty"`
 }
 
 func (o *LLMOverride) ApplyTo(target *LLMConfig) {
@@ -207,6 +209,9 @@ func (o *ContextOverride) ApplyTo(target *ContextConfig) {
 	}
 	if o.CompressionThreshold != nil {
 		target.CompressionThreshold = *o.CompressionThreshold
+	}
+	if o.CompressionToolResultTruncate != nil {
+		target.CompressionToolResultTruncate = *o.CompressionToolResultTruncate
 	}
 }
 
@@ -276,9 +281,10 @@ func defaultConfig() *Config {
 			Vision:        false,
 		},
 		Context: ContextConfig{
-			MaxImageBytes:        5 * 1024 * 1024,
-			MaxOutputTokens:      16_384,
-			CompressionThreshold: 0.7,
+			MaxImageBytes:                 5 * 1024 * 1024,
+			MaxOutputTokens:               16_384,
+			CompressionThreshold:          0.7,
+			CompressionToolResultTruncate: 2000,
 		},
 		WebUI: WebUIConfig{
 			Enabled:       true,
@@ -350,6 +356,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Context.CompressionThreshold <= 0 || c.Context.CompressionThreshold > 1 {
 		return fmt.Errorf("context.compression_threshold must be greater than 0 and at most 1")
+	}
+	if c.Context.CompressionToolResultTruncate < 0 {
+		return fmt.Errorf("context.compression_tool_result_truncate must be non-negative")
 	}
 	if c.Context.MaxImageBytes <= 0 {
 		return fmt.Errorf("context.max_image_bytes must be positive")

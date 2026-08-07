@@ -67,7 +67,7 @@ func TestAgent_CompressWithFewerThanTwoMessages(t *testing.T) {
 		Context: config.ContextConfig{MaxOutputTokens: 16384},
 	}
 
-	err := agent.Compress(context.Background(), cfg, "sys", conv)
+	err := agent.Compress(context.Background(), cfg, conv)
 	if err != nil {
 		t.Fatalf("expected nil error for short conversation, got %v", err)
 	}
@@ -95,7 +95,7 @@ func TestAgent_CompressWithExactlyTwoMessages(t *testing.T) {
 		Context: config.ContextConfig{MaxOutputTokens: 16384},
 	}
 
-	err := agent.Compress(context.Background(), cfg, "sys", conv)
+	err := agent.Compress(context.Background(), cfg, conv)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

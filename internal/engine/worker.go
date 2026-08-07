@@ -192,7 +192,7 @@ func (w *ConversationWorker) handleMessage(ctx context.Context, e events.Message
 func (w *ConversationWorker) processText(ctx context.Context, ev events.TextInputEvent) error {
 	slog.Debug("text input", "chat_id", w.chatID, "msg_id", ev.MessageID, "len", len(ev.Message), "content", ev.Message)
 	prompt := llm.NewMainPrompt(w.skills, w.rt)
-	if err := w.maybeCompress(ctx, prompt); err != nil {
+	if err := w.maybeCompress(ctx); err != nil {
 		slog.Error("compress", "chat_id", w.chatID, "err", err)
 	}
 	reg := w.tools.BuildRegistry(ev.Sender)
@@ -217,7 +217,7 @@ func (w *ConversationWorker) processImage(ctx context.Context, ev events.ImageIn
 	}
 	slog.Debug("image input", "chat_id", w.chatID, "msg_id", ev.MessageID, "count", len(ev.ImageData), "bytes", totalBytes)
 	prompt := llm.NewMainPrompt(w.skills, w.rt)
-	if err := w.maybeCompress(ctx, prompt); err != nil {
+	if err := w.maybeCompress(ctx); err != nil {
 		slog.Error("compress", "chat_id", w.chatID, "err", err)
 	}
 	content := []map[string]any{
@@ -283,13 +283,16 @@ func (w *ConversationWorker) processResume(_ context.Context, ev events.ResumeCo
 }
 
 func (w *ConversationWorker) processCompress(ctx context.Context, ev events.CompressCommand) error {
+	slog.Debug("context compression start", "chat_id", w.chatID)
 	ev.Sender.StartThinking(ctx)
+	ev.Sender.Send(ctx, "compressing context")
 	defer ev.Sender.EndThinking(ctx)
-	if err := w.loop.Compress(ctx, llm.NewMainPrompt(w.skills, w.rt)); err != nil {
+	if err := w.loop.Compress(ctx); err != nil {
 		ev.Sender.Send(ctx, fmt.Sprintf("error: %v", err))
 		return err
 	}
 	ev.Sender.Send(ctx, "context compressed")
+	slog.Debug("context compression done", "chat_id", w.chatID)
 	return nil
 }
 
@@ -383,13 +386,13 @@ func (w *ConversationWorker) runBackground(ctx context.Context, sender events.Ou
 	return w.loop.Run(ctx, w.abortCh, reg, orch, prompt, content)
 }
 
-func (w *ConversationWorker) maybeCompress(ctx context.Context, prompt llm.SystemPrompt) error {
+func (w *ConversationWorker) maybeCompress(ctx context.Context) error {
 	threshold := int(float64(w.cfg.LLM.ContextWindow) * w.cfg.Context.CompressionThreshold)
 	if threshold <= 0 || int(w.loop.TotalTokens()) < threshold {
 		return nil
 	}
 	slog.Debug("compressing context", "chat_id", w.chatID, "tokens", w.loop.TotalTokens(), "threshold", threshold)
-	return w.loop.Compress(ctx, prompt)
+	return w.loop.Compress(ctx)
 }
 
 func (w *ConversationWorker) scheduleHeartbeat() {

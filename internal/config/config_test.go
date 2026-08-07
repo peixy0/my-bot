@@ -41,6 +41,7 @@ func TestConfigValidateRejectsInvalidValues(t *testing.T) {
 		{"max output tokens", func(c *Config) { c.Context.MaxOutputTokens = 0 }},
 		{"compression threshold low", func(c *Config) { c.Context.CompressionThreshold = 0 }},
 		{"compression threshold high", func(c *Config) { c.Context.CompressionThreshold = 1.1 }},
+		{"compression tool result truncate negative", func(c *Config) { c.Context.CompressionToolResultTruncate = -1 }},
 		{"image size", func(c *Config) { c.Context.MaxImageBytes = 0 }},
 		{"limiter rpm", func(c *Config) { c.Limiter = &LimiterConfig{RPM: 0, Burst: 1} }},
 		{"limiter burst", func(c *Config) { c.Limiter = &LimiterConfig{RPM: 1, Burst: 0} }},
@@ -89,6 +90,9 @@ llm:
 	}
 	if cfg.Context.MaxOutputTokens != 16384 {
 		t.Fatalf("expected default max_output_tokens 16384, got %d", cfg.Context.MaxOutputTokens)
+	}
+	if cfg.Context.CompressionToolResultTruncate != 2000 {
+		t.Fatalf("expected default compression_tool_result_truncate 2000, got %d", cfg.Context.CompressionToolResultTruncate)
 	}
 	if cfg.Tool.MaxOutputChars != 100000 {
 		t.Fatalf("expected default max_output_chars 100000, got %d", cfg.Tool.MaxOutputChars)
@@ -321,9 +325,10 @@ func TestForSessionExtraBodyOverride(t *testing.T) {
 
 func TestContextOverrideApplyTo(t *testing.T) {
 	target := ContextConfig{
-		MaxImageBytes:        1024,
-		MaxOutputTokens:      16384,
-		CompressionThreshold: 0.7,
+		MaxImageBytes:                 1024,
+		MaxOutputTokens:               16384,
+		CompressionThreshold:          0.7,
+		CompressionToolResultTruncate: 2000,
 	}
 
 	t.Run("all fields set", func(t *testing.T) {
@@ -331,10 +336,12 @@ func TestContextOverrideApplyTo(t *testing.T) {
 		maxImage := 2048
 		maxTokens := int64(8192)
 		threshold := 0.9
+		toolTruncate := 3000
 		override := ContextOverride{
-			MaxImageBytes:        &maxImage,
-			MaxOutputTokens:      &maxTokens,
-			CompressionThreshold: &threshold,
+			MaxImageBytes:                 &maxImage,
+			MaxOutputTokens:               &maxTokens,
+			CompressionThreshold:          &threshold,
+			CompressionToolResultTruncate: &toolTruncate,
 		}
 		override.ApplyTo(&tgt)
 		if tgt.MaxImageBytes != 2048 {
@@ -345,6 +352,9 @@ func TestContextOverrideApplyTo(t *testing.T) {
 		}
 		if tgt.CompressionThreshold != 0.9 {
 			t.Fatalf("expected compression_threshold 0.9, got %f", tgt.CompressionThreshold)
+		}
+		if tgt.CompressionToolResultTruncate != 3000 {
+			t.Fatalf("expected compression_tool_result_truncate 3000, got %d", tgt.CompressionToolResultTruncate)
 		}
 	})
 
@@ -360,6 +370,9 @@ func TestContextOverrideApplyTo(t *testing.T) {
 		}
 		if tgt.CompressionThreshold != 0.7 {
 			t.Fatalf("expected compression_threshold unchanged 0.7, got %f", tgt.CompressionThreshold)
+		}
+		if tgt.CompressionToolResultTruncate != 2000 {
+			t.Fatalf("expected compression_tool_result_truncate unchanged 2000, got %d", tgt.CompressionToolResultTruncate)
 		}
 	})
 }

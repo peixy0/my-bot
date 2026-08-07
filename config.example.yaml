@@ -61,6 +61,7 @@ context:
   max_image_bytes: 5242880
   max_output_tokens: 16384
   compression_threshold: 0.7
+  compression_tool_result_truncate: 2000
 
 feishu:
   app_id: ""
