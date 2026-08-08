@@ -37,12 +37,9 @@ func (r *ContainerRuntime) TruncateTail(ctx context.Context, text string, limit 
 	return truncateTailWithRedirection(ctx, r, text, limit)
 }
 
-func (r *ContainerRuntime) buildExecArgs(withStdin bool, command ...string) []string {
+func (r *ContainerRuntime) buildExecArgs(command ...string) []string {
 	args := []string{r.runtimeBin, "exec"}
-	if withStdin {
-		args = append(args, "-i")
-	}
-	args = append(args,
+	args = append(args, "-i",
 		"-w", r.workdir,
 		r.containerName,
 	)
@@ -51,8 +48,7 @@ func (r *ContainerRuntime) buildExecArgs(withStdin bool, command ...string) []st
 }
 
 func (r *ContainerRuntime) ExecuteTruncated(ctx context.Context, stdin io.Reader, command ...string) (ExecResult, error) {
-	cmdArgs := append([]string{"bash", "-l", "-c"}, command...)
-	result, err := r.Execute(ctx, stdin, cmdArgs...)
+	result, err := r.Execute(ctx, stdin, command...)
 	if err != nil {
 		return ExecResult{}, err
 	}
@@ -65,7 +61,9 @@ func (r *ContainerRuntime) Execute(ctx context.Context, stdin io.Reader, command
 	if len(command) == 0 {
 		return ExecResult{}, fmt.Errorf("empty command")
 	}
-	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+	cmdArgs := append([]string{"bash", "-l", "-c"}, command...)
+	args := r.buildExecArgs(cmdArgs...)
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -80,7 +78,7 @@ func (r *ContainerRuntime) Execute(ctx context.Context, stdin io.Reader, command
 }
 
 func (r *ContainerRuntime) Spawn(ctx context.Context, command string) (*ProcessHandle, error) {
-	args := r.buildExecArgs(true, "bash", "-l", "-c", command)
+	args := r.buildExecArgs("bash", "-l", "-c", command)
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, err := cmd.StdinPipe()
@@ -201,7 +199,7 @@ func (r *ContainerRuntime) EditFile(ctx context.Context, filename string, edits 
 }
 
 func (r *ContainerRuntime) OSInfo(ctx context.Context) (string, error) {
-	res, err := r.Execute(ctx, nil, "bash", "-l", "-c", "uname -sm && pwd")
+	res, err := r.Execute(ctx, nil, "uname -sm && pwd")
 	if err != nil {
 		return "", err
 	}
