@@ -29,8 +29,9 @@ type Edit struct {
 }
 
 type GlobResult struct {
-	Items []string `json:"items"`
-	Count int      `json:"count"`
+	Items        []string `json:"items"`
+	Count        int      `json:"count"`
+	ExceedsLimit bool     `json:"exceeds_limit,omitempty"`
 }
 
 type ProcessHandle struct {
@@ -59,7 +60,7 @@ type Runtime interface {
 	WriteFile(ctx context.Context, filename, content string) error
 	WriteTmpFile(ctx context.Context, content string) (string, error)
 	AppendFile(ctx context.Context, filename, content string) error
-	Glob(ctx context.Context, pattern string) (GlobResult, error)
+	Glob(ctx context.Context, pattern string, limit int) (GlobResult, error)
 	EditFile(ctx context.Context, filename string, edits []Edit) error
 	OSInfo(ctx context.Context) (string, error)
 }
@@ -151,10 +152,10 @@ func truncateLinesWithNote(
 	return content, cursor - start
 }
 
-func runPythonGlob(ctx context.Context, rt Runtime, pattern string) (GlobResult, error) {
+func runPythonGlob(ctx context.Context, rt Runtime, pattern string, limit int) (GlobResult, error) {
 	script := fmt.Sprintf(
-		`python3 -c "import glob, json, sys; p=sys.argv[1]; items=sorted(glob.glob(p, recursive=True)); print(json.dumps({'items': items, 'count': len(items)}))" %q`,
-		pattern,
+		`python3 -c "import glob, json, sys; p=sys.argv[1]; limit=int(sys.argv[2]); items=sorted(glob.glob(p, recursive=True)); exceeds=len(items)>limit; items=items[:limit]; print(json.dumps({'items': items, 'count': len(items), 'exceeds_limit': exceeds}))" %q %d`,
+		pattern, limit,
 	)
 	res, err := rt.Execute(ctx, script)
 	if err != nil {
@@ -166,12 +167,6 @@ func runPythonGlob(ctx context.Context, rt Runtime, pattern string) (GlobResult,
 	var parsed GlobResult
 	if err := json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &parsed); err != nil {
 		return GlobResult{}, fmt.Errorf("glob parse failed: %w", err)
-	}
-	if parsed.Items == nil {
-		parsed.Items = []string{}
-	}
-	if parsed.Count == 0 {
-		parsed.Count = len(parsed.Items)
 	}
 	return parsed, nil
 }

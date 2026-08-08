@@ -49,7 +49,7 @@ func TestHostRuntimeGlobUsesPatternDirectly(t *testing.T) {
 	}
 
 	pattern := filepath.Join(root, "**", "*.go")
-	got, err := NewHostRuntime(1024).Glob(context.Background(), pattern)
+	got, err := NewHostRuntime(1024).Glob(context.Background(), pattern, 50)
 	if err != nil {
 		t.Fatal(err)
 	}

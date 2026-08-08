@@ -443,12 +443,18 @@ func (d *DefaultToolset) registerGlob(r *Registry) {
 					"type":        "string",
 					"description": "Glob pattern relative to the workspace root, e.g. 'src/**/*.py' (all Python files under src/) or 'tests/test_*.py'. Use ** for recursive matching across subdirectories.",
 				},
+				"limit": map[string]any{
+					"type":        "integer",
+					"default":     50,
+					"description": "Max number of returned entries (default: 50).",
+				},
 			},
 			"required": []string{"pattern"},
 		}),
 	}, func(args []byte) (PreparedTool, error) {
 		var p struct {
 			Pattern string `json:"pattern"`
+			Limit   int    `json:"limit"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
 			return PreparedTool{}, fmt.Errorf("parse glob args: %w", err)
@@ -456,10 +462,13 @@ func (d *DefaultToolset) registerGlob(r *Registry) {
 		if p.Pattern == "" {
 			return PreparedTool{}, fmt.Errorf("glob pattern must not be empty")
 		}
+		if p.Limit <= 0 {
+			return PreparedTool{}, fmt.Errorf("glob limit must be positive")
+		}
 		return PreparedTool{
 			Description: fmt.Sprintf("Finding files matching %q", p.Pattern),
 			Execute: func(ctx context.Context) (ToolResult, error) {
-				result, err := d.rt.Glob(ctx, p.Pattern)
+				result, err := d.rt.Glob(ctx, p.Pattern, p.Limit)
 				if err != nil {
 					return ErrorResult(fmt.Errorf("glob pattern %q: %w", p.Pattern, err)), nil
 				}

@@ -68,7 +68,7 @@ func (rt testRuntime) WriteTmpFile(_ context.Context, _ string) (string, error) 
 	return rt.tmpPath, nil
 }
 func (rt testRuntime) AppendFile(_ context.Context, _, _ string) error { return nil }
-func (rt testRuntime) Glob(_ context.Context, _ string) (runtime.GlobResult, error) {
+func (rt testRuntime) Glob(_ context.Context, _ string, _ int) (runtime.GlobResult, error) {
 	return runtime.GlobResult{}, nil
 }
 func (rt testRuntime) EditFile(_ context.Context, _ string, _ []runtime.Edit) error { return nil }

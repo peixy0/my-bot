@@ -141,8 +141,8 @@ func (r *HostRuntime) AppendFile(ctx context.Context, filename, content string) 
 	return nil
 }
 
-func (r *HostRuntime) Glob(ctx context.Context, pattern string) (GlobResult, error) {
-	return runPythonGlob(ctx, r, pattern)
+func (r *HostRuntime) Glob(ctx context.Context, pattern string, limit int) (GlobResult, error) {
+	return runPythonGlob(ctx, r, pattern, limit)
 }
 
 func (r *HostRuntime) EditFile(ctx context.Context, filename string, edits []Edit) error {

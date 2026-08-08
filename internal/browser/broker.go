@@ -195,14 +195,6 @@ func (b *ExtensionBroker) handleWebSocket(w http.ResponseWriter, r *http.Request
 		if err := conn.ReadJSON(&frame); err != nil {
 			return
 		}
-		// Application-layer heartbeat: respond to ping with pong.
-		if frame.Type == "ping" {
-			_ = conn.WriteJSON(map[string]string{"type": "pong"})
-			continue
-		}
-		if frame.ID == "" {
-			continue
-		}
 		frame.conn = extension
 		select {
 		case b.responses <- frame:
@@ -265,6 +257,13 @@ func (b *ExtensionBroker) loop(ctx context.Context) {
 			}
 		case response := <-b.responses:
 			if response.conn != extension {
+				continue
+			}
+			if response.Type == "ping" {
+				_ = extension.conn.WriteJSON(map[string]string{"type": "pong"})
+				continue
+			}
+			if response.ID == "" {
 				continue
 			}
 			request, ok := pending[response.ID]
