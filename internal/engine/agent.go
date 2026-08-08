@@ -144,6 +144,8 @@ func (a *Agent) Run(
 			"finish_reason", resp.FinishReason,
 			"tool_calls", len(resp.ToolCalls),
 			"total_tokens", resp.TotalTokens,
+			"completion_tokens", resp.CompletionTokens,
+			"generation_time", resp.GenerationTime,
 			"content", resp.Content,
 		)
 
