@@ -429,14 +429,14 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 	if compressCall.maxTokens != cfg.Context.MaxOutputTokens {
 		t.Fatalf("expected compression max_tokens %d, got %d", cfg.Context.MaxOutputTokens, compressCall.maxTokens)
 	}
-	if compressCall.temperature != compressionTemperature {
-		t.Fatalf("expected compression temperature %v, got %v", compressionTemperature, compressCall.temperature)
+	if compressCall.temperature != cfg.LLM.Temperature {
+		t.Fatalf("expected compression temperature %v, got %v", cfg.LLM.Temperature, compressCall.temperature)
 	}
 	if len(compressCall.messages) != 2 {
 		t.Fatalf("expected system + flattened user, got %d messages", len(compressCall.messages))
 	}
 	sysContent, _ := compressCall.messages[0].Content.(string)
-	if compressCall.messages[0].Role != "system" || sysContent != compressionInstruction {
+	if compressCall.messages[0].Role != "system" || sysContent != llm.CompressionInstruction {
 		t.Fatalf("expected compression system prompt to be compressionInstruction, got role=%q content[:50]=%q", compressCall.messages[0].Role, truncateStr(sysContent, 50))
 	}
 	flatContent, _ := compressCall.messages[1].Content.(string)

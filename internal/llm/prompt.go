@@ -118,3 +118,219 @@ func (p *SubagentPrompt) Build(ctx context.Context) string {
 	p.writeOSInfo(ctx, &sb)
 	return sb.String()
 }
+
+const CompressionInstruction = `
+You are compressing conversation history into a persistent state anchor for an autonomous AI agent.
+
+The input contains:
+- [USER]: user messages.
+- [CONTEXT ANCHOR]: an optional previously compressed state.
+- [ASSISTANT]: assistant messages.
+- [TOOL tool_call(args)]: tool calls and tool results, which may be truncated.
+
+Your output becomes the ONLY persistent context available to the agent besides the newest message group.
+
+Your task is not to summarize the conversation.
+Your task is to reconstruct the smallest complete operational state required for the agent to continue working correctly.
+
+---
+
+## Source of Truth
+
+- Treat [CONTEXT ANCHOR] as previously compressed state, not absolute truth.
+- Merge newer messages into the existing state.
+- Newer confirmed information overrides older conflicting information.
+- Remove stale assumptions when later evidence invalidates them.
+- Never invent facts, files, commands, results, decisions, or completion status.
+- If something is uncertain, preserve the uncertainty explicitly.
+
+---
+
+## Evidence Handling
+
+- User statements define requirements, constraints, preferences, and requested outcomes.
+- Assistant statements define proposed actions, explanations, and reported outcomes.
+- Tool results define observed facts only.
+- Tool results may be truncated; never assume missing output.
+- Preserve diagnostic evidence from failed attempts when it may prevent repeating mistakes.
+
+---
+
+## Preserve Exactly
+
+Always preserve exact values for:
+
+- file paths
+- URLs
+- identifiers
+- IDs
+- variable names
+- API names
+- package names
+- package versions
+- commands
+- command arguments
+- environment variables
+- configuration values
+- error messages
+- stack traces
+- database/schema names
+- numeric values
+- user-provided requirements
+
+Do not paraphrase values that must be copied literally.
+
+---
+
+## Task Lifecycle
+
+- Move tasks from Active Tasks to Completed Tasks only when completion is explicitly confirmed.
+- Remove fully resolved issues.
+- Keep unresolved blockers and unanswered questions.
+- Preserve failed approaches only when they contain useful diagnostic information.
+- Preserve rejected approaches only when they explain an important decision.
+
+---
+
+## Compression Rules
+
+- Be dense and information-rich.
+- Remove greetings, filler, repetition, speculation, and abandoned exploration.
+- Prefer structured state over narrative.
+- Avoid duplicate information across sections.
+- If information appears in multiple places, keep it in the most appropriate section.
+- Prefer removing historical explanation over removing actionable state.
+- Keep facts that affect future actions.
+- Remove facts that only explain past discussion.
+- Respect context limits: optimize for future execution, not completeness of history.
+
+---
+
+## Writing Style
+
+- Use the language of the original conversation.
+- Write as persistent agent memory.
+- Use third-person past tense.
+- Do not mention this compression process.
+- Do not include analysis or justification about what was removed.
+
+---
+
+## Continuation Requirement
+
+The resumed agent has no access to earlier messages except this anchor and the newest message group.
+
+Every retained item must be:
+
+- self-contained
+- actionable when follow-up is required
+- specific enough to continue execution without guessing
+
+---
+
+Output ONLY the updated anchor state.
+
+Use these Markdown sections.
+Omit any empty section.
+
+## Intent
+
+The original objective, refined goals, constraints, and success criteria.
+
+## Immediate Next Step
+
+The single most important concrete action to perform when resuming.
+
+Must be:
+- executable
+- specific
+- unambiguous
+
+Do not list multiple options.
+
+## Active Tasks
+
+Unfinished work.
+
+For each task include:
+- current status
+- next action
+- blockers
+- relevant context
+
+## Completed Tasks
+
+Finished work and verified outcomes.
+
+Include:
+- what was done
+- resulting state
+- evidence of completion
+
+## Decisions
+
+Important decisions and accepted approaches.
+
+Include:
+- chosen approach
+- rejected alternatives when relevant
+- rationale
+
+## Invariants
+
+Rules, constraints, and properties that future work must preserve.
+
+Examples:
+- compatibility requirements
+- architectural constraints
+- user preferences
+- safety requirements
+- forbidden changes
+
+## Needed Skills
+
+Skills, tools, libraries, APIs, or domain knowledge required for future work.
+
+## Key Files
+
+Files involved.
+
+For each include:
+- exact path
+- status: created / modified / read / deleted
+- purpose
+- important changes
+
+## Established Facts
+
+Verified current state.
+
+Include:
+- environment details
+- versions
+- identifiers
+- configuration
+- discovered values
+- confirmed behavior
+
+## Pending Issues
+
+Unresolved:
+- errors
+- blockers
+- missing information
+- unanswered questions
+
+## Critical Artifacts
+
+Only include exact text that must survive compression.
+
+Examples:
+- user requirements
+- commands
+- error messages
+- configuration snippets
+- identifiers
+
+Preserve verbatim.
+`
