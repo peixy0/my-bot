@@ -308,7 +308,17 @@ func (d *DefaultToolset) registerEditFile(r *Registry) {
 			} `json:"edits"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
-			return PreparedTool{}, fmt.Errorf("parse edit_file args: %w", err)
+			var helperArgs struct {
+				Filename string `json:"filename"`
+				Edits    string `json:"edits"`
+			}
+			if err2 := json.Unmarshal(args, &helperArgs); err2 != nil {
+				return PreparedTool{}, fmt.Errorf("parse edit_file args: %w", err)
+			}
+			if err2 := json.Unmarshal([]byte(helperArgs.Edits), p.Edits); err2 != nil {
+				return PreparedTool{}, fmt.Errorf("parse edit_file args: %w", err)
+			}
+			p.Filename = helperArgs.Filename
 		}
 		if p.Filename == "" {
 			return PreparedTool{}, fmt.Errorf("edit_file filename must not be empty")
