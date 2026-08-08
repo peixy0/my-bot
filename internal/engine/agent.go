@@ -239,10 +239,12 @@ func (a *Agent) Compress(ctx context.Context, cfg *config.Config, conv *llm.Conv
 
 	retainedStart := findLastGroupStart(conv.Messages)
 	flatText := flattenMessages(conv.Messages, cfg.Context.CompressionToolResultTruncate)
+	flatText = "[CONTEXT COMPRESSION TASK]\nCompress the following conversation into a state anchor.\nDo not continue the conversation. Do not call tools.\nFollow your instructions.\n\n[CONVERSATION HISTORY BEGIN]\n\n" + flatText + "\n\n[CONVERSATION HISTORY END]"
 
 	resp, err := a.client.Complete(ctx, llm.CompletionRequest{
 		Model:       cfg.LLM.Model,
 		Messages:    []llm.ChatMessage{{Role: "system", Content: llm.CompressionInstruction}, llm.UserMessage(flatText)},
+		Tools:       []map[string]any{},
 		MaxTokens:   cfg.Context.MaxOutputTokens,
 		Temperature: cfg.LLM.Temperature,
 		TopP:        cfg.LLM.TopP,
