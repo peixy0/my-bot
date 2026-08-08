@@ -2,6 +2,7 @@
 /main
 /bot
 /agent
+/bot.*
 
 # Workspace data
 workspace/
