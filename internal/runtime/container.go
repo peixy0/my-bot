@@ -1,9 +1,9 @@
 package runtime
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"path"
 	"strings"
@@ -50,35 +50,33 @@ func (r *ContainerRuntime) buildExecArgs(withStdin bool, command ...string) []st
 	return args
 }
 
-func (r *ContainerRuntime) Execute(ctx context.Context, command string) (ExecResult, error) {
-	stdout, stderr, rc, err := r.execute(ctx, nil, "bash", "-l", "-c", command)
+func (r *ContainerRuntime) ExecuteTruncated(ctx context.Context, stdin io.Reader, command ...string) (ExecResult, error) {
+	cmdArgs := append([]string{"bash", "-l", "-c"}, command...)
+	result, err := r.Execute(ctx, stdin, cmdArgs...)
 	if err != nil {
 		return ExecResult{}, err
 	}
-	stdoutStr := r.Truncate(ctx, string(stdout), r.maxOutputChars)
-	stderrStr := r.Truncate(ctx, string(stderr), r.maxOutputChars)
-	return ExecResult{Stdout: stdoutStr, Stderr: stderrStr, ReturnCode: rc}, nil
+	stdoutStr := r.Truncate(ctx, result.Stdout, r.maxOutputChars)
+	stderrStr := r.Truncate(ctx, result.Stderr, r.maxOutputChars)
+	return ExecResult{Stdout: stdoutStr, Stderr: stderrStr, ReturnCode: result.ReturnCode}, nil
 }
 
-func (r *ContainerRuntime) execute(ctx context.Context, stdin []byte, command ...string) (stdout, stderr []byte, rc int, err error) {
-	args := r.buildExecArgs(stdin != nil, command...)
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	if stdin != nil {
-		cmd.Stdin = bytes.NewReader(stdin)
+func (r *ContainerRuntime) Execute(ctx context.Context, stdin io.Reader, command ...string) (ExecResult, error) {
+	if len(command) == 0 {
+		return ExecResult{}, fmt.Errorf("empty command")
 	}
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
-	err = cmd.Run()
-	rc = 0
-	if err != nil {
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	cmd.Stdin = stdin
+	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			rc = exitErr.ExitCode()
-		} else {
-			return nil, nil, 0, err
+			return ExecResult{Stdout: stdout.String(), Stderr: stderr.String(), ReturnCode: exitErr.ExitCode()}, nil
 		}
+		return ExecResult{}, err
 	}
-	return stdoutBuf.Bytes(), stderrBuf.Bytes(), rc, nil
+	return ExecResult{Stdout: stdout.String(), Stderr: stderr.String(), ReturnCode: 0}, nil
 }
 
 func (r *ContainerRuntime) Spawn(ctx context.Context, command string) (*ProcessHandle, error) {
@@ -124,14 +122,14 @@ func (r *ContainerRuntime) Spawn(ctx context.Context, command string) (*ProcessH
 }
 
 func (r *ContainerRuntime) ReadRawBytes(ctx context.Context, filename string) ([]byte, error) {
-	stdout, stderr, rc, err := r.execute(ctx, nil, "cat", "--", filename)
+	res, err := r.Execute(ctx, nil, "cat", "--", filename)
 	if err != nil {
 		return nil, err
 	}
-	if rc != 0 {
-		return nil, fmt.Errorf("cat failed: %s", strings.TrimSpace(string(stderr)))
+	if res.ReturnCode != 0 {
+		return nil, fmt.Errorf("cat failed: %s", strings.TrimSpace(res.Stderr))
 	}
-	return stdout, nil
+	return []byte(res.Stdout), nil
 }
 
 func (r *ContainerRuntime) ReadFile(ctx context.Context, filename string, startLine, limit int) (ReadFileResult, error) {
@@ -155,19 +153,19 @@ func (r *ContainerRuntime) ReadFile(ctx context.Context, filename string, startL
 }
 
 func (r *ContainerRuntime) WriteFile(ctx context.Context, filename, content string) error {
-	_, stderr, rc, err := r.execute(ctx, nil, "mkdir", "-p", "--", path.Dir(filename))
+	res, err := r.Execute(ctx, nil, "mkdir", "-p", "--", path.Dir(filename))
 	if err != nil {
 		return err
 	}
-	if rc != 0 {
-		return fmt.Errorf("mkdir failed: %s", strings.TrimSpace(string(stderr)))
+	if res.ReturnCode != 0 {
+		return fmt.Errorf("mkdir failed: %s", strings.TrimSpace(res.Stderr))
 	}
-	_, stderr, rc, err = r.execute(ctx, []byte(content), "tee", "--", filename)
+	res, err = r.Execute(ctx, strings.NewReader(content), "tee", "--", filename)
 	if err != nil {
 		return err
 	}
-	if rc != 0 {
-		return fmt.Errorf("write failed: %s", strings.TrimSpace(string(stderr)))
+	if res.ReturnCode != 0 {
+		return fmt.Errorf("write failed: %s", strings.TrimSpace(res.Stderr))
 	}
 	return nil
 }
@@ -177,19 +175,19 @@ func (r *ContainerRuntime) WriteTmpFile(ctx context.Context, content string) (st
 }
 
 func (r *ContainerRuntime) AppendFile(ctx context.Context, filename, content string) error {
-	_, stderr, rc, err := r.execute(ctx, nil, "mkdir", "-p", "--", path.Dir(filename))
+	res, err := r.Execute(ctx, nil, "mkdir", "-p", "--", path.Dir(filename))
 	if err != nil {
 		return err
 	}
-	if rc != 0 {
-		return fmt.Errorf("mkdir failed: %s", strings.TrimSpace(string(stderr)))
+	if res.ReturnCode != 0 {
+		return fmt.Errorf("mkdir failed: %s", strings.TrimSpace(res.Stderr))
 	}
-	_, stderr, rc, err = r.execute(ctx, []byte(content), "tee", "-a", "--", filename)
+	res, err = r.Execute(ctx, strings.NewReader(content), "tee", "-a", "--", filename)
 	if err != nil {
 		return err
 	}
-	if rc != 0 {
-		return fmt.Errorf("append failed: %s", strings.TrimSpace(string(stderr)))
+	if res.ReturnCode != 0 {
+		return fmt.Errorf("append failed: %s", strings.TrimSpace(res.Stderr))
 	}
 	return nil
 }
@@ -203,7 +201,7 @@ func (r *ContainerRuntime) EditFile(ctx context.Context, filename string, edits 
 }
 
 func (r *ContainerRuntime) OSInfo(ctx context.Context) (string, error) {
-	res, err := r.Execute(ctx, "uname -sm && pwd")
+	res, err := r.Execute(ctx, nil, "bash", "-l", "-c", "uname -sm && pwd")
 	if err != nil {
 		return "", err
 	}

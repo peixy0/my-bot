@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -53,7 +54,8 @@ func (h *ProcessHandle) ExitCode() *int   { return h.fnExitCode() }
 type Runtime interface {
 	Truncate(ctx context.Context, text string, limit int) string
 	TruncateTail(ctx context.Context, text string, limit int) string
-	Execute(ctx context.Context, command string) (ExecResult, error)
+	ExecuteTruncated(ctx context.Context, stdin io.Reader, command ...string) (ExecResult, error)
+	Execute(ctx context.Context, stdin io.Reader, command ...string) (ExecResult, error)
 	Spawn(ctx context.Context, command string) (*ProcessHandle, error)
 	ReadRawBytes(ctx context.Context, filename string) ([]byte, error)
 	ReadFile(ctx context.Context, filename string, startLine, limit int) (ReadFileResult, error)
@@ -153,11 +155,14 @@ func truncateLinesWithNote(
 }
 
 func runPythonGlob(ctx context.Context, rt Runtime, pattern string, limit int) (GlobResult, error) {
-	script := fmt.Sprintf(
-		`python3 -c "import glob, json, sys; p=sys.argv[1]; limit=int(sys.argv[2]); items=sorted(glob.glob(p, recursive=True)); exceeds=len(items)>limit; items=items[:limit]; print(json.dumps({'items': items, 'count': len(items), 'exceeds_limit': exceeds}))" %q %d`,
-		pattern, limit,
-	)
-	res, err := rt.Execute(ctx, script)
+	const pyScript = `import glob, json, sys
+p = sys.argv[1]
+limit = int(sys.argv[2])
+items = sorted(glob.glob(p, recursive=True))
+exceeds = len(items) > limit
+items = items[:limit]
+print(json.dumps({'items': items, 'count': len(items), 'exceeds_limit': exceeds}))`
+	res, err := rt.Execute(ctx, nil, "python3", "-c", pyScript, pattern, strconv.Itoa(limit))
 	if err != nil {
 		return GlobResult{}, err
 	}

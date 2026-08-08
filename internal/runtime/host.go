@@ -1,9 +1,9 @@
 package runtime
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,23 +28,32 @@ func (r *HostRuntime) TruncateTail(ctx context.Context, text string, limit int) 
 	return truncateTailWithRedirection(ctx, r, text, limit)
 }
 
-func (r *HostRuntime) Execute(ctx context.Context, command string) (ExecResult, error) {
-	cmd := exec.CommandContext(ctx, "bash", "-l", "-c", command)
-	var stdout, stderr bytes.Buffer
+func (r *HostRuntime) ExecuteTruncated(ctx context.Context, stdin io.Reader, command ...string) (ExecResult, error) {
+	result, err := r.Execute(ctx, stdin, command...)
+	if err != nil {
+		return ExecResult{}, err
+	}
+	stdoutStr := r.Truncate(ctx, result.Stdout, r.maxOutputChars)
+	stderrStr := r.Truncate(ctx, result.Stderr, r.maxOutputChars)
+	return ExecResult{Stdout: stdoutStr, Stderr: stderrStr, ReturnCode: result.ReturnCode}, nil
+}
+
+func (r *HostRuntime) Execute(ctx context.Context, stdin io.Reader, command ...string) (ExecResult, error) {
+	if len(command) == 0 {
+		return ExecResult{}, fmt.Errorf("empty command")
+	}
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
-	rc := 0
-	if err != nil {
+	cmd.Stdin = stdin
+	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			rc = exitErr.ExitCode()
-		} else {
-			return ExecResult{}, err
+			return ExecResult{Stdout: stdout.String(), Stderr: stderr.String(), ReturnCode: exitErr.ExitCode()}, nil
 		}
+		return ExecResult{}, err
 	}
-	stdoutStr := r.Truncate(ctx, stdout.String(), r.maxOutputChars)
-	stderrStr := r.Truncate(ctx, stderr.String(), r.maxOutputChars)
-	return ExecResult{Stdout: stdoutStr, Stderr: stderrStr, ReturnCode: rc}, nil
+	return ExecResult{Stdout: stdout.String(), Stderr: stderr.String(), ReturnCode: 0}, nil
 }
 
 func (r *HostRuntime) Spawn(ctx context.Context, command string) (*ProcessHandle, error) {

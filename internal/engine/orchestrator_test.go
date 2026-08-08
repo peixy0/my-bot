@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -631,7 +632,10 @@ func (r *nullRuntime) Truncate(_ context.Context, text string, _ int) string {
 func (r *nullRuntime) TruncateTail(_ context.Context, text string, _ int) string {
 	return text
 }
-func (r *nullRuntime) Execute(_ context.Context, _ string) (runtime.ExecResult, error) {
+func (r *nullRuntime) ExecuteTruncated(_ context.Context, _ io.Reader, _ ...string) (runtime.ExecResult, error) {
+	return runtime.ExecResult{}, nil
+}
+func (r *nullRuntime) Execute(_ context.Context, _ io.Reader, _ ...string) (runtime.ExecResult, error) {
 	return runtime.ExecResult{}, nil
 }
 func (r *nullRuntime) Spawn(_ context.Context, _ string) (*runtime.ProcessHandle, error) {

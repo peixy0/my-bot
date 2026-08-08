@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"encoding/base64"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -53,7 +54,10 @@ func (rt testRuntime) Truncate(_ context.Context, text string, _ int) string { r
 func (rt testRuntime) TruncateTail(_ context.Context, text string, _ int) string {
 	return text
 }
-func (rt testRuntime) Execute(_ context.Context, _ string) (runtime.ExecResult, error) {
+func (rt testRuntime) ExecuteTruncated(_ context.Context, _ io.Reader, _ ...string) (runtime.ExecResult, error) {
+	return runtime.ExecResult{}, nil
+}
+func (rt testRuntime) Execute(_ context.Context, _ io.Reader, _ ...string) (runtime.ExecResult, error) {
 	return runtime.ExecResult{}, nil
 }
 func (rt testRuntime) Spawn(_ context.Context, _ string) (*runtime.ProcessHandle, error) {
