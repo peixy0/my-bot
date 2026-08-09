@@ -126,7 +126,7 @@ The input contains:
 - [USER]: user messages.
 - [CONTEXT ANCHOR]: an optional previously compressed state.
 - [ASSISTANT]: assistant messages.
-- [TOOL tool_call(args)]: tool calls and tool results, which may be truncated.
+- [TOOL tool_call(args)]: tool calls and tool results, which may be truncated or omitted.
 
 Your output becomes the ONLY persistent context available to the agent besides the newest message group.
 

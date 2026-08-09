@@ -380,7 +380,7 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 
 	agent := NewAgent(client, nil)
 	conv := llm.NewConversation()
-	conv.Messages = append(conv.Messages, llm.UserMessage("start"))
+	conv.Messages = append(conv.Messages, llm.UserMessage("start"), llm.AssistantMessage("assistant message", "", []llm.ToolCall{}))
 	orch := newMockOrchestrator()
 
 	client.responses = append(client.responses[:1],
@@ -391,7 +391,7 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 	cfg := &config.Config{
 		LLM: config.LLMConfig{
 			Model:         "test-model",
-			Temperature:   1.5,
+			Temperature:   1.0,
 			ContextWindow: 8000,
 		},
 		Context: config.ContextConfig{
@@ -429,8 +429,8 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 	if compressCall.maxTokens != cfg.Context.MaxOutputTokens {
 		t.Fatalf("expected compression max_tokens %d, got %d", cfg.Context.MaxOutputTokens, compressCall.maxTokens)
 	}
-	if compressCall.temperature != cfg.LLM.Temperature {
-		t.Fatalf("expected compression temperature %v, got %v", cfg.LLM.Temperature, compressCall.temperature)
+	if compressCall.temperature != CompressionTemperature {
+		t.Fatalf("expected compression temperature %v, got %v", CompressionTemperature, compressCall.temperature)
 	}
 	if len(compressCall.messages) != 2 {
 		t.Fatalf("expected system + flattened user, got %d messages", len(compressCall.messages))
