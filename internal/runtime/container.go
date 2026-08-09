@@ -61,8 +61,7 @@ func (r *ContainerRuntime) Execute(ctx context.Context, stdin io.Reader, command
 	if len(command) == 0 {
 		return ExecResult{}, fmt.Errorf("empty command")
 	}
-	cmdArgs := append([]string{"bash", "-l", "-c"}, command...)
-	args := r.buildExecArgs(cmdArgs...)
+	args := r.buildExecArgs(command...)
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -199,7 +198,7 @@ func (r *ContainerRuntime) EditFile(ctx context.Context, filename string, edits 
 }
 
 func (r *ContainerRuntime) OSInfo(ctx context.Context) (string, error) {
-	res, err := r.Execute(ctx, nil, "uname -sm && pwd")
+	res, err := r.Execute(ctx, nil, "bash", "-l", "-c", "uname -sm && pwd")
 	if err != nil {
 		return "", err
 	}

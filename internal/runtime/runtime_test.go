@@ -64,3 +64,50 @@ func TestHostRuntimeGlobUsesPatternDirectly(t *testing.T) {
 		t.Fatalf("want count %d, got %d", len(want), got.Count)
 	}
 }
+
+func TestContainerRuntimeExecutePreservesArguments(t *testing.T) {
+	root := t.TempDir()
+	runtimeBin := filepath.Join(root, "fake-runtime")
+	script := `#!/bin/sh
+if [ "$1" != "exec" ]; then
+  exit 90
+fi
+shift
+if [ "$1" != "-i" ]; then
+  exit 91
+fi
+shift
+if [ "$1" != "-w" ]; then
+  exit 92
+fi
+shift 2
+if [ "$1" != "container" ]; then
+  exit 93
+fi
+shift
+exec "$@"
+`
+	if err := os.WriteFile(runtimeBin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := &ContainerRuntime{
+		maxOutputChars: 1024,
+		containerName:  "container",
+		runtimeBin:     runtimeBin,
+		workdir:        "/workspace",
+	}
+	got, err := rt.Execute(context.Background(), nil, "printf", "%s", "a b;printf bad >&2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ReturnCode != 0 {
+		t.Fatalf("return code = %d, stderr = %q", got.ReturnCode, got.Stderr)
+	}
+	if got.Stdout != "a b;printf bad >&2" {
+		t.Fatalf("stdout = %q", got.Stdout)
+	}
+	if got.Stderr != "" {
+		t.Fatalf("stderr = %q", got.Stderr)
+	}
+}

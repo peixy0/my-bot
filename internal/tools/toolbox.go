@@ -415,7 +415,7 @@ func (d *DefaultToolset) registerGrep(r *Registry) {
 		return PreparedTool{
 			Description: fmt.Sprintf("Searching %s for %q", path, p.Pattern),
 			Execute: func(ctx context.Context) (ToolResult, error) {
-				res, err := d.rt.ExecuteTruncated(ctx, nil, sb.String())
+				res, err := d.rt.ExecuteTruncated(ctx, nil, "bash", "-l", "-c", sb.String())
 				if err != nil {
 					return ErrorResult(fmt.Errorf("run grep command: %w", err)), nil
 				}
@@ -462,7 +462,10 @@ func (d *DefaultToolset) registerGlob(r *Registry) {
 		if p.Pattern == "" {
 			return PreparedTool{}, fmt.Errorf("glob pattern must not be empty")
 		}
-		if p.Limit <= 0 {
+		if p.Limit == 0 {
+			p.Limit = 50
+		}
+		if p.Limit < 0 {
 			return PreparedTool{}, fmt.Errorf("glob limit must be positive")
 		}
 		return PreparedTool{

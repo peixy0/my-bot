@@ -171,7 +171,7 @@ print(json.dumps({'items': items, 'count': len(items), 'exceeds_limit': exceeds}
 	}
 	var parsed GlobResult
 	if err := json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &parsed); err != nil {
-		return GlobResult{}, fmt.Errorf("glob parse failed: %w", err)
+		return GlobResult{}, fmt.Errorf("glob parse failed: %w: %q", err, res.Stdout)
 	}
 	return parsed, nil
 }

@@ -239,7 +239,7 @@ async function cdpScreenshot(tabId: number, params: Record<string, unknown>, req
   }
   const screenshot = String(result.data);
   for (let start = 0; start < screenshot.length; start += screenshotChunkSize) {
-    const end = (start += screenshotChunkSize);
+    const end = (start + screenshotChunkSize);
     send({
       type: "response",
       id: requestId,
