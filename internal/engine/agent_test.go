@@ -443,11 +443,11 @@ func TestAgent_CompressionOnHighTokens(t *testing.T) {
 	if compressCall.messages[1].Role != "user" || flatContent == "" {
 		t.Fatalf("expected flattened conversation text as user message, got %#v", compressCall.messages[1])
 	}
-	if !strings.Contains(flatContent, "[USER]:") {
-		t.Fatalf("expected flattened text to contain [USER]: tag, got %q", truncateStr(flatContent, 100))
+	if !strings.Contains(flatContent, "## User\n") {
+		t.Fatalf("expected flattened text to contain [USER] tag, got %q", truncateStr(flatContent, 100))
 	}
-	if !strings.Contains(flatContent, "[ASSISTANT]:") {
-		t.Fatalf("expected flattened text to contain [ASSISTANT]: tag, got %q", truncateStr(flatContent, 100))
+	if !strings.Contains(flatContent, "## Assistant\n") {
+		t.Fatalf("expected flattened text to contain [ASSISTANT] tag, got %q", truncateStr(flatContent, 100))
 	}
 
 	finalCall := client.calls[2]

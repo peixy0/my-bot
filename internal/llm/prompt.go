@@ -121,13 +121,6 @@ func (p *SubagentPrompt) Build(ctx context.Context) string {
 
 const CompressionInstruction = `
 You are compressing conversation history into a persistent state anchor for an autonomous AI agent.
-
-The input contains:
-- [USER]: user messages.
-- [CONTEXT ANCHOR]: an optional previously compressed state.
-- [ASSISTANT]: assistant messages.
-- [TOOL tool_call(args)]: tool calls and tool results, which may be truncated or omitted.
-
 Your output becomes the ONLY persistent context available to the agent besides the newest message group.
 
 Your task is not to summarize the conversation.
@@ -230,8 +223,7 @@ Every retained item must be:
 
 Output ONLY the updated anchor state.
 
-Use these Markdown sections.
-Omit any empty section.
+Strictly use the following Markdown sections.
 
 ## Intent
 

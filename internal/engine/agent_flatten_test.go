@@ -13,11 +13,11 @@ func TestFlattenMessages_UserAssistantOnly(t *testing.T) {
 		llm.AssistantMessage("hi there", "", nil),
 	}
 	got := flattenMessages(messages, 0)
-	if !strings.Contains(got, "[USER]: hello") {
-		t.Fatalf("missing [USER]: hello in %q", got)
+	if !strings.Contains(got, "## User\nhello") {
+		t.Fatalf("missing user message in %q", got)
 	}
-	if !strings.Contains(got, "[ASSISTANT]: hi there") {
-		t.Fatalf("missing [ASSISTANT]: hi there in %q", got)
+	if !strings.Contains(got, "## Assistant\nhi there") {
+		t.Fatalf("missing assistant message in %q", got)
 	}
 }
 
@@ -32,11 +32,11 @@ func TestFlattenMessages_ToolResultMerged(t *testing.T) {
 		{Role: "tool", ToolCallID: "call_1", Content: "file contents here"},
 	}
 	got := flattenMessages(messages, 0)
-	if !strings.Contains(got, `[TOOL read_file({"filename":"test.txt"})]: file contents here`) {
+	if !strings.Contains(got, "## Tool read_file({\"filename\":\"test.txt\"})\nfile contents here") {
 		t.Fatalf("expected tool result merged after tool call, got %q", got)
 	}
 	// tool result should NOT appear as a standalone line
-	if strings.Contains(got, "[tool]:") {
+	if strings.Contains(got, "## tool\n") {
 		t.Fatalf("tool result should not appear as standalone line in %q", got)
 	}
 }
@@ -91,7 +91,7 @@ func TestFlattenMessages_ToolResultMissing(t *testing.T) {
 		// no tool result — simulates retained assistant with pending toolMsgs
 	}
 	got := flattenMessages(messages, 0)
-	if !strings.Contains(got, `[TOOL read_file({"filename":"x"})]: `) {
+	if !strings.Contains(got, "## Tool read_file({\"filename\":\"x\"})\n") {
 		// result should be empty string after the colon-space
 		t.Fatalf("expected empty tool result for missing tool_call_id, got %q", got)
 	}
@@ -112,10 +112,10 @@ func TestFlattenMessages_MultipleToolCallsOneAssistant(t *testing.T) {
 		{Role: "tool", ToolCallID: "c2", Content: "output ls"},
 	}
 	got := flattenMessages(messages, 0)
-	if !strings.Contains(got, `[TOOL read_file({"filename":"a"})]: content a`) {
+	if !strings.Contains(got, "## Tool read_file({\"filename\":\"a\"})\ncontent a") {
 		t.Fatalf("missing first tool result in %q", got)
 	}
-	if !strings.Contains(got, `[TOOL run_command({"command":"ls"})]: output ls`) {
+	if !strings.Contains(got, "## Tool run_command({\"command\":\"ls\"})\noutput ls") {
 		t.Fatalf("missing second tool result in %q", got)
 	}
 }
@@ -126,10 +126,10 @@ func TestFlattenMessages_ContextAnchor(t *testing.T) {
 		llm.UserMessage("new task"),
 	}
 	got := flattenMessages(messages, 0)
-	if !strings.Contains(got, "[USER]: [CONTEXT ANCHOR]\nold summary") {
+	if !strings.Contains(got, "## User\n[CONTEXT ANCHOR]\nold summary") {
 		t.Fatalf("expected anchor as [USER] in %q", got)
 	}
-	if !strings.Contains(got, "[USER]: new task") {
+	if !strings.Contains(got, "## User\nnew task") {
 		t.Fatalf("expected new task as [USER] in %q", got)
 	}
 }

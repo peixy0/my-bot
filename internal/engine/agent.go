@@ -241,7 +241,7 @@ func (a *Agent) Compress(ctx context.Context, cfg *config.Config, conv *llm.Conv
 
 	retainedStart := findLastGroupStart(conv.Messages)
 	flatText := flattenMessages(conv.Messages[:retainedStart], cfg.Context.CompressionToolResultTruncate)
-	flatText = "[CONTEXT COMPRESSION TASK]\nCompress the following conversation into a state anchor.\nDo not continue the conversation. Do not call tools.\nFollow your instructions.\n\n[CONVERSATION HISTORY BEGIN]\n\n" + flatText + "\n\n[CONVERSATION HISTORY END]"
+	flatText = "[CONTEXT COMPRESSION TASK]\nCompress the following conversation into a state anchor.\nDo not continue the conversation.\n\n[CONVERSATION HISTORY BEGIN]\n\n" + flatText + "\n\n[CONVERSATION HISTORY END]"
 
 	resp, err := a.client.Complete(ctx, llm.CompletionRequest{
 		Model:       cfg.LLM.Model,
@@ -300,24 +300,20 @@ func flattenMessages(messages []llm.ChatMessage, truncateLimit int) string {
 		}
 		switch m.Role {
 		case "user":
-			b.WriteString("[USER]: ")
+			b.WriteString("## User\n")
 			b.WriteString(contentToString(m.Content))
 		case "assistant":
-			b.WriteString("[ASSISTANT]: ")
+			b.WriteString("## Assistant\n")
 			b.WriteString(contentToString(m.Content))
 			for _, tc := range m.ToolCalls {
-				b.WriteString("\n[TOOL ")
+				b.WriteString("\n## Tool ")
 				b.WriteString(tc.Function.Name)
 				b.WriteString("(")
 				b.WriteString(tc.Function.Arguments)
-				b.WriteString(")]: ")
+				b.WriteString(")\n")
 				b.WriteString(toolResults[tc.ID])
 			}
 		default:
-			b.WriteString("[")
-			b.WriteString(m.Role)
-			b.WriteString("]: ")
-			b.WriteString(contentToString(m.Content))
 		}
 	}
 	return b.String()
