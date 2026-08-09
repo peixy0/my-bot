@@ -125,7 +125,7 @@ func (r *ContainerRuntime) ReadRawBytes(ctx context.Context, filename string) ([
 		return nil, err
 	}
 	if res.ReturnCode != 0 {
-		return nil, fmt.Errorf("cat failed: %s", strings.TrimSpace(res.Stderr))
+		return nil, fmt.Errorf("read failed: %s", strings.TrimSpace(res.Stderr))
 	}
 	return []byte(res.Stdout), nil
 }

@@ -510,6 +510,9 @@ func (d *DefaultToolset) registerReadImage(r *Registry) {
 				if err != nil {
 					return ErrorResult(fmt.Errorf("read image %s: %w", p.Filename, err)), nil
 				}
+				if data == nil || len(data) == 0 {
+					return ErrorResult(fmt.Errorf("read image failed, no data")), nil
+				}
 				if len(data) > d.cfg.Context.MaxImageBytes {
 					return ErrorResult(fmt.Errorf("image too large: %d bytes", len(data))), nil
 				}
