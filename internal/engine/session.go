@@ -15,7 +15,6 @@ import (
 	"my-bot/internal/tools"
 )
 
-// SessionEnv bundles the core dependencies shared across session-level constructors.
 type SessionEnv struct {
 	Cfg           *config.Config
 	Rt            runtime.Runtime

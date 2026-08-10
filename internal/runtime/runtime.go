@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/google/uuid"
 )
@@ -50,6 +52,29 @@ func (h *ProcessHandle) Wait() error      { return h.fnWait() }
 func (h *ProcessHandle) Terminate() error { return h.fnTerminate() }
 func (h *ProcessHandle) Kill() error      { return h.fnKill() }
 func (h *ProcessHandle) ExitCode() *int   { return h.fnExitCode() }
+
+func newProcessHandle(cmd *exec.Cmd, stdin io.WriteCloser, stdout, stderr io.ReadCloser) *ProcessHandle {
+	return &ProcessHandle{
+		PID:    cmd.Process.Pid,
+		Stdin:  stdin,
+		Stdout: stdout,
+		Stderr: stderr,
+		fnWait: cmd.Wait,
+		fnTerminate: func() error {
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		},
+		fnKill: func() error {
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		},
+		fnExitCode: func() *int {
+			if cmd.ProcessState == nil {
+				return nil
+			}
+			rc := cmd.ProcessState.ExitCode()
+			return &rc
+		},
+	}
+}
 
 type Runtime interface {
 	Truncate(ctx context.Context, text string, limit int) string

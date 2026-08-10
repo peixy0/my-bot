@@ -540,3 +540,23 @@ func TestOpenAIProvider_EmptyReasoningContentOmittedFromRequest(t *testing.T) {
 		t.Fatalf("expected reasoning_content to be omitted when empty, got %#v", assistant)
 	}
 }
+
+func TestNewOpenAIProviderUsesBoundedTransport(t *testing.T) {
+	provider := NewOpenAIProvider("https://example.com", "")
+	transport, ok := provider.httpClient.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("expected *http.Transport, got %T", provider.httpClient.Transport)
+	}
+	if transport.DialContext == nil {
+		t.Fatal("expected bounded dial context")
+	}
+	if transport.TLSHandshakeTimeout <= 0 {
+		t.Fatal("expected TLS handshake timeout")
+	}
+	if transport.ResponseHeaderTimeout <= 0 {
+		t.Fatal("expected response header timeout")
+	}
+	if transport.IdleConnTimeout <= 0 {
+		t.Fatal("expected idle connection timeout")
+	}
+}

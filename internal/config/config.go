@@ -208,9 +208,6 @@ func (c *Config) ForSession(chatID string) *Config {
 				merged.LLM.Model = override.Model
 			}
 		}
-	}
-
-	if override, ok := c.Sessions[chatID]; ok {
 		if override.CompressionModel != "" {
 			merged.Context.CompressionModel = override.CompressionModel
 		}

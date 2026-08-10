@@ -19,7 +19,6 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// ErrAborted is returned when the agent loop is aborted via the abort channel.
 var ErrAborted = errors.New("aborted")
 
 type Agent struct {
@@ -353,7 +352,6 @@ func contentPartsToString[T any](parts []T) string {
 	return strings.Join(out, "\n")
 }
 
-// AgentLoop manages a per-session conversation loop.
 type AgentLoop struct {
 	cfg   *config.Config
 	agent *Agent

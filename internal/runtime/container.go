@@ -95,27 +95,7 @@ func (r *ContainerRuntime) Spawn(ctx context.Context, command string) (*ProcessH
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	h := &ProcessHandle{
-		PID:    cmd.Process.Pid,
-		Stdin:  stdin,
-		Stdout: stdout,
-		Stderr: stderr,
-		fnWait: cmd.Wait,
-		fnTerminate: func() error {
-			return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-		},
-		fnKill: func() error {
-			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		},
-		fnExitCode: func() *int {
-			if cmd.ProcessState == nil {
-				return nil
-			}
-			rc := cmd.ProcessState.ExitCode()
-			return &rc
-		},
-	}
-	return h, nil
+	return newProcessHandle(cmd, stdin, stdout, stderr), nil
 }
 
 func (r *ContainerRuntime) ReadRawBytes(ctx context.Context, filename string) ([]byte, error) {

@@ -175,7 +175,7 @@ func (b *ExtensionBroker) handleWebSocket(w http.ResponseWriter, r *http.Request
 	}
 	defer conn.Close()
 	conn.SetReadLimit(2 << 20)
-	if !b.authenticate(conn) {
+	if !readAuthentication(conn) {
 		return
 	}
 	extension := &extensionConn{conn: conn}
@@ -204,7 +204,7 @@ func (b *ExtensionBroker) handleWebSocket(w http.ResponseWriter, r *http.Request
 	}
 }
 
-func (b *ExtensionBroker) authenticate(conn *websocket.Conn) bool {
+func readAuthentication(conn *websocket.Conn) bool {
 	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	defer conn.SetReadDeadline(time.Time{})
 	var frame struct {
@@ -214,10 +214,7 @@ func (b *ExtensionBroker) authenticate(conn *websocket.Conn) bool {
 	if err := conn.ReadJSON(&frame); err != nil {
 		return false
 	}
-	if frame.Type != "authenticate" || frame.Version != protocolVersion {
-		return false
-	}
-	return conn.WriteJSON(map[string]any{"type": "authenticated", "version": protocolVersion}) == nil
+	return frame.Type == "authenticate" && frame.Version == protocolVersion
 }
 
 func (b *ExtensionBroker) loop(ctx context.Context) {
@@ -226,11 +223,14 @@ func (b *ExtensionBroker) loop(ctx context.Context) {
 	defer ticker.Stop()
 	var extension *extensionConn
 	pending := make(map[string]*brokerCall)
+	resolve := func(id string, request *brokerCall, frame brokerFrame) {
+		delete(pending, id)
+		b.sendFrame(ctx, request, frame)
+		close(request.reply)
+	}
 	failPending := func(err error) {
 		for id, request := range pending {
-			delete(pending, id)
-			request.reply <- brokerFrame{err: err}
-			close(request.reply)
+			resolve(id, request, brokerFrame{err: err})
 		}
 	}
 	for {
@@ -241,14 +241,16 @@ func (b *ExtensionBroker) loop(ctx context.Context) {
 		case <-ticker.C:
 			for id, request := range pending {
 				if err := request.ctx.Err(); err != nil {
-					delete(pending, id)
-					request.reply <- brokerFrame{err: err}
-					close(request.reply)
+					resolve(id, request, brokerFrame{err: err})
 				}
 			}
 		case extension = <-b.connected:
 			if extension != nil {
 				failPending(ErrDisconnected)
+				if err := extension.conn.WriteJSON(map[string]any{"type": "authenticated", "version": protocolVersion}); err != nil {
+					slog.Warn("browser extension acknowledge failed", "err", err)
+					extension = nil
+				}
 			}
 		case disconnected := <-b.disconnected:
 			if disconnected == extension {
@@ -275,27 +277,36 @@ func (b *ExtensionBroker) loop(ctx context.Context) {
 				frame.err = errors.New(response.Error)
 			}
 			if !response.HasMore {
-				delete(pending, response.ID)
-				request.reply <- frame
-				close(request.reply)
-			} else {
-				request.reply <- frame
+				resolve(response.ID, request, frame)
+			} else if !b.sendFrame(ctx, request, frame) {
+				resolve(response.ID, request, brokerFrame{err: context.Cause(request.ctx)})
 			}
 		case call := <-b.requests:
 			if extension == nil {
-				call.reply <- brokerFrame{err: ErrDisconnected}
+				b.sendFrame(ctx, &call, brokerFrame{err: ErrDisconnected})
 				close(call.reply)
 				continue
 			}
 			id := fmt.Sprintf("browser-%d-%s", b.nextID.Add(1), uuid.NewString())
 			frame := requestFromCall(id, call)
 			if err := extension.conn.WriteJSON(frame); err != nil {
-				call.reply <- brokerFrame{err: fmt.Errorf("send browser request: %w", err)}
+				b.sendFrame(ctx, &call, brokerFrame{err: fmt.Errorf("send browser request: %w", err)})
 				close(call.reply)
 				continue
 			}
 			pending[id] = &call
 		}
+	}
+}
+
+func (b *ExtensionBroker) sendFrame(ctx context.Context, call *brokerCall, frame brokerFrame) bool {
+	select {
+	case call.reply <- frame:
+		return true
+	case <-call.ctx.Done():
+		return false
+	case <-ctx.Done():
+		return false
 	}
 }
 

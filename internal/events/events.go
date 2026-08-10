@@ -133,8 +133,6 @@ func (ResumeCommand) workerEvent()     {}
 func (CompressCommand) workerEvent()   {}
 func (RebootCommand) workerEvent()     {}
 
-// QueuedInputEvent is used by the /queue command to wrap user input
-// into a worker event that will be processed when the current work completes.
 type QueuedInputEvent struct {
 	ChatID    string
 	MessageID string

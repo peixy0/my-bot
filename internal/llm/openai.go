@@ -19,8 +19,8 @@ import (
 	"my-bot/internal/util"
 )
 
-const maxAttempts = 99
-const maxRetryDuration = 1800
+const maxAttempts = 10
+const maxRetryDuration = 300
 
 var retryAfter = time.After
 
@@ -40,7 +40,7 @@ type OpenAIProvider struct {
 }
 
 func NewOpenAIProvider(baseURL, apiKey string, httpClient ...*http.Client) *OpenAIProvider {
-	c := http.DefaultClient
+	c := defaultHTTPClient()
 	if len(httpClient) > 0 && httpClient[0] != nil {
 		c = httpClient[0]
 	}
@@ -49,6 +49,15 @@ func NewOpenAIProvider(baseURL, apiKey string, httpClient ...*http.Client) *Open
 		apiKey:     apiKey,
 		httpClient: c,
 	}
+}
+
+func defaultHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	transport.TLSHandshakeTimeout = 15 * time.Second
+	transport.ResponseHeaderTimeout = 120 * time.Second
+	transport.IdleConnTimeout = 90 * time.Second
+	return &http.Client{Transport: transport}
 }
 
 func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (CompletionResponse, error) {
@@ -216,22 +225,20 @@ func parseChatCompletionStream(
 
 	for {
 		line, err := reader.ReadString('\n')
-		if err != nil {
-			return CompletionResponse{}, err
-		}
 		if len(line) > 0 {
-			line = strings.TrimRight(line, "\r\n")
-			if strings.HasPrefix(line, ":") {
-				// SSE comments are keepalives.
-			} else if data, ok := strings.CutPrefix(line, "data:"); ok {
-				done, err := handleStreamEvent(ctx, data, acc, onContentDelta)
+			trimmed := strings.TrimRight(line, "\r\n")
+			if data, ok := strings.CutPrefix(trimmed, "data:"); ok {
+				done, handleErr := handleStreamEvent(ctx, data, acc, onContentDelta)
 				if done {
 					return acc.response(), nil
 				}
-				if err != nil {
-					return CompletionResponse{}, err
+				if handleErr != nil {
+					return CompletionResponse{}, handleErr
 				}
 			}
+		}
+		if err != nil {
+			return CompletionResponse{}, err
 		}
 	}
 }

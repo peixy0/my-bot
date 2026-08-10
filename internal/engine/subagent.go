@@ -39,7 +39,12 @@ func newSubagentRunner(env SessionEnv, taskManager *tasks.Manager) *subagentRunn
 	return &subagentRunner{env: env, taskManager: taskManager}
 }
 
-func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task string) (tasks.Snapshot, error) {
+type agentTaskSpec struct {
+	Name string `json:"name"`
+	Task string `json:"task"`
+}
+
+func (r *subagentRunner) startAgentTask(ctx context.Context, name, systemPrompt, task string) (tasks.Snapshot, error) {
 	if r.taskManager == nil {
 		return tasks.Snapshot{}, fmt.Errorf("task manager is nil")
 	}
@@ -77,18 +82,18 @@ func (r *subagentRunner) startAgentTask(ctx context.Context, systemPrompt, task 
 		return ctrl, nil
 	})
 	return r.taskManager.Start(ctx, tasks.StartOptions{
-		Description: task,
+		Description: name,
 		Driver:      driver,
 	})
 }
 
-func (r *subagentRunner) startFleetTask(ctx context.Context, systemPrompt string, taskList []string) ([]string, error) {
+func (r *subagentRunner) startFleetTask(ctx context.Context, systemPrompt string, taskList []agentTaskSpec) ([]string, error) {
 	if r.taskManager == nil {
 		return nil, fmt.Errorf("task manager is nil")
 	}
 	childIDs := make([]string, 0, len(taskList))
 	for _, item := range taskList {
-		child, err := r.startAgentTask(ctx, systemPrompt, item)
+		child, err := r.startAgentTask(ctx, item.Name, systemPrompt, item.Task)
 		if err != nil {
 			for _, childID := range childIDs {
 				_, _ = r.taskManager.Kill(context.Background(), childID)
@@ -108,6 +113,10 @@ func (s *SubagentToolset) Register(r *tools.Registry) {
 		ParameterDesc: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"name": map[string]any{
+					"type":        "string",
+					"description": "A concise name for the agent. This becomes the task description shown in task listings.",
+				},
 				"task": map[string]any{
 					"type":        "string",
 					"description": "The task description for the subagent to execute. Provide full context as the subagent has no conversation history.",
@@ -117,15 +126,19 @@ func (s *SubagentToolset) Register(r *tools.Registry) {
 					"description": "System prompt for the subagent.",
 				},
 			},
-			"required": []string{"task", "system_prompt"},
+			"required": []string{"name", "task", "system_prompt"},
 		},
 	}, func(args []byte) (tools.PreparedTool, error) {
 		var p struct {
+			Name         string `json:"name"`
 			Task         string `json:"task"`
 			SystemPrompt string `json:"system_prompt"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
 			return tools.PreparedTool{}, fmt.Errorf("parse agent args: %w", err)
+		}
+		if p.Name == "" {
+			return tools.PreparedTool{}, fmt.Errorf("name must not be empty")
 		}
 		if p.Task == "" {
 			return tools.PreparedTool{}, fmt.Errorf("task must not be empty")
@@ -134,10 +147,10 @@ func (s *SubagentToolset) Register(r *tools.Registry) {
 			return tools.PreparedTool{}, fmt.Errorf("system_prompt must not be empty")
 		}
 		return tools.PreparedTool{
-			Description: fmt.Sprintf("Starting agent task: %s", p.Task),
+			Description: fmt.Sprintf("Starting agent: %s", p.Name),
 			Execute: func(ctx context.Context) (tools.ToolResult, error) {
 				slog.Debug("subagent start")
-				snap, err := s.runner.startAgentTask(ctx, p.SystemPrompt, p.Task)
+				snap, err := s.runner.startAgentTask(ctx, p.Name, p.SystemPrompt, p.Task)
 				if err != nil {
 					return tools.ErrorResult(fmt.Errorf("start subagent task: %w", err)), nil
 				}
@@ -159,17 +172,24 @@ func (s *FleetToolset) Register(r *tools.Registry) {
 					"description": "Shared system prompt applied to every subagent. Describe the role or constraints common to all tasks.",
 				},
 				"tasks": map[string]any{
-					"type":        "array",
-					"items":       map[string]any{"type": "string"},
-					"description": "List of task descriptions to execute in parallel. Each task is handled by an independent subagent with full context.",
+					"type": "array",
+					"items": map[string]any{
+						"type":     "object",
+						"required": []string{"name", "task"},
+						"properties": map[string]any{
+							"name": map[string]any{"type": "string", "description": "A concise agent name used as the task description."},
+							"task": map[string]any{"type": "string", "description": "The detailed, self-contained task description for this agent."},
+						},
+					},
+					"description": "Agents to execute in parallel. Each item must provide a name and a self-contained task.",
 				},
 			},
 			"required": []string{"system_prompt", "tasks"},
 		},
 	}, func(args []byte) (tools.PreparedTool, error) {
 		var p struct {
-			SystemPrompt string   `json:"system_prompt"`
-			Tasks        []string `json:"tasks"`
+			SystemPrompt string          `json:"system_prompt"`
+			Tasks        []agentTaskSpec `json:"tasks"`
 		}
 		if err := json.Unmarshal(args, &p); err != nil {
 			return tools.PreparedTool{}, fmt.Errorf("parse fleet args: %w", err)
@@ -181,8 +201,11 @@ func (s *FleetToolset) Register(r *tools.Registry) {
 			return tools.PreparedTool{}, fmt.Errorf("tasks must not be empty")
 		}
 		for _, task := range p.Tasks {
-			if task == "" {
-				return tools.PreparedTool{}, fmt.Errorf("tasks must not contain empty items")
+			if task.Name == "" {
+				return tools.PreparedTool{}, fmt.Errorf("tasks must not contain empty names")
+			}
+			if task.Task == "" {
+				return tools.PreparedTool{}, fmt.Errorf("tasks must not contain empty tasks")
 			}
 		}
 		return tools.PreparedTool{

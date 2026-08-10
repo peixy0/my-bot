@@ -452,7 +452,7 @@ func (p *inspectParams) describe() string {
 	if p.Selector == "" {
 		return "Inspecting page HTML"
 	}
-	return fmt.Sprintf("Inspecting HTML in browser")
+	return "Inspecting HTML in browser"
 }
 
 type scrollParams struct {
@@ -491,7 +491,7 @@ func (p *screenshotParams) validate() error {
 }
 func (p *screenshotParams) describe() string {
 	if p.Selector != "" {
-		return fmt.Sprintf("Capturing node screenshot in browser")
+		return "Capturing node screenshot in browser"
 	}
 	if p.FullPage {
 		return "Capturing full page screenshot in browser"

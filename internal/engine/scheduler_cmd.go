@@ -80,8 +80,9 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 			e.Sender.Send(ctx, "resume id must be a UUID")
 			return nil
 		}
+		session := s.getOrCreateSession(ctx, e.ChatID)
 		go func() {
-			if err := s.getOrCreateSession(ctx, e.ChatID).restore(ctx, id); err != nil {
+			if err := session.restore(ctx, id); err != nil {
 				e.Sender.Send(ctx, fmt.Sprintf("session restore error: %v", err))
 				return
 			}
@@ -142,7 +143,7 @@ func (s *Scheduler) stopAndDumpAllSessions(ctx context.Context) ([]restoreSessio
 
 func (s *Scheduler) handleRebootCommand(ctx context.Context, e events.TextInputEvent) error {
 	if len(s.sessions) == 0 {
-		e.Sender.Send(ctx, fmt.Sprintf("rebooting"))
+		e.Sender.Send(ctx, "rebooting")
 		return ErrReboot
 	}
 	total := len(s.sessions)

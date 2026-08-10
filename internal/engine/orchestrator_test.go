@@ -339,7 +339,7 @@ func TestSubagentToolset_DoesNotForwardSubagentToolContent(t *testing.T) {
 	if !ok {
 		t.Fatal("expected agent preparer")
 	}
-	prepared, err := preparer([]byte(`{"task":"do work","system_prompt":"sys"}`))
+	prepared, err := preparer([]byte(`{"name":"worker-one","task":"do work","system_prompt":"sys"}`))
 	if err != nil {
 		t.Fatalf("prepare agent: %v", err)
 	}
@@ -357,6 +357,9 @@ func TestSubagentToolset_DoesNotForwardSubagentToolContent(t *testing.T) {
 	snap, err := manager.Await(context.Background(), start["task_id"], 2*time.Second)
 	if err != nil {
 		t.Fatalf("await subagent task: %v", err)
+	}
+	if snap.Description != "worker-one" {
+		t.Fatalf("expected agent name as task description, got %q", snap.Description)
 	}
 	if !strings.Contains(snap.Output, "subagent result") {
 		t.Fatalf("expected subagent output, got %+v", snap)
@@ -382,7 +385,7 @@ func TestFleetToolset_ReturnsAllChildTaskIDs(t *testing.T) {
 	if !ok {
 		t.Fatal("expected fleet preparer")
 	}
-	prepared, err := preparer([]byte(`{"system_prompt":"sys","tasks":["a","b","c"]}`))
+	prepared, err := preparer([]byte(`{"system_prompt":"sys","tasks":[{"name":"agent-a","task":"a"},{"name":"agent-b","task":"b"},{"name":"agent-c","task":"c"}]}`))
 	if err != nil {
 		t.Fatalf("prepare fleet: %v", err)
 	}
@@ -406,11 +409,16 @@ func TestFleetToolset_ReturnsAllChildTaskIDs(t *testing.T) {
 		}
 	}
 	wantByTaskID := map[string]string{}
+	wantNames := map[string]struct{}{"agent-a": {}, "agent-b": {}, "agent-c": {}}
 	for _, id := range start.TaskIDs {
 		snap, err := manager.Await(context.Background(), id, 2*time.Second)
 		if err != nil {
 			t.Fatalf("await fleet child task %s: %v", id, err)
 		}
+		if _, ok := wantNames[snap.Description]; !ok {
+			t.Fatalf("unexpected fleet task description %q", snap.Description)
+		}
+		delete(wantNames, snap.Description)
 		wantByTaskID[id] = snap.Output
 	}
 	wantParts := []string{"result:a", "result:b", "result:c"}
