@@ -72,7 +72,7 @@ func (w *ConversationWorker) Model() string {
 func (w *ConversationWorker) SetModel(model string) {
 	w.cfg.LLM = w.baseLLM
 	w.cfg.LLM.Model = model
-	if preset, ok := w.cfg.Models[model]; ok {
+	if preset := w.cfg.FindPreset(model); preset != nil {
 		preset.ApplyTo(&w.cfg.LLM)
 	}
 }
@@ -340,8 +340,8 @@ func (w *ConversationWorker) processConfigChange(ctx context.Context, ev events.
 	case events.ConfigKeyModel:
 		w.SetModel(ev.Value)
 		msg := fmt.Sprintf("model set to: %s", ev.Value)
-		if _, ok := w.cfg.Models[ev.Value]; ok {
-			msg += " (model preset applied)"
+		if w.cfg.FindPreset(ev.Value) != nil {
+			msg += " (preset applied)"
 		}
 		ev.Sender.Send(ctx, msg)
 	case events.ConfigKeyVision:

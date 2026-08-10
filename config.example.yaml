@@ -10,30 +10,33 @@ llm:
   context_window: 128000
   vision: false
   skip_on_tool_dispatch_error: false
-  # extra_body:
-  #   chat_template_kwargs:
-  #     enable_thinking: true
-  #   presence_penalty: 0
+  extra_body:
+    chat_template_kwargs:
+      enable_thinking: true
+    presence_penalty: 0
 
-models:
-  Qwen3-32B:
+presets:
+  default-completion:
+    model: "gpt-4o"
+    temperature: 1.0
+    top_p: 0.95
+    top_k: 0
+    context_window: 128000
+    vision: false
+  default-compression:
+    model: "gpt-4o"
+    temperature: 0.2
+    top_p: 1.0
+    top_k: 0
+    context_window: 128000
+    vision: false
+  qwen-completion:
+    model: "Qwen3-32B"
     temperature: 0.6
+    top_p: 0.95
+    top_k: 0
     context_window: 131072
     vision: true
-    extra_body:
-      chat_template_kwargs:
-        enable_thinking: true
-  Qwen3-8B:
-    temperature: 0.3
-    top_p: 0.9
-    context_window: 131072
-  deepseek-r1:
-    temperature: 0.7
-    context_window: 65536
-    extra_body:
-      chat_template_kwargs:
-        thinking: true
-        reasoning_effort: high
 
 container:
   enabled: false
@@ -62,6 +65,7 @@ context:
   max_output_tokens: 16384
   compression_threshold: 0.7
   compression_tool_result_truncate: 2000
+  compression_model: "default-compression"
 
 feishu:
   app_id: ""
@@ -71,8 +75,8 @@ feishu:
 
 wechat:
   enabled: false
-  # bot_token: ""   # optional: if set, skip QR login on startup
-  # base_url: ""    # optional: override https://ilinkai.weixin.qq.com
+  bot_token: ""
+  base_url: ""
 
 webui:
   enabled: true
@@ -86,10 +90,5 @@ heartbeat:
 
 sessions:
   "oc_abc123def456":
-    llm:
-      model: "gpt-4o-mini"
-      temperature: 0.3
-
-    context:
-      max_output_tokens: 8192
-
+    model: "qwen-completion"
+    compression_model: "default-compression"

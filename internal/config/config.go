@@ -9,7 +9,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type ModelConfig struct {
+type LLMOverride struct {
+	Model                   *string        `yaml:"model,omitempty"`
 	Temperature             *float64       `yaml:"temperature,omitempty"`
 	TopP                    *float64       `yaml:"top_p,omitempty"`
 	TopK                    *int           `yaml:"top_k,omitempty"`
@@ -19,35 +20,15 @@ type ModelConfig struct {
 	ExtraBody               map[string]any `yaml:"extra_body,omitempty"`
 }
 
-func (m *ModelConfig) ApplyTo(target *LLMConfig) {
-	if m.Temperature != nil {
-		target.Temperature = *m.Temperature
-	}
-	if m.TopP != nil {
-		target.TopP = *m.TopP
-	}
-	if m.TopK != nil {
-		target.TopK = *m.TopK
-	}
-	if m.ContextWindow != nil {
-		target.ContextWindow = *m.ContextWindow
-	}
-	if m.Vision != nil {
-		target.Vision = *m.Vision
-	}
-	if m.SkipOnToolDispatchError != nil {
-		target.SkipOnToolDispatchError = *m.SkipOnToolDispatchError
-	}
-	if m.ExtraBody != nil {
-		target.ExtraBody = m.ExtraBody
-	}
+type Preset struct {
+	LLMOverride `yaml:",inline"`
 }
 
 type Config struct {
 	LogLevel  string                     `yaml:"log_level"`
 	LLM       LLMConfig                  `yaml:"llm"`
 	Limiter   *LimiterConfig             `yaml:"limiter,omitempty"`
-	Models    map[string]ModelConfig     `yaml:"models,omitempty"`
+	Presets   map[string]Preset          `yaml:"presets,omitempty"`
 	Container *ContainerConfig           `yaml:"container,omitempty"`
 	Browser   *BrowserConfig             `yaml:"browser,omitempty"`
 	Tool      ToolConfig                 `yaml:"tool"`
@@ -116,6 +97,7 @@ type ContextConfig struct {
 	MaxOutputTokens               int64   `yaml:"max_output_tokens"`
 	CompressionThreshold          float64 `yaml:"compression_threshold"`
 	CompressionToolResultTruncate int     `yaml:"compression_tool_result_truncate"`
+	CompressionModel              string  `yaml:"compression_model,omitempty"`
 }
 
 type FeishuConfig struct {
@@ -143,76 +125,58 @@ type HeartbeatConfig struct {
 }
 
 type SessionOverride struct {
-	LLM     *LLMOverride     `yaml:"llm,omitempty"`
-	Context *ContextOverride `yaml:"context,omitempty"`
+	Model            string `yaml:"model,omitempty"`
+	CompressionModel string `yaml:"compression_model,omitempty"`
 }
 
-type LLMOverride struct {
-	BaseURL                 *string        `yaml:"base_url,omitempty"`
-	Model                   *string        `yaml:"model,omitempty"`
-	APIKey                  *string        `yaml:"api_key,omitempty"`
-	Temperature             *float64       `yaml:"temperature,omitempty"`
-	TopP                    *float64       `yaml:"top_p,omitempty"`
-	TopK                    *int           `yaml:"top_k,omitempty"`
-	ContextWindow           *int64         `yaml:"context_window,omitempty"`
-	Vision                  *bool          `yaml:"vision,omitempty"`
-	SkipOnToolDispatchError *bool          `yaml:"skip_on_tool_dispatch_error,omitempty"`
-	ExtraBody               map[string]any `yaml:"extra_body,omitempty"`
+func (c *Config) FindPreset(name string) *Preset {
+	if p, ok := c.Presets[name]; ok {
+		return &p
+	}
+	return nil
 }
 
-type ContextOverride struct {
-	MaxImageBytes                 *int     `yaml:"max_image_bytes,omitempty"`
-	MaxOutputTokens               *int64   `yaml:"max_output_tokens,omitempty"`
-	CompressionThreshold          *float64 `yaml:"compression_threshold,omitempty"`
-	CompressionToolResultTruncate *int     `yaml:"compression_tool_result_truncate,omitempty"`
-}
-
-func (o *LLMOverride) ApplyTo(target *LLMConfig) {
-	if o.BaseURL != nil {
-		target.BaseURL = *o.BaseURL
+func (p *Preset) ApplyTo(target *LLMConfig) {
+	if p.Model != nil {
+		target.Model = *p.Model
 	}
-	if o.Model != nil {
-		target.Model = *o.Model
+	if p.Temperature != nil {
+		target.Temperature = *p.Temperature
 	}
-	if o.APIKey != nil {
-		target.APIKey = *o.APIKey
+	if p.TopP != nil {
+		target.TopP = *p.TopP
 	}
-	if o.Temperature != nil {
-		target.Temperature = *o.Temperature
+	if p.TopK != nil {
+		target.TopK = *p.TopK
 	}
-	if o.TopP != nil {
-		target.TopP = *o.TopP
+	if p.ContextWindow != nil {
+		target.ContextWindow = *p.ContextWindow
 	}
-	if o.TopK != nil {
-		target.TopK = *o.TopK
+	if p.Vision != nil {
+		target.Vision = *p.Vision
 	}
-	if o.ContextWindow != nil {
-		target.ContextWindow = *o.ContextWindow
+	if p.SkipOnToolDispatchError != nil {
+		target.SkipOnToolDispatchError = *p.SkipOnToolDispatchError
 	}
-	if o.Vision != nil {
-		target.Vision = *o.Vision
-	}
-	if o.SkipOnToolDispatchError != nil {
-		target.SkipOnToolDispatchError = *o.SkipOnToolDispatchError
-	}
-	if o.ExtraBody != nil {
-		target.ExtraBody = o.ExtraBody
+	if p.ExtraBody != nil {
+		target.ExtraBody = p.ExtraBody
 	}
 }
 
-func (o *ContextOverride) ApplyTo(target *ContextConfig) {
-	if o.MaxImageBytes != nil {
-		target.MaxImageBytes = *o.MaxImageBytes
+func (o *LLMOverride) validate(path string) error {
+	if o.Temperature != nil && (*o.Temperature < 0 || *o.Temperature > 2) {
+		return fmt.Errorf("%s.temperature must be between 0 and 2", path)
 	}
-	if o.MaxOutputTokens != nil {
-		target.MaxOutputTokens = *o.MaxOutputTokens
+	if o.TopP != nil && (*o.TopP < 0 || *o.TopP > 1) {
+		return fmt.Errorf("%s.top_p must be between 0 and 1", path)
 	}
-	if o.CompressionThreshold != nil {
-		target.CompressionThreshold = *o.CompressionThreshold
+	if o.TopK != nil && *o.TopK < 0 {
+		return fmt.Errorf("%s.top_k must be non-negative", path)
 	}
-	if o.CompressionToolResultTruncate != nil {
-		target.CompressionToolResultTruncate = *o.CompressionToolResultTruncate
+	if o.ContextWindow != nil && *o.ContextWindow <= 0 {
+		return fmt.Errorf("%s.context_window must be positive", path)
 	}
+	return nil
 }
 
 func Load(path string) (*Config, error) {
@@ -237,22 +201,38 @@ func (c *Config) ForSession(chatID string) *Config {
 	merged.Sessions = nil
 
 	if override, ok := c.Sessions[chatID]; ok {
-		if override.LLM != nil {
-			override.LLM.ApplyTo(&merged.LLM)
-		}
-		if override.Context != nil {
-			override.Context.ApplyTo(&merged.Context)
+		if override.Model != "" {
+			if preset := c.FindPreset(override.Model); preset != nil {
+				preset.ApplyTo(&merged.LLM)
+			} else {
+				merged.LLM.Model = override.Model
+			}
 		}
 	}
 
-	base := merged.LLM
-	merged.baseLLM = &base
-
-	if preset, ok := merged.Models[merged.LLM.Model]; ok {
-		preset.ApplyTo(&merged.LLM)
+	if override, ok := c.Sessions[chatID]; ok {
+		if override.CompressionModel != "" {
+			merged.Context.CompressionModel = override.CompressionModel
+		}
 	}
+
+	merged.baseLLM = &c.LLM
 
 	return &merged
+}
+
+func (c *Config) CompressionLLMConfig() LLMConfig {
+	cfg := c.LLM
+
+	if c.Context.CompressionModel != "" {
+		if preset := c.FindPreset(c.Context.CompressionModel); preset != nil {
+			preset.ApplyTo(&cfg)
+		} else {
+			cfg.Model = c.Context.CompressionModel
+		}
+	}
+
+	return cfg
 }
 
 func defaultConfig() *Config {
@@ -369,6 +349,15 @@ func (c *Config) Validate() error {
 		}
 		if c.WebUI.Port < 1 || c.WebUI.Port > 65535 {
 			return fmt.Errorf("webui.port must be between 1 and 65535")
+		}
+	}
+	for name := range c.Presets {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("preset name is required")
+		}
+		preset := c.Presets[name]
+		if err := preset.validate(fmt.Sprintf("presets[%s]", name)); err != nil {
+			return err
 		}
 	}
 	return nil

@@ -232,8 +232,6 @@ func responseMetadata(model string, contextWindow int64, resp llm.CompletionResp
 	}
 }
 
-const CompressionTemperature = 0.2
-
 func (a *Agent) Compress(ctx context.Context, cfg *config.Config, conv *llm.Conversation) error {
 	if len(conv.Messages) < 2 {
 		return nil
@@ -243,15 +241,16 @@ func (a *Agent) Compress(ctx context.Context, cfg *config.Config, conv *llm.Conv
 	flatText := flattenMessages(conv.Messages[:retainedStart], cfg.Context.CompressionToolResultTruncate)
 	flatText = "[CONTEXT COMPRESSION TASK]\nCompress the following conversation into a state anchor.\nDo not continue the conversation.\n\n[CONVERSATION HISTORY BEGIN]\n\n" + flatText + "\n\n[CONVERSATION HISTORY END]"
 
+	compressionCfg := cfg.CompressionLLMConfig()
 	resp, err := a.client.Complete(ctx, llm.CompletionRequest{
-		Model:       cfg.LLM.Model,
+		Model:       compressionCfg.Model,
 		Messages:    []llm.ChatMessage{{Role: "system", Content: llm.CompressionInstruction}, llm.UserMessage(flatText)},
 		Tools:       []map[string]any{},
 		MaxTokens:   cfg.Context.MaxOutputTokens,
-		Temperature: CompressionTemperature,
-		TopP:        cfg.LLM.TopP,
-		TopK:        cfg.LLM.TopK,
-		ExtraBody:   cfg.LLM.ExtraBody,
+		Temperature: compressionCfg.Temperature,
+		TopP:        compressionCfg.TopP,
+		TopK:        compressionCfg.TopK,
+		ExtraBody:   compressionCfg.ExtraBody,
 	})
 	if err != nil {
 		return err

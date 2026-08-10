@@ -16,6 +16,12 @@ func validConfig() *Config {
 	return cfg
 }
 
+func strPtr(s string) *string     { return &s }
+func floatPtr(f float64) *float64 { return &f }
+func intPtr(i int) *int           { return &i }
+func int64Ptr(i int64) *int64     { return &i }
+func boolPtr(b bool) *bool        { return &b }
+
 func TestConfigValidateAcceptsDefaultsShape(t *testing.T) {
 	if err := validConfig().Validate(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -52,6 +58,21 @@ func TestConfigValidateRejectsInvalidValues(t *testing.T) {
 		}},
 		{"browser bad path", func(c *Config) {
 			c.Browser = &BrowserConfig{Enabled: true, ListenAddr: "127.0.0.1:8020", Path: "browser"}
+		}},
+		{"preset missing name", func(c *Config) {
+			c.Presets = map[string]Preset{"": {LLMOverride: LLMOverride{Temperature: floatPtr(0.5)}}}
+		}},
+		{"preset temperature", func(c *Config) {
+			c.Presets = map[string]Preset{"p": {LLMOverride: LLMOverride{Temperature: floatPtr(2.1)}}}
+		}},
+		{"preset top p", func(c *Config) {
+			c.Presets = map[string]Preset{"p": {LLMOverride: LLMOverride{TopP: floatPtr(1.1)}}}
+		}},
+		{"preset top k", func(c *Config) {
+			c.Presets = map[string]Preset{"p": {LLMOverride: LLMOverride{TopK: intPtr(-1)}}}
+		}},
+		{"preset context window", func(c *Config) {
+			c.Presets = map[string]Preset{"p": {LLMOverride: LLMOverride{ContextWindow: int64Ptr(0)}}}
 		}},
 	}
 
@@ -131,6 +152,32 @@ browser:
 	}
 }
 
+func TestLoadYAMLPresets(t *testing.T) {
+	path := writeTestConfig(t, `
+llm:
+  api_key: key
+context:
+  compression_model: "my-compression"
+presets:
+  my-completion:
+    model: "gpt-4o"
+    temperature: 0.7
+  my-compression:
+    model: "gpt-4o-mini"
+    temperature: 0.2
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if len(cfg.Presets) != 2 {
+		t.Fatalf("expected 2 presets, got %d", len(cfg.Presets))
+	}
+	if cfg.Context.CompressionModel != "my-compression" {
+		t.Fatalf("expected compression_model my-compression, got %s", cfg.Context.CompressionModel)
+	}
+}
+
 func TestForSessionNoOverride(t *testing.T) {
 	base := validConfig()
 	session := base.ForSession("oc_missing")
@@ -139,16 +186,15 @@ func TestForSessionNoOverride(t *testing.T) {
 	}
 }
 
-func TestForSessionWithOverride(t *testing.T) {
+func TestForSessionSessionOverrideCompletionPreset(t *testing.T) {
 	base := validConfig()
-	model := "gpt-4o-mini"
-	temp := 0.3
+	base.Presets = map[string]Preset{
+		"global-completion":  {LLMOverride: LLMOverride{Model: strPtr("gpt-4o"), Temperature: floatPtr(1.0)}},
+		"session-completion": {LLMOverride: LLMOverride{Model: strPtr("gpt-4o-mini"), Temperature: floatPtr(0.3)}},
+	}
 	base.Sessions = map[string]SessionOverride{
 		"oc_test": {
-			LLM: &LLMOverride{
-				Model:       &model,
-				Temperature: &temp,
-			},
+			Model: "session-completion",
 		},
 	}
 
@@ -157,29 +203,41 @@ func TestForSessionWithOverride(t *testing.T) {
 		t.Fatalf("expected model gpt-4o-mini, got %s", session.LLM.Model)
 	}
 	if session.LLM.Temperature != 0.3 {
-		t.Fatalf("expected temperature 0.3, got %f", session.LLM.Temperature)
-	}
-	if session.LLM.APIKey != "key" {
-		t.Fatalf("expected inherited api_key 'key', got %q", session.LLM.APIKey)
+		t.Fatalf("expected temperature 0.3 from session preset, got %f", session.LLM.Temperature)
 	}
 	if session.Sessions != nil {
 		t.Fatal("expected sessions to be nil in merged config")
 	}
 }
 
-func TestForSessionDoesNotMutateBase(t *testing.T) {
+func TestForSessionSessionOverrideCompressionPreset(t *testing.T) {
 	base := validConfig()
-	model := "gpt-4o-mini"
+	base.Context.CompressionModel = "global-compression"
+	base.Presets = map[string]Preset{
+		"global-compression":  {LLMOverride: LLMOverride{Model: strPtr("gpt-4o"), Temperature: floatPtr(0.5)}},
+		"session-compression": {LLMOverride: LLMOverride{Model: strPtr("gpt-4o-mini"), Temperature: floatPtr(0.1)}},
+	}
 	base.Sessions = map[string]SessionOverride{
 		"oc_test": {
-			LLM: &LLMOverride{Model: &model},
+			CompressionModel: "session-compression",
+		},
+	}
+
+	session := base.ForSession("oc_test")
+	if session.Context.CompressionModel != "session-compression" {
+		t.Fatalf("expected compression_model session-compression, got %s", session.Context.CompressionModel)
+	}
+}
+
+func TestForSessionDoesNotMutateBase(t *testing.T) {
+	base := validConfig()
+	base.Sessions = map[string]SessionOverride{
+		"oc_test": {
+			Model: "some-preset",
 		},
 	}
 
 	_ = base.ForSession("oc_test")
-	if base.LLM.Model == "gpt-4o-mini" {
-		t.Fatal("override should not mutate base config")
-	}
 }
 
 func TestLoadYAMLExtraBody(t *testing.T) {
@@ -207,7 +265,7 @@ llm:
 	}
 }
 
-func TestModelConfigApplyTo(t *testing.T) {
+func TestPresetApplyTo(t *testing.T) {
 	target := LLMConfig{
 		Temperature: 1.0,
 		TopP:        0.95,
@@ -217,14 +275,13 @@ func TestModelConfigApplyTo(t *testing.T) {
 
 	t.Run("all fields set", func(t *testing.T) {
 		tgt := target
-		temp := 0.6
-		topP := 0.8
-		topK := 50
-		preset := ModelConfig{
-			Temperature: &temp,
-			TopP:        &topP,
-			TopK:        &topK,
-			ExtraBody:   map[string]any{"new": true},
+		preset := Preset{
+			LLMOverride: LLMOverride{
+				Temperature: floatPtr(0.6),
+				TopP:        floatPtr(0.8),
+				TopK:        intPtr(50),
+				ExtraBody:   map[string]any{"new": true},
+			},
 		}
 		preset.ApplyTo(&tgt)
 		if tgt.Temperature != 0.6 {
@@ -244,9 +301,9 @@ func TestModelConfigApplyTo(t *testing.T) {
 		}
 	})
 
-	t.Run("nil fields do not override", func(t *testing.T) {
+	t.Run("zero fields do not override", func(t *testing.T) {
 		tgt := target
-		preset := ModelConfig{}
+		preset := Preset{}
 		preset.ApplyTo(&tgt)
 		if tgt.Temperature != 1.0 {
 			t.Fatalf("expected temperature unchanged 1.0, got %f", tgt.Temperature)
@@ -263,38 +320,16 @@ func TestModelConfigApplyTo(t *testing.T) {
 	})
 }
 
-func TestForSessionAppliesModelPreset(t *testing.T) {
-	base := validConfig()
-	base.LLM.Model = "Qwen3-32B"
-	temp := 0.6
-	base.Models = map[string]ModelConfig{
-		"Qwen3-32B": {
-			Temperature: &temp,
-		},
-	}
-
-	session := base.ForSession("oc_no_override")
-	if session.LLM.Temperature != 0.6 {
-		t.Fatalf("expected temperature 0.6 from preset, got %f", session.LLM.Temperature)
-	}
-	if base.LLM.Temperature == 0.6 {
-		t.Fatal("preset should not mutate base config")
-	}
-}
-
-func TestForSessionAppliesModelPresetAfterSessionOverride(t *testing.T) {
+func TestForSessionWithGlobalCompletionPreset(t *testing.T) {
 	base := validConfig()
 	base.LLM.Model = "gpt-4o"
-	model := "Qwen3-32B"
-	temp := 0.6
-	base.Models = map[string]ModelConfig{
-		"Qwen3-32B": {
-			Temperature: &temp,
-		},
+	base.LLM.Temperature = 1.0
+	base.Presets = map[string]Preset{
+		"qwen": {LLMOverride: LLMOverride{Model: strPtr("Qwen3-32B"), Temperature: floatPtr(0.6)}},
 	}
 	base.Sessions = map[string]SessionOverride{
 		"oc_test": {
-			LLM: &LLMOverride{Model: &model},
+			Model: "qwen",
 		},
 	}
 
@@ -303,145 +338,172 @@ func TestForSessionAppliesModelPresetAfterSessionOverride(t *testing.T) {
 		t.Fatalf("expected model Qwen3-32B, got %s", session.LLM.Model)
 	}
 	if session.LLM.Temperature != 0.6 {
-		t.Fatalf("expected temperature 0.6 from preset after session override, got %f", session.LLM.Temperature)
+		t.Fatalf("expected temperature 0.6 from preset, got %f", session.LLM.Temperature)
 	}
 }
 
-func TestForSessionExtraBodyOverride(t *testing.T) {
+func TestCompletionPresetFallbackToModelName(t *testing.T) {
 	base := validConfig()
-	base.LLM.ExtraBody = map[string]any{"presence_penalty": 0.5}
-	sessionExtra := map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": true}}
+	// no preset, no session override - model stays as is
+	session := base.ForSession("oc_no_override")
+	if session.LLM.Model != "gpt-4o" {
+		t.Fatalf("expected model gpt-4o, got %s", session.LLM.Model)
+	}
+}
+
+func TestSessionCompletionPresetFallbackToModelName(t *testing.T) {
+	base := validConfig()
+	base.Presets = map[string]Preset{
+		"some-preset": {LLMOverride: LLMOverride{Temperature: floatPtr(0.5)}},
+	}
 	base.Sessions = map[string]SessionOverride{
-		"oc_test": {LLM: &LLMOverride{ExtraBody: sessionExtra}},
+		"oc_test": {
+			Model: "gpt-4o-mini", // not a preset
+		},
 	}
+
 	session := base.ForSession("oc_test")
-	if session.LLM.ExtraBody["chat_template_kwargs"] == nil {
-		t.Fatal("expected session extra_body to have chat_template_kwargs")
-	}
-	if _, ok := session.LLM.ExtraBody["presence_penalty"]; ok {
-		t.Fatal("expected session extra_body to fully replace, not merge")
+	if session.LLM.Model != "gpt-4o-mini" {
+		t.Fatalf("expected model gpt-4o-mini (fallback), got %s", session.LLM.Model)
 	}
 }
 
-func TestContextOverrideApplyTo(t *testing.T) {
-	target := ContextConfig{
-		MaxImageBytes:                 1024,
-		MaxOutputTokens:               16384,
-		CompressionThreshold:          0.7,
-		CompressionToolResultTruncate: 2000,
+func TestValidateAllowsDirectSessionAndCompressionModels(t *testing.T) {
+	base := validConfig()
+	base.Context.CompressionModel = "gpt-4o-mini"
+	base.Sessions = map[string]SessionOverride{
+		"oc_test": {
+			Model:            "gpt-4o-mini",
+			CompressionModel: "gpt-4o-nano",
+		},
 	}
-
-	t.Run("all fields set", func(t *testing.T) {
-		tgt := target
-		maxImage := 2048
-		maxTokens := int64(8192)
-		threshold := 0.9
-		toolTruncate := 3000
-		override := ContextOverride{
-			MaxImageBytes:                 &maxImage,
-			MaxOutputTokens:               &maxTokens,
-			CompressionThreshold:          &threshold,
-			CompressionToolResultTruncate: &toolTruncate,
-		}
-		override.ApplyTo(&tgt)
-		if tgt.MaxImageBytes != 2048 {
-			t.Fatalf("expected max_image_bytes 2048, got %d", tgt.MaxImageBytes)
-		}
-		if tgt.MaxOutputTokens != 8192 {
-			t.Fatalf("expected max_output_tokens 8192, got %d", tgt.MaxOutputTokens)
-		}
-		if tgt.CompressionThreshold != 0.9 {
-			t.Fatalf("expected compression_threshold 0.9, got %f", tgt.CompressionThreshold)
-		}
-		if tgt.CompressionToolResultTruncate != 3000 {
-			t.Fatalf("expected compression_tool_result_truncate 3000, got %d", tgt.CompressionToolResultTruncate)
-		}
-	})
-
-	t.Run("nil fields do not override", func(t *testing.T) {
-		tgt := target
-		override := ContextOverride{}
-		override.ApplyTo(&tgt)
-		if tgt.MaxImageBytes != 1024 {
-			t.Fatalf("expected max_image_bytes unchanged 1024, got %d", tgt.MaxImageBytes)
-		}
-		if tgt.MaxOutputTokens != 16384 {
-			t.Fatalf("expected max_output_tokens unchanged 16384, got %d", tgt.MaxOutputTokens)
-		}
-		if tgt.CompressionThreshold != 0.7 {
-			t.Fatalf("expected compression_threshold unchanged 0.7, got %f", tgt.CompressionThreshold)
-		}
-		if tgt.CompressionToolResultTruncate != 2000 {
-			t.Fatalf("expected compression_tool_result_truncate unchanged 2000, got %d", tgt.CompressionToolResultTruncate)
-		}
-	})
+	if err := base.Validate(); err != nil {
+		t.Fatalf("expected direct model names to be valid: %v", err)
+	}
 }
 
-func TestBaseLLM(t *testing.T) {
-	t.Run("returns pre-preset value after model preset applied", func(t *testing.T) {
+func TestCompressionLLMConfig(t *testing.T) {
+	t.Run("no preset returns base LLMConfig", func(t *testing.T) {
 		base := validConfig()
-		base.LLM.Model = "Qwen3-32B"
-		base.LLM.Temperature = 0.8
-		presetTemp := 0.6
-		base.Models = map[string]ModelConfig{
-			"Qwen3-32B": {
-				Temperature: &presetTemp,
+		base.LLM.Model = "gpt-4o"
+		base.LLM.Temperature = 1.0
+		base.LLM.TopP = 0.95
+
+		comp := base.CompressionLLMConfig()
+		if comp.Model != "gpt-4o" {
+			t.Fatalf("expected model gpt-4o, got %s", comp.Model)
+		}
+		if comp.Temperature != 1.0 {
+			t.Fatalf("expected temperature 1.0, got %f", comp.Temperature)
+		}
+		if comp.TopP != 0.95 {
+			t.Fatalf("expected top_p 0.95, got %f", comp.TopP)
+		}
+	})
+
+	t.Run("applies global compression preset", func(t *testing.T) {
+		base := validConfig()
+		base.LLM.Model = "gpt-4o"
+		base.LLM.Temperature = 1.0
+		base.Context.CompressionModel = "qwen-compression"
+		base.Presets = map[string]Preset{
+			"qwen-compression": {LLMOverride: LLMOverride{Model: strPtr("Qwen3-32B"), Temperature: floatPtr(0.2)}},
+		}
+
+		comp := base.CompressionLLMConfig()
+		if comp.Model != "Qwen3-32B" {
+			t.Fatalf("expected model Qwen3-32B, got %s", comp.Model)
+		}
+		if comp.Temperature != 0.2 {
+			t.Fatalf("expected temperature 0.2 from preset, got %f", comp.Temperature)
+		}
+	})
+
+	t.Run("session compression preset merged by ForSession", func(t *testing.T) {
+		base := validConfig()
+		base.LLM.Model = "gpt-4o"
+		base.LLM.Temperature = 1.0
+		base.Context.CompressionModel = "global-compression"
+		base.Presets = map[string]Preset{
+			"global-compression":  {LLMOverride: LLMOverride{Temperature: floatPtr(0.5)}},
+			"session-compression": {LLMOverride: LLMOverride{Temperature: floatPtr(0.1)}},
+		}
+		base.Sessions = map[string]SessionOverride{
+			"oc_test": {
+				CompressionModel: "session-compression",
 			},
 		}
 
-		session := base.ForSession("oc_no_override")
-		// ForSession applies the model preset onto merged.LLM, but baseLLM
-		// captures the pre-preset value.
-		if session.LLM.Temperature != 0.6 {
-			t.Fatalf("expected session llm temperature 0.6 from preset, got %f", session.LLM.Temperature)
-		}
-		if got := session.BaseLLM(); got.Temperature != 0.8 {
-			t.Fatalf("expected base llm temperature 0.8, got %f", got.Temperature)
+		session := base.ForSession("oc_test")
+		comp := session.CompressionLLMConfig()
+
+		if comp.Temperature != 0.1 {
+			t.Fatalf("expected temperature 0.1 from session preset, got %f", comp.Temperature)
 		}
 	})
 
-	t.Run("fallback when baseLLM is nil", func(t *testing.T) {
-		cfg := defaultConfig()
-		cfg.LLM.APIKey = "key"
-		// A fresh Config without ForSession has baseLLM == nil, so BaseLLM
-		// returns the LLM field directly.
-		if got := cfg.BaseLLM(); got.Temperature != cfg.LLM.Temperature {
-			t.Fatalf("expected base llm temperature %f, got %f", cfg.LLM.Temperature, got.Temperature)
+	t.Run("fallback to model name when preset not found", func(t *testing.T) {
+		base := validConfig()
+		base.LLM.Model = "gpt-4o"
+		base.LLM.Temperature = 1.0
+		base.Context.CompressionModel = "gpt-4o-mini" // not a preset
+
+		comp := base.CompressionLLMConfig()
+		if comp.Model != "gpt-4o-mini" {
+			t.Fatalf("expected model gpt-4o-mini (fallback), got %s", comp.Model)
 		}
-		if got := cfg.BaseLLM(); got.APIKey != cfg.LLM.APIKey {
-			t.Fatalf("expected base llm api_key %q, got %q", cfg.LLM.APIKey, got.APIKey)
+		if comp.Temperature != 1.0 {
+			t.Fatalf("expected temperature unchanged 1.0, got %f", comp.Temperature)
 		}
 	})
 }
 
-func TestLoadNonexistentFile(t *testing.T) {
-	_, err := Load(filepath.Join(t.TempDir(), "does-not-exist.yaml"))
-	if err == nil {
-		t.Fatal("expected error loading nonexistent file")
+func TestFindPreset(t *testing.T) {
+	base := validConfig()
+	base.Presets = map[string]Preset{
+		"qwen": {LLMOverride: LLMOverride{Model: strPtr("Qwen3-32B"), Temperature: floatPtr(0.6)}},
 	}
-	if !strings.Contains(err.Error(), "read config") {
-		t.Fatalf("expected error containing \"read config\", got %v", err)
+
+	p := base.FindPreset("qwen")
+	if p == nil {
+		t.Fatal("expected to find preset qwen")
+	}
+	if p.Model == nil || *p.Model != "Qwen3-32B" {
+		t.Fatalf("expected model Qwen3-32B, got %v", p.Model)
+	}
+	if base.FindPreset("missing") != nil {
+		t.Fatal("expected nil for missing preset")
+	}
+}
+
+func TestLoadNonexistentFile(t *testing.T) {
+	_, err := Load("/nonexistent/path.yaml")
+	if err == nil {
+		t.Fatal("expected error for nonexistent file")
 	}
 }
 
 func TestLoadMalformedYAML(t *testing.T) {
-	path := writeTestConfig(t, "llm: [unclosed")
+	path := writeTestConfig(t, `llm: [}`)
 	_, err := Load(path)
 	if err == nil {
-		t.Fatal("expected error loading malformed yaml")
+		t.Fatal("expected error for malformed yaml")
 	}
 	if !strings.Contains(err.Error(), "parse config") {
-		t.Fatalf("expected error containing \"parse config\", got %v", err)
+		t.Fatalf("expected parse config error, got %v", err)
 	}
 }
 
 func TestLoadValidationFailure(t *testing.T) {
-	path := writeTestConfig(t, "llm:\n  api_key: \"\"")
+	path := writeTestConfig(t, `
+llm:
+  api_key: ""
+`)
 	_, err := Load(path)
 	if err == nil {
-		t.Fatal("expected error loading config with empty api_key")
+		t.Fatal("expected validation error")
 	}
-	if !strings.Contains(err.Error(), "api_key is required") {
-		t.Fatalf("expected error containing \"api_key is required\", got %v", err)
+	if !strings.Contains(err.Error(), "llm.api_key is required") {
+		t.Fatalf("expected api_key error, got %v", err)
 	}
 }

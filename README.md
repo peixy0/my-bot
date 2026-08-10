@@ -106,12 +106,20 @@ llm:
   #   chat_template_kwargs:
   #     enable_thinking: true
 
-models:                        # named presets applied when the chosen model matches
-  Qwen3-32B:
+presets:                       # named presets selectable by session or slash command
+  qwen-completion:
+    model: Qwen3-32B
     temperature: 0.6
     context_window: 131072
     vision: true
     extra_body: {chat_template_kwargs: {enable_thinking: true}}
+
+  qwen-compression:
+    model: Qwen3-8B
+    temperature: 0.2
+
+context:
+  compression_model: qwen-compression # preset name or a direct provider model name
 
 heartbeat:
   interval_seconds: 1800
@@ -123,8 +131,8 @@ container:                     # tool-execution sandbox
 
 sessions:                      # per-chat overrides (keyed by chat id)
   "oc_xxx":
-    llm:
-      model: gpt-4o-mini
+    model: qwen-completion          # preset name or a direct provider model name
+    compression_model: gpt-4o-mini  # optional; otherwise uses the current model settings
 
 wechat:                        # WeChat iLink bot (QR login if bot_token is empty)
   enabled: false
@@ -230,4 +238,3 @@ go test ./... -race -count=1
 ```
 
 Read [AGENTS.md](./AGENTS.md) before contributing — it covers the no-comments policy, single-owner invariants, how to add tools / events / providers, and the testing seams.
-

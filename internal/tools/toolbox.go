@@ -315,7 +315,7 @@ func (d *DefaultToolset) registerEditFile(r *Registry) {
 			if err2 := json.Unmarshal(args, &helperArgs); err2 != nil {
 				return PreparedTool{}, fmt.Errorf("parse edit_file args: %w", err)
 			}
-			if err2 := json.Unmarshal([]byte(helperArgs.Edits), p.Edits); err2 != nil {
+			if err2 := json.Unmarshal([]byte(helperArgs.Edits), &p.Edits); err2 != nil {
 				return PreparedTool{}, fmt.Errorf("parse edit_file args: %w", err2)
 			}
 			p.Filename = helperArgs.Filename

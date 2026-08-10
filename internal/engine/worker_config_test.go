@@ -10,6 +10,9 @@ import (
 	"my-bot/internal/events"
 )
 
+func strPtr(s string) *string     { return &s }
+func floatPtr(f float64) *float64 { return &f }
+
 func TestWorkerConfigChangeModel(t *testing.T) {
 	cfg := &config.Config{
 		LLM: config.LLMConfig{
@@ -35,7 +38,6 @@ func TestWorkerConfigChangeModel(t *testing.T) {
 }
 
 func TestWorkerConfigChangeModelWithPreset(t *testing.T) {
-	temp := 0.6
 	cfg := &config.Config{
 		LLM: config.LLMConfig{
 			Model:       "gpt-4o",
@@ -43,8 +45,8 @@ func TestWorkerConfigChangeModelWithPreset(t *testing.T) {
 			TopP:        1,
 		},
 		Tool: config.ToolConfig{MaxOutputChars: 1000},
-		Models: map[string]config.ModelConfig{
-			"Qwen3-32B": {Temperature: &temp},
+		Presets: map[string]config.Preset{
+			"Qwen3-32B": {LLMOverride: config.LLMOverride{Model: strPtr("Qwen3-32B"), Temperature: floatPtr(0.6)}},
 		},
 	}
 	worker := newConfigTestWorker(cfg)
@@ -60,7 +62,7 @@ func TestWorkerConfigChangeModelWithPreset(t *testing.T) {
 	if worker.cfg.LLM.Temperature != 0.6 {
 		t.Fatalf("expected preset temperature 0.6, got %f", worker.cfg.LLM.Temperature)
 	}
-	if !slices.ContainsFunc(out.messages, func(m string) bool { return strings.Contains(m, "model preset applied") }) {
+	if !slices.ContainsFunc(out.messages, func(m string) bool { return strings.Contains(m, "preset applied") }) {
 		t.Fatalf("expected preset applied message, got %v", out.messages)
 	}
 }
