@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type LLMOverride struct {
+type Preset struct {
 	Model                   *string        `yaml:"model,omitempty"`
 	Temperature             *float64       `yaml:"temperature,omitempty"`
 	TopP                    *float64       `yaml:"top_p,omitempty"`
@@ -18,10 +18,6 @@ type LLMOverride struct {
 	Vision                  *bool          `yaml:"vision,omitempty"`
 	SkipOnToolDispatchError *bool          `yaml:"skip_on_tool_dispatch_error,omitempty"`
 	ExtraBody               map[string]any `yaml:"extra_body,omitempty"`
-}
-
-type Preset struct {
-	LLMOverride `yaml:",inline"`
 }
 
 type Config struct {
@@ -59,8 +55,8 @@ type LLMConfig struct {
 	Model                   string         `yaml:"model"`
 	APIKey                  string         `yaml:"api_key"`
 	Temperature             float64        `yaml:"temperature"`
-	TopP                    float64        `yaml:"top_p"`
-	TopK                    int            `yaml:"top_k"`
+	TopP                    *float64       `yaml:"top_p,omitempty"`
+	TopK                    *int           `yaml:"top_k,omitempty"`
 	ContextWindow           int64          `yaml:"context_window"`
 	Vision                  bool           `yaml:"vision"`
 	SkipOnToolDispatchError bool           `yaml:"skip_on_tool_dispatch_error"`
@@ -144,10 +140,10 @@ func (p *Preset) ApplyTo(target *LLMConfig) {
 		target.Temperature = *p.Temperature
 	}
 	if p.TopP != nil {
-		target.TopP = *p.TopP
+		target.TopP = p.TopP
 	}
 	if p.TopK != nil {
-		target.TopK = *p.TopK
+		target.TopK = p.TopK
 	}
 	if p.ContextWindow != nil {
 		target.ContextWindow = *p.ContextWindow
@@ -163,17 +159,17 @@ func (p *Preset) ApplyTo(target *LLMConfig) {
 	}
 }
 
-func (o *LLMOverride) validate(path string) error {
-	if o.Temperature != nil && (*o.Temperature < 0 || *o.Temperature > 2) {
+func (p *Preset) validate(path string) error {
+	if p.Temperature != nil && (*p.Temperature < 0 || *p.Temperature > 2) {
 		return fmt.Errorf("%s.temperature must be between 0 and 2", path)
 	}
-	if o.TopP != nil && (*o.TopP < 0 || *o.TopP > 1) {
+	if p.TopP != nil && (*p.TopP < 0 || *p.TopP > 1) {
 		return fmt.Errorf("%s.top_p must be between 0 and 1", path)
 	}
-	if o.TopK != nil && *o.TopK < 0 {
+	if p.TopK != nil && *p.TopK < 0 {
 		return fmt.Errorf("%s.top_k must be non-negative", path)
 	}
-	if o.ContextWindow != nil && *o.ContextWindow <= 0 {
+	if p.ContextWindow != nil && *p.ContextWindow <= 0 {
 		return fmt.Errorf("%s.context_window must be positive", path)
 	}
 	return nil
@@ -253,7 +249,6 @@ func defaultConfig() *Config {
 			BaseURL:       "https://api.openai.com/v1",
 			Model:         "gpt-4o",
 			Temperature:   1,
-			TopP:          0.95,
 			ContextWindow: 128_000,
 			Vision:        false,
 		},
@@ -279,10 +274,10 @@ func (c *Config) Validate() error {
 	if c.LLM.Temperature < 0 || c.LLM.Temperature > 2 {
 		return fmt.Errorf("llm.temperature must be between 0 and 2")
 	}
-	if c.LLM.TopP < 0 || c.LLM.TopP > 1 {
+	if c.LLM.TopP != nil && (*c.LLM.TopP < 0 || *c.LLM.TopP > 1) {
 		return fmt.Errorf("llm.top_p must be between 0 and 1")
 	}
-	if c.LLM.TopK < 0 {
+	if c.LLM.TopK != nil && *c.LLM.TopK < 0 {
 		return fmt.Errorf("llm.top_k must be non-negative")
 	}
 	if c.Limiter != nil {

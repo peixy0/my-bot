@@ -51,9 +51,9 @@ llm:
   base_url: https://api.openai.com/v1
   api_key: sk-...
   model: gpt-4o
-  temperature: 1.0       # optional
-  top_p: 0.95            # optional (default 0.95)
-  top_k: 0               # optional, only needed for some non-OpenAI providers
+  temperature: 1.0      # optional
+  # top_p: 0.95         # optional; omitted from API requests when unset
+  # top_k: 40           # optional; omitted from API requests when unset
 ```
 
 Enable Feishu/Lark:
@@ -98,8 +98,8 @@ context:
 
 llm:
   temperature: 1.0
-  top_p: 0.95
-  top_k: 0                     # optional, non-OpenAI providers
+  # top_p: 0.95                # optional; omitted from API requests when unset
+  # top_k: 40                  # optional, non-OpenAI providers
   context_window: 128000
   vision: false
   # extra_body:                # passthrough for provider-specific knobs
@@ -152,8 +152,6 @@ While chatting with the bot:
 | `/model <name>` | Switch the active LLM model for the current chat/session (applies any matching model preset) |
 | `/vision on|off` | Toggle image input support for the current chat/session |
 | `/temperature <0..2>` | Set sampling temperature for the current chat/session |
-| `/top_p <0..1>` | Set top_p for the current chat/session |
-| `/top_k <positive int>` | Set top_k for the current chat/session |
 | `/max_tokens <positive int>` | Set max output tokens for the current chat/session |
 | `/context_window <positive int>` | Set context window size (compression trigger) for the current chat/session |
 | `/queue <text>` | Queue a message to run after the current agent loop finishes |

@@ -281,7 +281,7 @@ func TestHumanInputOrchestrator_PreservesEmptyDescriptions(t *testing.T) {
 	}
 }
 
-func TestBackgroundAndSubagentOrchestrators_DoNotEmitDescriptions(t *testing.T) {
+func TestBackgroundOrchestrator_DoesNotEmitDescriptions(t *testing.T) {
 	reg := tools.NewRegistry()
 	reg.Register(tools.ToolSchema{Name: "tool"}, func([]byte) (tools.PreparedTool, error) {
 		return tools.PreparedTool{
@@ -298,14 +298,40 @@ func TestBackgroundAndSubagentOrchestrators_DoNotEmitDescriptions(t *testing.T) 
 	if _, err := background.DispatchTools(context.Background(), prepared); err != nil {
 		t.Fatalf("background dispatch: %v", err)
 	}
-	subagent := NewSubagentOrchestrator(nil, nil)
-	subagent.BeforeToolUse(context.Background(), "thinking", toolDescriptions(prepared))
-	if _, err := subagent.DispatchTools(context.Background(), prepared); err != nil {
-		t.Fatalf("subagent dispatch: %v", err)
-	}
 	if len(sender.deltas) != 0 || len(sender.sent) != 0 {
 		t.Fatalf("expected no description output, got deltas=%v sent=%v", sender.deltas, sender.sent)
 	}
+}
+
+func TestSubagentOrchestrator_EmitsDescriptions(t *testing.T) {
+	manager := tasks.NewManager(&nullRuntime{}, 1000)
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = manager.Shutdown(ctx)
+	}()
+
+	started, err := manager.Start(context.Background(), tasks.StartOptions{
+		Description: "subagent descriptions",
+		Driver: tasks.FuncDriver(func(_ context.Context, _ tasks.TaskInfo, emit *tasks.Emitter) (tasks.Controller, error) {
+			orch := NewSubagentOrchestrator(emit, nil)
+			orch.BeforeToolUse(context.Background(), "thinking", []string{"running tool..."})
+			emit.Complete(tasks.TaskResult{})
+			return nil, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("start task: %v", err)
+	}
+	snapshot, err := manager.Await(context.Background(), started.TaskID, time.Second)
+	if err != nil {
+		t.Fatalf("await task: %v", err)
+	}
+	if snapshot.Output != "\nrunning tool..." {
+		t.Fatalf("unexpected subagent description output: %q", snapshot.Output)
+	}
+
+	NewSubagentOrchestrator(nil, nil).BeforeToolUse(context.Background(), "thinking", []string{"running tool..."})
 }
 
 func TestSubagentToolset_DoesNotForwardSubagentToolContent(t *testing.T) {

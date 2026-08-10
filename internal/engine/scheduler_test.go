@@ -772,7 +772,7 @@ func TestWorkerVisionConfigChangeRejectsInvalidValue(t *testing.T) {
 }
 
 func TestWorkerGenerationConfigCommands(t *testing.T) {
-	worker := newConfigTestWorker(&config.Config{LLM: config.LLMConfig{Temperature: 1, TopP: 1, ContextWindow: 32000}, Tool: config.ToolConfig{MaxOutputChars: 1000}, Context: config.ContextConfig{MaxOutputTokens: 16384}})
+	worker := newConfigTestWorker(&config.Config{LLM: config.LLMConfig{Temperature: 1, TopP: floatPtr(1), ContextWindow: 32000}, Tool: config.ToolConfig{MaxOutputChars: 1000}, Context: config.ContextConfig{MaxOutputTokens: 16384}})
 	out := &captureOutbound{}
 	s := &Scheduler{
 		sessions: map[string]*chatSession{
@@ -780,7 +780,7 @@ func TestWorkerGenerationConfigCommands(t *testing.T) {
 		},
 	}
 
-	for _, cmd := range []string{"temperature 0.2", "top_p 0.9", "top_k 40", "max_tokens 12000", "context_window 64000"} {
+	for _, cmd := range []string{"temperature 0.2", "max_tokens 12000", "context_window 64000"} {
 		s.handleSlashCommand(context.Background(), cmd, events.TextInputEvent{
 			ChatID: "chat-1",
 			Sender: out,
@@ -798,10 +798,10 @@ func TestWorkerGenerationConfigCommands(t *testing.T) {
 		}
 	}
 
-	if worker.cfg.LLM.Temperature != 0.2 || worker.cfg.LLM.TopP != 0.9 || worker.cfg.LLM.TopK != 40 || worker.cfg.Context.MaxOutputTokens != 12000 || worker.cfg.LLM.ContextWindow != 64000 {
+	if worker.cfg.LLM.Temperature != 0.2 || worker.cfg.Context.MaxOutputTokens != 12000 || worker.cfg.LLM.ContextWindow != 64000 {
 		t.Fatalf("unexpected generation config: %+v", worker.cfg)
 	}
-	want := []string{"temperature set to: 0.2", "top_p set to: 0.9", "top_k set to: 40", "max_tokens set to: 12000", "context_window set to: 64000"}
+	want := []string{"temperature set to: 0.2", "max_tokens set to: 12000", "context_window set to: 64000"}
 	if len(out.messages) != len(want) {
 		t.Fatalf("unexpected responses: %v", out.messages)
 	}

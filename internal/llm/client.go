@@ -49,8 +49,8 @@ type CompletionRequest struct {
 	Tools          []map[string]any
 	MaxTokens      int64
 	Temperature    float64
-	TopP           float64
-	TopK           int
+	TopP           *float64
+	TopK           *int
 	ExtraBody      map[string]any
 	OnContentBegin func(ctx context.Context)
 	OnContentDelta func(ctx context.Context, delta string)

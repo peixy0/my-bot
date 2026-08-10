@@ -75,8 +75,6 @@ const (
 	ConfigKeyModel         = "model"
 	ConfigKeyVision        = "vision"
 	ConfigKeyTemperature   = "temperature"
-	ConfigKeyTopP          = "top_p"
-	ConfigKeyTopK          = "top_k"
 	ConfigKeyMaxTokens     = "max_tokens"
 	ConfigKeyContextWindow = "context_window"
 )

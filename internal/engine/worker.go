@@ -93,25 +93,6 @@ func (w *ConversationWorker) SetTemperature(value float64) {
 	w.cfg.LLM.Temperature = value
 }
 
-func (w *ConversationWorker) TopP() string {
-	return formatFloat(w.cfg.LLM.TopP)
-}
-
-func (w *ConversationWorker) SetTopP(value float64) {
-	w.cfg.LLM.TopP = value
-}
-
-func (w *ConversationWorker) TopK() string {
-	if w.cfg.LLM.TopK <= 0 {
-		return "unset"
-	}
-	return strconv.Itoa(w.cfg.LLM.TopK)
-}
-
-func (w *ConversationWorker) SetTopK(value int) {
-	w.cfg.LLM.TopK = value
-}
-
 func (w *ConversationWorker) MaxTokens() string {
 	return strconv.FormatInt(w.cfg.Context.MaxOutputTokens, 10)
 }
@@ -323,10 +304,6 @@ func (w *ConversationWorker) processConfigQuery(ctx context.Context, ev events.C
 		ev.Sender.Send(ctx, fmt.Sprintf("current vision: %s", onOff(w.VisionSupported())))
 	case events.ConfigKeyTemperature:
 		ev.Sender.Send(ctx, fmt.Sprintf("current temperature: %s", w.Temperature()))
-	case events.ConfigKeyTopP:
-		ev.Sender.Send(ctx, fmt.Sprintf("current top_p: %s", w.TopP()))
-	case events.ConfigKeyTopK:
-		ev.Sender.Send(ctx, fmt.Sprintf("current top_k: %s", w.TopK()))
 	case events.ConfigKeyMaxTokens:
 		ev.Sender.Send(ctx, fmt.Sprintf("current max_tokens: %s", w.MaxTokens()))
 	case events.ConfigKeyContextWindow:
@@ -363,22 +340,6 @@ func (w *ConversationWorker) processConfigChange(ctx context.Context, ev events.
 		}
 		w.SetTemperature(value)
 		ev.Sender.Send(ctx, fmt.Sprintf("temperature set to: %s", formatFloat(value)))
-	case events.ConfigKeyTopP:
-		value, err := strconv.ParseFloat(ev.Value, 64)
-		if err != nil || value < 0 || value > 1 {
-			ev.Sender.Send(ctx, "usage: /top_p <0..1>")
-			return nil
-		}
-		w.SetTopP(value)
-		ev.Sender.Send(ctx, fmt.Sprintf("top_p set to: %s", formatFloat(value)))
-	case events.ConfigKeyTopK:
-		value, err := strconv.Atoi(ev.Value)
-		if err != nil || value <= 0 {
-			ev.Sender.Send(ctx, "usage: /top_k <positive integer>")
-			return nil
-		}
-		w.SetTopK(value)
-		ev.Sender.Send(ctx, fmt.Sprintf("top_k set to: %d", value))
 	case events.ConfigKeyMaxTokens:
 		value, err := strconv.ParseInt(ev.Value, 10, 64)
 		if err != nil || value <= 0 {

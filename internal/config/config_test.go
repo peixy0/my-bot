@@ -10,7 +10,7 @@ import (
 func validConfig() *Config {
 	cfg := defaultConfig()
 	cfg.LLM.APIKey = "key"
-	cfg.LLM.TopP = 1
+	cfg.LLM.TopP = floatPtr(1)
 	cfg.Heartbeat.IntervalSeconds = 60
 	cfg.Context.MaxImageBytes = 1024
 	return cfg
@@ -36,9 +36,9 @@ func TestConfigValidateRejectsInvalidValues(t *testing.T) {
 		{"llm api key", func(c *Config) { c.LLM.APIKey = "" }},
 		{"temperature low", func(c *Config) { c.LLM.Temperature = -0.1 }},
 		{"temperature high", func(c *Config) { c.LLM.Temperature = 2.1 }},
-		{"top p low", func(c *Config) { c.LLM.TopP = -0.1 }},
-		{"top p high", func(c *Config) { c.LLM.TopP = 1.1 }},
-		{"top k", func(c *Config) { c.LLM.TopK = -1 }},
+		{"top p low", func(c *Config) { c.LLM.TopP = floatPtr(-0.1) }},
+		{"top p high", func(c *Config) { c.LLM.TopP = floatPtr(1.1) }},
+		{"top k", func(c *Config) { c.LLM.TopK = intPtr(-1) }},
 		{"container enabled no name", func(c *Config) { c.Container = &ContainerConfig{Runtime: "podman"} }},
 		{"container enabled bad runtime", func(c *Config) { c.Container = &ContainerConfig{Name: "x", Runtime: "runc"} }},
 		{"tool max output chars", func(c *Config) { c.Tool.MaxOutputChars = 0 }},
@@ -60,19 +60,19 @@ func TestConfigValidateRejectsInvalidValues(t *testing.T) {
 			c.Browser = &BrowserConfig{Enabled: true, ListenAddr: "127.0.0.1:8020", Path: "browser"}
 		}},
 		{"preset missing name", func(c *Config) {
-			c.Presets = map[string]Preset{"": {LLMOverride: LLMOverride{Temperature: floatPtr(0.5)}}}
+			c.Presets = map[string]Preset{"": {Temperature: floatPtr(0.5)}}
 		}},
 		{"preset temperature", func(c *Config) {
-			c.Presets = map[string]Preset{"p": {LLMOverride: LLMOverride{Temperature: floatPtr(2.1)}}}
+			c.Presets = map[string]Preset{"p": {Temperature: floatPtr(2.1)}}
 		}},
 		{"preset top p", func(c *Config) {
-			c.Presets = map[string]Preset{"p": {LLMOverride: LLMOverride{TopP: floatPtr(1.1)}}}
+			c.Presets = map[string]Preset{"p": {TopP: floatPtr(1.1)}}
 		}},
 		{"preset top k", func(c *Config) {
-			c.Presets = map[string]Preset{"p": {LLMOverride: LLMOverride{TopK: intPtr(-1)}}}
+			c.Presets = map[string]Preset{"p": {TopK: intPtr(-1)}}
 		}},
 		{"preset context window", func(c *Config) {
-			c.Presets = map[string]Preset{"p": {LLMOverride: LLMOverride{ContextWindow: int64Ptr(0)}}}
+			c.Presets = map[string]Preset{"p": {ContextWindow: int64Ptr(0)}}
 		}},
 	}
 
@@ -117,6 +117,9 @@ llm:
 	}
 	if cfg.Tool.MaxOutputChars != 100000 {
 		t.Fatalf("expected default max_output_chars 100000, got %d", cfg.Tool.MaxOutputChars)
+	}
+	if cfg.LLM.TopP != nil || cfg.LLM.TopK != nil {
+		t.Fatalf("expected top_p and top_k to be unset by default, got top_p=%v top_k=%v", cfg.LLM.TopP, cfg.LLM.TopK)
 	}
 }
 
@@ -189,8 +192,8 @@ func TestForSessionNoOverride(t *testing.T) {
 func TestForSessionSessionOverrideCompletionPreset(t *testing.T) {
 	base := validConfig()
 	base.Presets = map[string]Preset{
-		"global-completion":  {LLMOverride: LLMOverride{Model: strPtr("gpt-4o"), Temperature: floatPtr(1.0)}},
-		"session-completion": {LLMOverride: LLMOverride{Model: strPtr("gpt-4o-mini"), Temperature: floatPtr(0.3)}},
+		"global-completion":  {Model: strPtr("gpt-4o"), Temperature: floatPtr(1.0)},
+		"session-completion": {Model: strPtr("gpt-4o-mini"), Temperature: floatPtr(0.3)},
 	}
 	base.Sessions = map[string]SessionOverride{
 		"oc_test": {
@@ -214,8 +217,8 @@ func TestForSessionSessionOverrideCompressionPreset(t *testing.T) {
 	base := validConfig()
 	base.Context.CompressionModel = "global-compression"
 	base.Presets = map[string]Preset{
-		"global-compression":  {LLMOverride: LLMOverride{Model: strPtr("gpt-4o"), Temperature: floatPtr(0.5)}},
-		"session-compression": {LLMOverride: LLMOverride{Model: strPtr("gpt-4o-mini"), Temperature: floatPtr(0.1)}},
+		"global-compression":  {Model: strPtr("gpt-4o"), Temperature: floatPtr(0.5)},
+		"session-compression": {Model: strPtr("gpt-4o-mini"), Temperature: floatPtr(0.1)},
 	}
 	base.Sessions = map[string]SessionOverride{
 		"oc_test": {
@@ -268,30 +271,28 @@ llm:
 func TestPresetApplyTo(t *testing.T) {
 	target := LLMConfig{
 		Temperature: 1.0,
-		TopP:        0.95,
-		TopK:        0,
+		TopP:        floatPtr(0.95),
+		TopK:        intPtr(0),
 		ExtraBody:   map[string]any{"old": true},
 	}
 
 	t.Run("all fields set", func(t *testing.T) {
 		tgt := target
 		preset := Preset{
-			LLMOverride: LLMOverride{
-				Temperature: floatPtr(0.6),
-				TopP:        floatPtr(0.8),
-				TopK:        intPtr(50),
-				ExtraBody:   map[string]any{"new": true},
-			},
+			Temperature: floatPtr(0.6),
+			TopP:        floatPtr(0.8),
+			TopK:        intPtr(50),
+			ExtraBody:   map[string]any{"new": true},
 		}
 		preset.ApplyTo(&tgt)
 		if tgt.Temperature != 0.6 {
 			t.Fatalf("expected temperature 0.6, got %f", tgt.Temperature)
 		}
-		if tgt.TopP != 0.8 {
-			t.Fatalf("expected top_p 0.8, got %f", tgt.TopP)
+		if tgt.TopP == nil || *tgt.TopP != 0.8 {
+			t.Fatalf("expected top_p 0.8, got %v", tgt.TopP)
 		}
-		if tgt.TopK != 50 {
-			t.Fatalf("expected top_k 50, got %d", tgt.TopK)
+		if tgt.TopK == nil || *tgt.TopK != 50 {
+			t.Fatalf("expected top_k 50, got %v", tgt.TopK)
 		}
 		if tgt.ExtraBody["new"] == nil {
 			t.Fatal("expected extra_body to be replaced")
@@ -308,11 +309,11 @@ func TestPresetApplyTo(t *testing.T) {
 		if tgt.Temperature != 1.0 {
 			t.Fatalf("expected temperature unchanged 1.0, got %f", tgt.Temperature)
 		}
-		if tgt.TopP != 0.95 {
-			t.Fatalf("expected top_p unchanged 0.95, got %f", tgt.TopP)
+		if tgt.TopP == nil || *tgt.TopP != 0.95 {
+			t.Fatalf("expected top_p unchanged 0.95, got %v", tgt.TopP)
 		}
-		if tgt.TopK != 0 {
-			t.Fatalf("expected top_k unchanged 0, got %d", tgt.TopK)
+		if tgt.TopK == nil || *tgt.TopK != 0 {
+			t.Fatalf("expected top_k unchanged 0, got %v", tgt.TopK)
 		}
 		if tgt.ExtraBody["old"] == nil {
 			t.Fatal("expected extra_body unchanged")
@@ -325,7 +326,7 @@ func TestForSessionWithGlobalCompletionPreset(t *testing.T) {
 	base.LLM.Model = "gpt-4o"
 	base.LLM.Temperature = 1.0
 	base.Presets = map[string]Preset{
-		"qwen": {LLMOverride: LLMOverride{Model: strPtr("Qwen3-32B"), Temperature: floatPtr(0.6)}},
+		"qwen": {Model: strPtr("Qwen3-32B"), Temperature: floatPtr(0.6)},
 	}
 	base.Sessions = map[string]SessionOverride{
 		"oc_test": {
@@ -354,7 +355,7 @@ func TestCompletionPresetFallbackToModelName(t *testing.T) {
 func TestSessionCompletionPresetFallbackToModelName(t *testing.T) {
 	base := validConfig()
 	base.Presets = map[string]Preset{
-		"some-preset": {LLMOverride: LLMOverride{Temperature: floatPtr(0.5)}},
+		"some-preset": {Temperature: floatPtr(0.5)},
 	}
 	base.Sessions = map[string]SessionOverride{
 		"oc_test": {
@@ -387,7 +388,7 @@ func TestCompressionLLMConfig(t *testing.T) {
 		base := validConfig()
 		base.LLM.Model = "gpt-4o"
 		base.LLM.Temperature = 1.0
-		base.LLM.TopP = 0.95
+		base.LLM.TopP = floatPtr(0.95)
 
 		comp := base.CompressionLLMConfig()
 		if comp.Model != "gpt-4o" {
@@ -396,8 +397,8 @@ func TestCompressionLLMConfig(t *testing.T) {
 		if comp.Temperature != 1.0 {
 			t.Fatalf("expected temperature 1.0, got %f", comp.Temperature)
 		}
-		if comp.TopP != 0.95 {
-			t.Fatalf("expected top_p 0.95, got %f", comp.TopP)
+		if comp.TopP == nil || *comp.TopP != 0.95 {
+			t.Fatalf("expected top_p 0.95, got %v", comp.TopP)
 		}
 	})
 
@@ -407,7 +408,7 @@ func TestCompressionLLMConfig(t *testing.T) {
 		base.LLM.Temperature = 1.0
 		base.Context.CompressionModel = "qwen-compression"
 		base.Presets = map[string]Preset{
-			"qwen-compression": {LLMOverride: LLMOverride{Model: strPtr("Qwen3-32B"), Temperature: floatPtr(0.2)}},
+			"qwen-compression": {Model: strPtr("Qwen3-32B"), Temperature: floatPtr(0.2)},
 		}
 
 		comp := base.CompressionLLMConfig()
@@ -425,8 +426,8 @@ func TestCompressionLLMConfig(t *testing.T) {
 		base.LLM.Temperature = 1.0
 		base.Context.CompressionModel = "global-compression"
 		base.Presets = map[string]Preset{
-			"global-compression":  {LLMOverride: LLMOverride{Temperature: floatPtr(0.5)}},
-			"session-compression": {LLMOverride: LLMOverride{Temperature: floatPtr(0.1)}},
+			"global-compression":  {Temperature: floatPtr(0.5)},
+			"session-compression": {Temperature: floatPtr(0.1)},
 		}
 		base.Sessions = map[string]SessionOverride{
 			"oc_test": {
@@ -461,7 +462,7 @@ func TestCompressionLLMConfig(t *testing.T) {
 func TestFindPreset(t *testing.T) {
 	base := validConfig()
 	base.Presets = map[string]Preset{
-		"qwen": {LLMOverride: LLMOverride{Model: strPtr("Qwen3-32B"), Temperature: floatPtr(0.6)}},
+		"qwen": {Model: strPtr("Qwen3-32B"), Temperature: floatPtr(0.6)},
 	}
 
 	p := base.FindPreset("qwen")

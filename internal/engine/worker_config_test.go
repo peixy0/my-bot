@@ -18,7 +18,7 @@ func TestWorkerConfigChangeModel(t *testing.T) {
 		LLM: config.LLMConfig{
 			Model:       "gpt-4o",
 			Temperature: 1,
-			TopP:        1,
+			TopP:        floatPtr(1),
 		},
 		Tool: config.ToolConfig{MaxOutputChars: 1000},
 	}
@@ -42,11 +42,11 @@ func TestWorkerConfigChangeModelWithPreset(t *testing.T) {
 		LLM: config.LLMConfig{
 			Model:       "gpt-4o",
 			Temperature: 1,
-			TopP:        1,
+			TopP:        floatPtr(1),
 		},
 		Tool: config.ToolConfig{MaxOutputChars: 1000},
 		Presets: map[string]config.Preset{
-			"Qwen3-32B": {LLMOverride: config.LLMOverride{Model: strPtr("Qwen3-32B"), Temperature: floatPtr(0.6)}},
+			"Qwen3-32B": {Model: strPtr("Qwen3-32B"), Temperature: floatPtr(0.6)},
 		},
 	}
 	worker := newConfigTestWorker(cfg)
@@ -69,7 +69,7 @@ func TestWorkerConfigChangeModelWithPreset(t *testing.T) {
 
 func TestWorkerConfigChangeTemperature(t *testing.T) {
 	cfg := &config.Config{
-		LLM:  config.LLMConfig{Temperature: 1, TopP: 1},
+		LLM:  config.LLMConfig{Temperature: 1, TopP: floatPtr(1)},
 		Tool: config.ToolConfig{MaxOutputChars: 1000},
 	}
 	worker := newConfigTestWorker(cfg)
@@ -86,7 +86,7 @@ func TestWorkerConfigChangeTemperature(t *testing.T) {
 
 func TestWorkerConfigChangeTemperatureOutOfRange(t *testing.T) {
 	cfg := &config.Config{
-		LLM:  config.LLMConfig{Temperature: 1, TopP: 1},
+		LLM:  config.LLMConfig{Temperature: 1, TopP: floatPtr(1)},
 		Tool: config.ToolConfig{MaxOutputChars: 1000},
 	}
 	worker := newConfigTestWorker(cfg)
@@ -106,79 +106,9 @@ func TestWorkerConfigChangeTemperatureOutOfRange(t *testing.T) {
 	}
 }
 
-func TestWorkerConfigChangeTopP(t *testing.T) {
-	cfg := &config.Config{
-		LLM:  config.LLMConfig{Temperature: 1, TopP: 1},
-		Tool: config.ToolConfig{MaxOutputChars: 1000},
-	}
-	worker := newConfigTestWorker(cfg)
-	out := &captureOutbound{}
-
-	ev := events.ConfigChangeEvent{Key: events.ConfigKeyTopP, Value: "0.8", Sender: out}
-	if err := worker.processConfigChange(context.Background(), ev); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if worker.TopP() != "0.8" {
-		t.Fatalf("expected top_p 0.8, got %s", worker.TopP())
-	}
-}
-
-func TestWorkerConfigChangeTopPOutOfRange(t *testing.T) {
-	cfg := &config.Config{
-		LLM:  config.LLMConfig{Temperature: 1, TopP: 1},
-		Tool: config.ToolConfig{MaxOutputChars: 1000},
-	}
-	worker := newConfigTestWorker(cfg)
-	out := &captureOutbound{}
-
-	ev := events.ConfigChangeEvent{Key: events.ConfigKeyTopP, Value: "1.5", Sender: out}
-	worker.processConfigChange(context.Background(), ev)
-
-	if !slices.ContainsFunc(out.messages, func(m string) bool { return strings.Contains(m, "usage: /top_p <0..1>") }) {
-		t.Fatalf("expected rejection, got %v", out.messages)
-	}
-	if worker.TopP() != "1" {
-		t.Fatalf("top_p should not change, got %s", worker.TopP())
-	}
-}
-
-func TestWorkerConfigChangeTopK(t *testing.T) {
-	cfg := &config.Config{
-		LLM:  config.LLMConfig{Temperature: 1, TopP: 1},
-		Tool: config.ToolConfig{MaxOutputChars: 1000},
-	}
-	worker := newConfigTestWorker(cfg)
-	out := &captureOutbound{}
-
-	ev := events.ConfigChangeEvent{Key: events.ConfigKeyTopK, Value: "50", Sender: out}
-	if err := worker.processConfigChange(context.Background(), ev); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if worker.TopK() != "50" {
-		t.Fatalf("expected top_k 50, got %s", worker.TopK())
-	}
-}
-
-func TestWorkerConfigChangeTopKRejectsZeroAndNegative(t *testing.T) {
-	cfg := &config.Config{
-		LLM:  config.LLMConfig{Temperature: 1, TopP: 1},
-		Tool: config.ToolConfig{MaxOutputChars: 1000},
-	}
-	worker := newConfigTestWorker(cfg)
-	out := &captureOutbound{}
-
-	for _, val := range []string{"0", "-1"} {
-		ev := events.ConfigChangeEvent{Key: events.ConfigKeyTopK, Value: val, Sender: out}
-		worker.processConfigChange(context.Background(), ev)
-	}
-	if !slices.ContainsFunc(out.messages, func(m string) bool { return strings.Contains(m, "usage: /top_k <positive integer>") }) {
-		t.Fatalf("expected rejection, got %v", out.messages)
-	}
-}
-
 func TestWorkerConfigChangeMaxTokens(t *testing.T) {
 	cfg := &config.Config{
-		LLM:     config.LLMConfig{Temperature: 1, TopP: 1, ContextWindow: 128000},
+		LLM:     config.LLMConfig{Temperature: 1, TopP: floatPtr(1), ContextWindow: 128000},
 		Context: config.ContextConfig{MaxOutputTokens: 16384, CompressionThreshold: 0.7},
 		Tool:    config.ToolConfig{MaxOutputChars: 1000},
 	}
@@ -196,7 +126,7 @@ func TestWorkerConfigChangeMaxTokens(t *testing.T) {
 
 func TestWorkerConfigChangeMaxTokensRejectsZero(t *testing.T) {
 	cfg := &config.Config{
-		LLM:     config.LLMConfig{Temperature: 1, TopP: 1, ContextWindow: 128000},
+		LLM:     config.LLMConfig{Temperature: 1, TopP: floatPtr(1), ContextWindow: 128000},
 		Context: config.ContextConfig{MaxOutputTokens: 16384, CompressionThreshold: 0.7},
 		Tool:    config.ToolConfig{MaxOutputChars: 1000},
 	}
@@ -213,7 +143,7 @@ func TestWorkerConfigChangeMaxTokensRejectsZero(t *testing.T) {
 
 func TestWorkerConfigChangeContextWindow(t *testing.T) {
 	cfg := &config.Config{
-		LLM:     config.LLMConfig{Temperature: 1, TopP: 1, ContextWindow: 128000},
+		LLM:     config.LLMConfig{Temperature: 1, TopP: floatPtr(1), ContextWindow: 128000},
 		Context: config.ContextConfig{MaxOutputTokens: 16384, CompressionThreshold: 0.7},
 		Tool:    config.ToolConfig{MaxOutputChars: 1000},
 	}
@@ -231,7 +161,7 @@ func TestWorkerConfigChangeContextWindow(t *testing.T) {
 
 func TestWorkerConfigChangeContextWindowRejectsNegative(t *testing.T) {
 	cfg := &config.Config{
-		LLM:     config.LLMConfig{Temperature: 1, TopP: 1, ContextWindow: 128000},
+		LLM:     config.LLMConfig{Temperature: 1, TopP: floatPtr(1), ContextWindow: 128000},
 		Context: config.ContextConfig{MaxOutputTokens: 16384, CompressionThreshold: 0.7},
 		Tool:    config.ToolConfig{MaxOutputChars: 1000},
 	}
@@ -248,7 +178,7 @@ func TestWorkerConfigChangeContextWindowRejectsNegative(t *testing.T) {
 
 func TestWorkerConfigQueryAll(t *testing.T) {
 	cfg := &config.Config{
-		LLM:     config.LLMConfig{Model: "gpt-4o", Temperature: 1, TopP: 1, ContextWindow: 128000, Vision: true},
+		LLM:     config.LLMConfig{Model: "gpt-4o", Temperature: 1, TopP: floatPtr(1), ContextWindow: 128000, Vision: true},
 		Context: config.ContextConfig{MaxOutputTokens: 16384, CompressionThreshold: 0.7},
 		Tool:    config.ToolConfig{MaxOutputChars: 1000},
 	}
@@ -258,7 +188,6 @@ func TestWorkerConfigQueryAll(t *testing.T) {
 		events.ConfigKeyModel:         "current model: gpt-4o",
 		events.ConfigKeyVision:        "current vision: on",
 		events.ConfigKeyTemperature:   "current temperature: 1",
-		events.ConfigKeyTopP:          "current top_p: 1",
 		events.ConfigKeyMaxTokens:     "current max_tokens: 16384",
 		events.ConfigKeyContextWindow: "current context_window: 128000",
 	}

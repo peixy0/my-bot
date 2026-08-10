@@ -43,8 +43,8 @@ func TestOpenAIProvider_CompleteStreamsContent(t *testing.T) {
 		Messages:    []ChatMessage{UserMessage("hi")},
 		MaxTokens:   123,
 		Temperature: 0.2,
-		TopP:        0.9,
-		TopK:        40,
+		TopP:        func() *float64 { v := 0.9; return &v }(),
+		TopK:        func() *int { v := 40; return &v }(),
 		OnContentBegin: func(context.Context) {
 			begins++
 		},
@@ -102,8 +102,37 @@ func TestOpenAIProvider_CompleteOmitsZeroMaxTokens(t *testing.T) {
 	if _, ok := requestBody["max_tokens"]; ok {
 		t.Fatalf("expected max_tokens to be omitted when unset, got %#v", requestBody["max_tokens"])
 	}
+	if _, ok := requestBody["top_p"]; ok {
+		t.Fatalf("expected top_p to be omitted when unset, got %#v", requestBody["top_p"])
+	}
+	if _, ok := requestBody["top_k"]; ok {
+		t.Fatalf("expected top_k to be omitted when unset, got %#v", requestBody["top_k"])
+	}
 	if resp.PromptTokens != 0 || resp.CompletionTokens != 0 || resp.TotalTokens != 0 {
 		t.Fatalf("expected missing usage to remain zero, got %+v", resp)
+	}
+}
+
+func TestOpenAIProvider_CompleteSendsExplicitZeroSamplingParams(t *testing.T) {
+	var requestBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		writeSSE(t, w, map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "ok"}, "finish_reason": "stop"}}})
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	topP := 0.0
+	topK := 0
+	provider := NewOpenAIProvider(server.URL, "", server.Client())
+	if _, err := provider.Complete(context.Background(), CompletionRequest{Model: "test-model", TopP: &topP, TopK: &topK}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if requestBody["top_p"] != 0.0 || requestBody["top_k"] != float64(0) {
+		t.Fatalf("expected explicit zero sampling params, got %#v", requestBody)
 	}
 }
 
@@ -538,25 +567,5 @@ func TestOpenAIProvider_EmptyReasoningContentOmittedFromRequest(t *testing.T) {
 	assistant := msgs[1].(map[string]any)
 	if _, present := assistant["reasoning_content"]; present {
 		t.Fatalf("expected reasoning_content to be omitted when empty, got %#v", assistant)
-	}
-}
-
-func TestNewOpenAIProviderUsesBoundedTransport(t *testing.T) {
-	provider := NewOpenAIProvider("https://example.com", "")
-	transport, ok := provider.httpClient.Transport.(*http.Transport)
-	if !ok {
-		t.Fatalf("expected *http.Transport, got %T", provider.httpClient.Transport)
-	}
-	if transport.DialContext == nil {
-		t.Fatal("expected bounded dial context")
-	}
-	if transport.TLSHandshakeTimeout <= 0 {
-		t.Fatal("expected TLS handshake timeout")
-	}
-	if transport.ResponseHeaderTimeout <= 0 {
-		t.Fatal("expected response header timeout")
-	}
-	if transport.IdleConnTimeout <= 0 {
-		t.Fatal("expected idle connection timeout")
 	}
 }

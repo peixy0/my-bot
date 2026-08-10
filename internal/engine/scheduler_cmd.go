@@ -38,7 +38,7 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 	case "drop":
 		s.closeSession(e.ChatID)
 		e.Sender.Send(ctx, fmt.Sprintf("dropped session: %s", e.ChatID))
-	case "model", "vision", "temperature", "top_p", "top_k", "max_tokens", "context_window":
+	case "model", "vision", "temperature", "max_tokens", "context_window":
 		s.handleConfigCommand(ctx, parts, e)
 	case "models":
 		s.handleModelsCommand(ctx, e)

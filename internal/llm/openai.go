@@ -19,8 +19,9 @@ import (
 	"my-bot/internal/util"
 )
 
-const maxAttempts = 10
-const maxRetryDuration = 300
+const maxAttempts = 99
+const maxRetryDuration = 30 * 60  // seconds
+const completionTimeout = 60 * 60 // seconds
 
 var retryAfter = time.After
 
@@ -52,12 +53,7 @@ func NewOpenAIProvider(baseURL, apiKey string, httpClient ...*http.Client) *Open
 }
 
 func defaultHTTPClient() *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.DialContext = (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext
-	transport.TLSHandshakeTimeout = 15 * time.Second
-	transport.ResponseHeaderTimeout = 120 * time.Second
-	transport.IdleConnTimeout = 90 * time.Second
-	return &http.Client{Transport: transport}
+	return &http.Client{Timeout: completionTimeout * time.Second}
 }
 
 func (p *OpenAIProvider) Complete(ctx context.Context, req CompletionRequest) (CompletionResponse, error) {
@@ -127,11 +123,11 @@ func (p *OpenAIProvider) doComplete(ctx context.Context, req CompletionRequest) 
 		body["tools"] = req.Tools
 		body["parallel_tool_calls"] = true
 	}
-	if req.TopP > 0 {
-		body["top_p"] = req.TopP
+	if req.TopP != nil {
+		body["top_p"] = *req.TopP
 	}
-	if req.TopK > 0 {
-		body["top_k"] = req.TopK
+	if req.TopK != nil {
+		body["top_k"] = *req.TopK
 	}
 	for k, v := range req.ExtraBody {
 		if _, exists := body[k]; !exists {

@@ -145,7 +145,15 @@ func (o *SubagentOrchestrator) OnContentFinal(context.Context, *events.ResponseM
 
 func (o *SubagentOrchestrator) OnFinalResponse(context.Context, string, *events.ResponseMetadata) {}
 
-func (o *SubagentOrchestrator) BeforeToolUse(context.Context, string, []string) {}
+func (o *SubagentOrchestrator) BeforeToolUse(_ context.Context, content string, descriptions []string) {
+	if o.emit == nil || len(descriptions) == 0 {
+		return
+	}
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		o.emit.Output("\n")
+	}
+	o.emit.Output(strings.Join(descriptions, "\n"))
+}
 
 func (o *SubagentOrchestrator) DispatchTools(ctx context.Context, calls []preparedToolCall) ([]llm.CallOutcome, error) {
 	return runDispatch(ctx, calls)
