@@ -111,7 +111,7 @@ export async function listTabs(
 
 export async function newTab(scopeId: string, url: string): Promise<{ tab_ref: string }> {
   const scope = await scopeFor(scopeId);
-  const options: chrome.tabs.CreateProperties = { url: validateURL(url || "about:blank"), active: false };
+  const options: chrome.tabs.CreateProperties = { url: validateURL(url), active: false };
   if (scope.windowId) options.windowId = scope.windowId;
   const tab = await chrome.tabs.create(options);
   const ref = await assignTab(scopeId, tab.id!);

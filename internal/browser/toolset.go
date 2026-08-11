@@ -110,7 +110,7 @@ func (c *ExtensionClient) registerNavigate(registry *tools.Registry) {
 		Description: "Navigate a tab: go to a URL, open a new tab, or traverse history.\n\n" +
 			"Actions:\n" +
 			"• 'go' (default) — navigate tab to url. Requires tab + url.\n" +
-			"• 'new' — create a new tab. url is optional (defaults to about:blank).\n" +
+			"• 'new' — create a new tab. Requires url.\n" +
 			"• 'back' — go back in history. Requires tab.\n" +
 			"• 'forward' — go forward in history. Requires tab.\n" +
 			"• 'reload' — reload the page. Requires tab.\n\n" +
@@ -120,7 +120,7 @@ func (c *ExtensionClient) registerNavigate(registry *tools.Registry) {
 			"required": []string{},
 			"properties": map[string]any{
 				"tab":    map[string]any{"type": "string", "description": "A tab returned by browser_tabs. Required except when action='new'."},
-				"url":    map[string]any{"type": "string", "description": "Absolute URL. Required for action='go', optional for action='new'."},
+				"url":    map[string]any{"type": "string", "description": "Absolute URL."},
 				"action": map[string]any{"type": "string", "description": "One of: go, new, back, forward, reload. Defaults to 'go'."},
 			},
 		},
@@ -314,6 +314,7 @@ type navigateParams struct {
 func (p *navigateParams) validate() error {
 	switch p.Action {
 	case "new":
+		return requireBrowserParam("browser_navigate", "url", p.URL)
 	case "back", "forward", "reload":
 		return requireBrowserParam("browser_navigate", "tab", p.Tab)
 	default:
