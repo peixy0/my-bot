@@ -52,7 +52,7 @@ func (o *Outbound) registerAddReaction(r *tools.Registry) {
 			return tools.PreparedTool{}, fmt.Errorf("emoji must not be empty")
 		}
 		return tools.PreparedTool{
-			Description: fmt.Sprintf("Adding %s reaction", p.Emoji),
+			Description: "",
 			Execute: func(ctx context.Context) (tools.ToolResult, error) {
 				if err := messaging.CallWithTimeout(ctx, 10*time.Second, func(ctx context.Context) error {
 					return o.addReaction(ctx, p.MessageID, p.Emoji)

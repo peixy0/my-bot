@@ -270,7 +270,7 @@ func TestHumanInputOrchestrator_PreservesEmptyDescriptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
-	if fmt.Sprint(sender.deltas) != fmt.Sprint([]string{"\n\nCalling unknown tool: \"missing\""}) {
+	if fmt.Sprint(sender.deltas) != fmt.Sprint([]string{"Calling unknown tool: \"missing\""}) {
 		t.Fatalf("unexpected descriptions: %v", sender.deltas)
 	}
 	if outcomes[1].Err == nil {

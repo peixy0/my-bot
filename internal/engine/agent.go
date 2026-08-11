@@ -69,9 +69,11 @@ func prepareToolCalls(r *tools.Registry, calls []llm.ToolCall) []preparedToolCal
 }
 
 func toolDescriptions(calls []preparedToolCall) []string {
-	descriptions := make([]string, len(calls))
-	for i, call := range calls {
-		descriptions[i] = call.tool.Description
+	descriptions := make([]string, 0, len(calls))
+	for _, call := range calls {
+		if call.tool.Description != "" {
+			descriptions = append(descriptions, call.tool.Description)
+		}
 	}
 	return descriptions
 }
