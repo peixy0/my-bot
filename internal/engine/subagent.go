@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"my-bot/internal/llm"
@@ -200,6 +201,7 @@ func (s *FleetToolset) Register(r *tools.Registry) {
 		if len(p.Tasks) == 0 {
 			return tools.PreparedTool{}, fmt.Errorf("tasks must not be empty")
 		}
+		fleetNames := make([]string, 0, len(p.Tasks))
 		for _, task := range p.Tasks {
 			if task.Name == "" {
 				return tools.PreparedTool{}, fmt.Errorf("tasks must not contain empty names")
@@ -207,9 +209,10 @@ func (s *FleetToolset) Register(r *tools.Registry) {
 			if task.Task == "" {
 				return tools.PreparedTool{}, fmt.Errorf("tasks must not contain empty tasks")
 			}
+			fleetNames = append(fleetNames, task.Name)
 		}
 		return tools.PreparedTool{
-			Description: fmt.Sprintf("Starting %d agent tasks", len(p.Tasks)),
+			Description: fmt.Sprintf("Starting fleet: %s", strings.Join(fleetNames, " ")),
 			Execute: func(ctx context.Context) (tools.ToolResult, error) {
 				slog.Debug("fleet start", "tasks", len(p.Tasks))
 				taskIDs, err := s.runner.startFleetTask(ctx, p.SystemPrompt, p.Tasks)
