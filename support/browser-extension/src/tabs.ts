@@ -76,7 +76,7 @@ export async function resolveTab(scopeId: string, tabRef?: string): Promise<chro
     throw new Error("tab_ref is invalid");
   }
   const tabId = tabRef ? scope.refs[tabRef] : scope.activeTabId || firstTabId(scope);
-  if (!tabId) throw new Error("browser scope has no tabs");
+  if (!tabId) throw new Error("browser scope doesn't have the required tab");
   if (!Object.values(scope.refs).includes(tabId)) {
     throw new Error("tab is not owned by this browser scope");
   }
