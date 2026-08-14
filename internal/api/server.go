@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -27,27 +29,27 @@ const (
 )
 
 type Server struct {
-	inbox         inbox.Inbox[events.AgentEvent]
-	indexHTMLPath string
-	rt            runtime.Runtime
-	mux           *http.ServeMux
-	token         string
+	inbox      inbox.Inbox[events.AgentEvent]
+	assetsPath string
+	rt         runtime.Runtime
+	mux        *http.ServeMux
+	token      string
 }
 
 type ServerOptions struct {
-	Token         string
-	IndexHTMLPath string
+	Token      string
+	AssetsPath string
 }
 
 func NewServer(agentInbox inbox.Inbox[events.AgentEvent], rt runtime.Runtime, opts ServerOptions) *Server {
 	s := &Server{
-		inbox:         agentInbox,
-		indexHTMLPath: opts.IndexHTMLPath,
-		rt:            rt,
-		mux:           http.NewServeMux(),
-		token:         opts.Token,
+		inbox:      agentInbox,
+		assetsPath: opts.AssetsPath,
+		rt:         rt,
+		mux:        http.NewServeMux(),
+		token:      opts.Token,
 	}
-	s.mux.HandleFunc("/", s.handleRoot)
+	s.mux.HandleFunc("/", s.handleFrontend)
 	s.mux.HandleFunc("/api/health", s.handleHealth)
 	s.mux.HandleFunc("/api/bot", s.handleWS)
 	return s
@@ -69,18 +71,32 @@ func (s *Server) Run(ctx context.Context, addr string) error {
 func (s *Server) nextChatID() string {
 	return fmt.Sprintf("session-%s", uuid.NewString())
 }
-func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
-	if !s.authorized(r) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+func (s *Server) handleFrontend(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/api/") {
+		http.NotFound(w, r)
 		return
 	}
-	data, err := os.ReadFile(s.indexHTMLPath)
-	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", http.MethodGet+", "+http.MethodHead)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html")
-	_, _ = w.Write(data)
+
+	relativePath := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+	if relativePath == "" {
+		relativePath = "index.html"
+	}
+	assetPath := filepath.Join(s.assetsPath, filepath.FromSlash(relativePath))
+	info, err := os.Stat(assetPath)
+	if err == nil && !info.IsDir() {
+		http.ServeFile(w, r, assetPath)
+		return
+	}
+	if path.Ext(relativePath) != "" {
+		http.NotFound(w, r)
+		return
+	}
+	http.ServeFile(w, r, filepath.Join(s.assetsPath, "index.html"))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

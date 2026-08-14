@@ -53,6 +53,7 @@ func TestConfigValidateRejectsInvalidValues(t *testing.T) {
 		{"limiter burst", func(c *Config) { c.Limiter = &LimiterConfig{RPM: 1, Burst: 0} }},
 		{"webui host", func(c *Config) { c.WebUI.Host = "" }},
 		{"webui port", func(c *Config) { c.WebUI.Port = 70000 }},
+		{"webui assets", func(c *Config) { c.WebUI.Assets = "" }},
 		{"browser bad address", func(c *Config) {
 			c.Browser = &BrowserConfig{Enabled: true, ListenAddr: "bad", Path: "/browser"}
 		}},

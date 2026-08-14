@@ -16,6 +16,7 @@ An event-driven AI agent framework in Go. Connects messaging platforms (Feishu/L
 
 ```bash
 # Build
+(cd support/webui && npm ci && npm run build)
 go build -o bot ./cmd/bot
 
 # Write your config (see "config.example.yaml" for the full schema)
@@ -73,9 +74,13 @@ webui:
   enabled: true
   host: 127.0.0.1
   port: 8017
-  token: change-me        # optional; gates http://host:port/?token=... and ws://...?token=...
-  index_html_path: ../chat.html  # path to the WebUI HTML file
+  token: change-me                    # optional; gates ws://host:port/api/bot?token=...
+  assets: ../support/webui/dist       # Vite build output, relative to workspace.cwd
 ```
+
+Build the WebUI with `npm ci && npm run build` in `support/webui` before starting the bot. The generated `dist` directory is not committed.
+
+Run the frontend quality checks with `npm run check`. ESLint uses type-aware TypeScript, React Hooks, React Refresh, and JSX accessibility rules; `npm run format` applies Prettier.
 
 Other notable sections (defaults shown):
 

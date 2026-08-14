@@ -109,11 +109,11 @@ type WeChatConfig struct {
 }
 
 type WebUIConfig struct {
-	Enabled       bool   `yaml:"enabled"`
-	Host          string `yaml:"host"`
-	Port          int    `yaml:"port"`
-	Token         string `yaml:"token"`
-	IndexHTMLPath string `yaml:"index_html_path"`
+	Enabled bool   `yaml:"enabled"`
+	Host    string `yaml:"host"`
+	Port    int    `yaml:"port"`
+	Token   string `yaml:"token"`
+	Assets  string `yaml:"assets"`
 }
 
 type HeartbeatConfig struct {
@@ -259,10 +259,10 @@ func defaultConfig() *Config {
 			CompressionToolResultTruncate: 2000,
 		},
 		WebUI: WebUIConfig{
-			Enabled:       true,
-			Host:          "127.0.0.1",
-			Port:          8017,
-			IndexHTMLPath: "../chat.html",
+			Enabled: true,
+			Host:    "127.0.0.1",
+			Port:    8017,
+			Assets:  "../support/webui/dist",
 		},
 	}
 }
@@ -341,6 +341,9 @@ func (c *Config) Validate() error {
 		}
 		if c.WebUI.Port < 1 || c.WebUI.Port > 65535 {
 			return fmt.Errorf("webui.port must be between 1 and 65535")
+		}
+		if strings.TrimSpace(c.WebUI.Assets) == "" {
+			return fmt.Errorf("webui.assets is required when webui.enabled=true")
 		}
 	}
 	for name := range c.Presets {

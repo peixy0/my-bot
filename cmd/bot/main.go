@@ -113,8 +113,8 @@ func main() {
 
 	if cfg.WebUI.Enabled {
 		srv := api.NewServer(mainInbox, rt, api.ServerOptions{
-			Token:         cfg.WebUI.Token,
-			IndexHTMLPath: cfg.WebUI.IndexHTMLPath,
+			Token:      cfg.WebUI.Token,
+			AssetsPath: cfg.WebUI.Assets,
 		})
 		addr := fmt.Sprintf("%s:%d", cfg.WebUI.Host, cfg.WebUI.Port)
 		go func() {

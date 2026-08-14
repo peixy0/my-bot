@@ -75,7 +75,7 @@ webui:
   host: "127.0.0.1"
   port: 8017
   token: ""
-  index_html_path: "../chat.html"
+  assets: "../support/webui/dist"
 
 heartbeat:
   interval_seconds: 1800

@@ -77,7 +77,7 @@ internal/
   util/
     encode.go            ← ToJSON / ToJSONIndent (HTML escape off)
   api/
-    server.go            ← HTTP + WebSocket server (chat.html frontend)
+    server.go            ← HTTP + WebSocket server (serves support/webui build)
 ```
 
 ### Data Flow
@@ -344,4 +344,4 @@ go build -o bot ./cmd/bot
 | Add subagent/fleet tool | `internal/engine/subagent.go` |
 | Tune LLM HTTP behavior | `internal/llm/openai.go` (retry, streaming, extra_body passthrough) |
 | Adjust dedup TTL / capacity | `internal/messaging/dedup/dedup.go` |
-| Frontend chat UI | `chat.html` + `internal/api/server.go` |
+| Frontend chat UI | `support/webui/` + `internal/api/server.go` |

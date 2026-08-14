@@ -1,0 +1,15 @@
+@font-face {
+  font-family: 'Commissioner Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/commissioner/files/commissioner-latin-wght-normal.woff2') format('woff2-variations');
+}
+
+@font-face {
+  font-family: 'Spline Sans Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 700;
+  src: url('@fontsource-variable/spline-sans/files/spline-sans-latin-wght-normal.woff2') format('woff2-variations');
+}
