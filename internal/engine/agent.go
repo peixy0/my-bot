@@ -404,3 +404,12 @@ func (l *AgentLoop) LoadConversation(path string) error {
 	l.conv = &conv
 	return nil
 }
+
+func (l *AgentLoop) HasConversation() bool {
+	return len(l.conv.Messages) > 0
+}
+
+func (l *AgentLoop) TrimLastMessage() {
+	i := findLastGroupStart(l.conv.Messages)
+	l.conv.Messages = l.conv.Messages[:i]
+}

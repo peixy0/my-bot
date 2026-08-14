@@ -110,6 +110,10 @@ type CompressCommand struct {
 	Sender Outbound
 }
 
+type DebugTrimLastMessage struct {
+	Sender Outbound
+}
+
 type RebootCommand struct {
 	ID     string
 	Result chan<- error
@@ -119,17 +123,18 @@ func (TextInputEvent) agentEvent()   {}
 func (ImageInputEvent) agentEvent()  {}
 func (DropSessionEvent) agentEvent() {}
 
-func (TextInputEvent) messageEvent()   {}
-func (ImageInputEvent) messageEvent()  {}
-func (HeartbeatEvent) workerEvent()    {}
-func (CronEvent) workerEvent()         {}
-func (NewSessionEvent) workerEvent()   {}
-func (ConfigQueryEvent) workerEvent()  {}
-func (ConfigChangeEvent) workerEvent() {}
-func (DumpCommand) workerEvent()       {}
-func (ResumeCommand) workerEvent()     {}
-func (CompressCommand) workerEvent()   {}
-func (RebootCommand) workerEvent()     {}
+func (TextInputEvent) messageEvent()      {}
+func (ImageInputEvent) messageEvent()     {}
+func (HeartbeatEvent) workerEvent()       {}
+func (CronEvent) workerEvent()            {}
+func (NewSessionEvent) workerEvent()      {}
+func (ConfigQueryEvent) workerEvent()     {}
+func (ConfigChangeEvent) workerEvent()    {}
+func (DumpCommand) workerEvent()          {}
+func (ResumeCommand) workerEvent()        {}
+func (CompressCommand) workerEvent()      {}
+func (DebugTrimLastMessage) workerEvent() {}
+func (RebootCommand) workerEvent()        {}
 
 type QueuedInputEvent struct {
 	ChatID    string

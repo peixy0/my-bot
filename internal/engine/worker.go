@@ -171,6 +171,8 @@ func (w *ConversationWorker) processControlEvent(ctx context.Context, event even
 		return false, w.processDump(ctx, ev)
 	case events.ResumeCommand:
 		return false, w.processResume(ctx, ev)
+	case events.DebugTrimLastMessage:
+		return false, w.processTrimLastMessage(ctx, ev)
 	case events.RebootCommand:
 		w.processReboot(ev)
 		return true, nil
@@ -357,6 +359,16 @@ func (w *ConversationWorker) processConfigChange(ctx context.Context, ev events.
 		w.SetContextWindow(value)
 		ev.Sender.Send(ctx, fmt.Sprintf("context_window set to: %d", value))
 	}
+	return nil
+}
+
+func (w *ConversationWorker) processTrimLastMessage(ctx context.Context, ev events.DebugTrimLastMessage) error {
+	if !w.loop.HasConversation() {
+		ev.Sender.Send(ctx, "no conversation to trim")
+		return nil
+	}
+	w.loop.TrimLastMessage()
+	ev.Sender.Send(ctx, "done")
 	return nil
 }
 

@@ -57,3 +57,18 @@ func TestAgentLoopLoadConversationInvalidJSONDoesNotOverwrite(t *testing.T) {
 		t.Fatalf("conversation was overwritten: %#v", loop.conv.Messages)
 	}
 }
+
+func TestAgentLoopTrimLastMessage(t *testing.T) {
+	loop := NewAgentLoop(&config.Config{}, NewAgent(nil, nil))
+	loop.conv.Messages = []llm.ChatMessage{
+		{Role: "assistant", Content: "calling tools"},
+		{Role: "tool", Content: "tool result"},
+		{Role: "tool", Content: "tool result2"},
+	}
+
+	loop.TrimLastMessage()
+
+	if len(loop.conv.Messages) != 0 {
+		t.Fatalf("expected 0 messages, got %d", len(loop.conv.Messages))
+	}
+}

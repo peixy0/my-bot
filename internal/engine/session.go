@@ -126,7 +126,8 @@ func isControlEvent(ev events.WorkerEvent) bool {
 		events.ConfigChangeEvent,
 		events.DumpCommand,
 		events.ResumeCommand,
-		events.RebootCommand:
+		events.RebootCommand,
+		events.DebugTrimLastMessage:
 		return true
 	default:
 		return false

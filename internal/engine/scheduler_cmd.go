@@ -93,6 +93,8 @@ func (s *Scheduler) handleSlashCommand(ctx context.Context, cmd string, e events
 	case "session":
 		e.Sender.Send(ctx, fmt.Sprintf("current session: %s", e.ChatID))
 		return nil
+	case "trimlast":
+		s.getOrCreateSession(ctx, e.ChatID).publishEvent(events.DebugTrimLastMessage{Sender: e.Sender})
 	case "abort":
 		if !s.getOrCreateSession(ctx, e.ChatID).tryAbort() {
 			e.Sender.Send(ctx, "no active conversation")
