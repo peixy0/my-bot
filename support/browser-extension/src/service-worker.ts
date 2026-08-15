@@ -254,7 +254,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function sendResult(requestId: string, result: unknown): void {
-  send({ type: "response", id: requestId, data: JSON.stringify(result, null, 2), has_more: false });
+  send({ type: "response", id: requestId, data: JSON.stringify(result, null), has_more: false });
 }
 
 console.info("[My Bot] Service worker loaded.");
