@@ -26,6 +26,19 @@ type ReadFileResult struct {
 	ReturnedLines int
 }
 
+type ReadFileRangeResult struct {
+	Content       string
+	TotalBytes    int64
+	StartByte     int64
+	ReturnedBytes int
+	NextByte      int64
+	EndOfFile     bool
+}
+
+type FileRangeReader interface {
+	ReadFileRange(ctx context.Context, filename string, startByte int64, limit int) (ReadFileRangeResult, error)
+}
+
 type Edit struct {
 	Search  string
 	Replace string

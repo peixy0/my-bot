@@ -18,6 +18,18 @@ func formatReadFileResult(filename string, res runtime.ReadFileResult) string {
 	return sb.String()
 }
 
+func formatReadFileRangeResult(filename string, res runtime.ReadFileRangeResult) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "filename: %s\n", filename)
+	fmt.Fprintf(&sb, "total_bytes: %d\n", res.TotalBytes)
+	fmt.Fprintf(&sb, "start_byte: %d\n", res.StartByte)
+	fmt.Fprintf(&sb, "returned_bytes: %d\n", res.ReturnedBytes)
+	fmt.Fprintf(&sb, "next_byte: %d\n", res.NextByte)
+	fmt.Fprintf(&sb, "end_of_file: %t\n", res.EndOfFile)
+	fmt.Fprintf(&sb, "content:\n%s", res.Content)
+	return sb.String()
+}
+
 func formatSkillResult(skill *Skill) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "name: %s\n", skill.Name)

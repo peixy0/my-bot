@@ -36,6 +36,9 @@ func (d *DefaultToolset) Register(r *Registry) {
 	}
 	d.registerFetch(r)
 	d.registerReadFile(r)
+	if rangeReader, ok := d.rt.(runtime.FileRangeReader); ok {
+		d.registerReadFileRange(r, rangeReader)
+	}
 	d.registerWriteFile(r)
 	d.registerAppendFile(r)
 	d.registerEditFile(r)
@@ -130,7 +133,7 @@ func (d *DefaultToolset) registerFetch(r *Registry) {
 func (d *DefaultToolset) registerReadFile(r *Registry) {
 	r.Register(ToolSchema{
 		Name:        "read_file",
-		Description: "Read a text file from the workspace, with optional line-range pagination.\n\nALWAYS use this instead of running cat/head/tail/sed via run_command(). Returns content with 1-based line numbers so you can reference exact locations when using edit_file().\n\nFor large files, paginate with start_line and limit. Do NOT use this for binary files.",
+		Description: "Read a text file from the workspace by line range. Returns content with 1-based line metadata for locating exact text before edit_file(). Use start_line and limit to paginate ordinary source files. For a very long single line or when line pagination cannot make progress, use read_file_range() instead. Do NOT use this for binary files or as a substitute for read_file_range() when the problem is byte-level positioning.",
 		Parallel:    true,
 		ParameterDesc: (map[string]any{
 			"type": "object",
@@ -174,6 +177,69 @@ func (d *DefaultToolset) registerReadFile(r *Registry) {
 					return ErrorResult(fmt.Errorf("read file %s: %w", p.Filename, err)), nil
 				}
 				return TextResult(formatReadFileResult(p.Filename, res)), nil
+			},
+		}, nil
+	})
+}
+
+func (d *DefaultToolset) registerReadFileRange(r *Registry, rangeReader runtime.FileRangeReader) {
+	r.Register(ToolSchema{
+		Name:        "read_file_range",
+		Description: "Read a raw byte range from a text file. Use this for files with extremely long lines, minified/generated content, or when read_file() cannot make useful progress because its line-based output is truncated. Continue reading with the returned next_byte value. The range is byte-based, not character-based; do not use this when you need 1-based line numbers for edit_file(). Do NOT use this for binary files.",
+		Parallel:    true,
+		ParameterDesc: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"filename": map[string]any{
+					"type":        "string",
+					"description": "Path to the file, relative to the cwd or use absolute path.",
+				},
+				"start_byte": map[string]any{
+					"type":        "integer",
+					"minimum":     0,
+					"default":     0,
+					"description": "Zero-based byte offset to start reading from. Use next_byte from the previous result to continue.",
+				},
+				"limit": map[string]any{
+					"type":        "integer",
+					"minimum":     1,
+					"maximum":     d.cfg.Tool.MaxOutputChars,
+					"default":     4096,
+					"description": fmt.Sprintf("Maximum number of bytes to return (default: 4096, maximum: %d).", d.cfg.Tool.MaxOutputChars),
+				},
+			},
+			"required": []string{"filename"},
+		},
+	}, func(args []byte) (PreparedTool, error) {
+		var p struct {
+			Filename  string `json:"filename"`
+			StartByte int64  `json:"start_byte"`
+			Limit     int    `json:"limit"`
+		}
+		p.Limit = 4096
+		if err := json.Unmarshal(args, &p); err != nil {
+			return PreparedTool{}, fmt.Errorf("parse read_file_range args: %w", err)
+		}
+		if p.Filename == "" {
+			return PreparedTool{}, fmt.Errorf("read_file_range filename must not be empty")
+		}
+		if p.StartByte < 0 {
+			return PreparedTool{}, fmt.Errorf("read_file_range start_byte must not be negative")
+		}
+		if p.Limit < 1 {
+			return PreparedTool{}, fmt.Errorf("read_file_range limit must be positive")
+		}
+		if p.Limit > d.cfg.Tool.MaxOutputChars {
+			return PreparedTool{}, fmt.Errorf("read_file_range limit must not exceed %d", d.cfg.Tool.MaxOutputChars)
+		}
+		return PreparedTool{
+			Description: fmt.Sprintf("Reading byte range from %s", p.Filename),
+			Execute: func(ctx context.Context) (ToolResult, error) {
+				res, err := rangeReader.ReadFileRange(ctx, p.Filename, p.StartByte, p.Limit)
+				if err != nil {
+					return ErrorResult(fmt.Errorf("read file range %s: %w", p.Filename, err)), nil
+				}
+				return TextResult(formatReadFileRangeResult(p.Filename, res)), nil
 			},
 		}, nil
 	})

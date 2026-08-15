@@ -236,7 +236,7 @@ These are known design weaknesses that are not bugs but will increase maintenanc
 
 ### LOW: Host/Container read-path duplication
 
-`ProcessHandle` construction is shared through `newProcessHandle`. `ReadFile` post-processing remains duplicated; the implementations differ in file I/O primitives (`os.ReadFile` vs `cat`) and command scaffolding. Extract the remaining shared read post-processing only when that code changes again.
+`ProcessHandle` construction is shared through `newProcessHandle`. `ReadFile` post-processing remains duplicated; the implementations differ in file I/O primitives (`os.ReadFile` vs `cat`) and command scaffolding. `read_file_range` is implemented by the optional `runtime.FileRangeReader` capability so test doubles and future runtimes do not have to grow the monolithic `Runtime` interface. Extract the remaining shared read post-processing only when that code changes again.
 
 ### LOW: Inconsistent retry policies across messaging channels
 

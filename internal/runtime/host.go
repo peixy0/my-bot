@@ -102,6 +102,38 @@ func (r *HostRuntime) ReadFile(ctx context.Context, filename string, startLine, 
 	}, nil
 }
 
+func (r *HostRuntime) ReadFileRange(ctx context.Context, filename string, startByte int64, limit int) (ReadFileRangeResult, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return ReadFileRangeResult{}, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return ReadFileRangeResult{}, err
+	}
+	if startByte < 0 {
+		startByte = 0
+	}
+	if startByte > info.Size() {
+		startByte = info.Size()
+	}
+	if _, err := file.Seek(startByte, io.SeekStart); err != nil {
+		return ReadFileRangeResult{}, err
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	data := make([]byte, limit)
+	n, err := io.ReadFull(file, data)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return ReadFileRangeResult{}, err
+	}
+	data = data[:n]
+	next := startByte + int64(n)
+	return ReadFileRangeResult{Content: string(data), TotalBytes: info.Size(), StartByte: startByte, ReturnedBytes: n, NextByte: next, EndOfFile: next >= info.Size()}, nil
+}
+
 func (r *HostRuntime) WriteFile(ctx context.Context, filename, content string) error {
 	if err := os.MkdirAll(filepath.Dir(filename), 0755); err != nil {
 		return err

@@ -111,3 +111,42 @@ exec "$@"
 		t.Fatalf("stderr = %q", got.Stderr)
 	}
 }
+
+func TestHostRuntimeReadFileRangeReadsByteWindows(t *testing.T) {
+	root := t.TempDir()
+	filename := filepath.Join(root, "long.txt")
+	want := "prefix-" + strings.Repeat("x", 10000) + "-suffix"
+	if err := os.WriteFile(filename, []byte(want), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rt := NewHostRuntime(1024)
+	first, err := rt.ReadFileRange(context.Background(), filename, 0, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Content != "prefix-" || first.TotalBytes != int64(len(want)) || first.NextByte != 7 || first.EndOfFile {
+		t.Fatalf("unexpected first range: %#v", first)
+	}
+	second, err := rt.ReadFileRange(context.Background(), filename, first.NextByte, len(want))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Content != want[7:] || !second.EndOfFile || second.NextByte != int64(len(want)) {
+		t.Fatalf("unexpected second range: %#v", second)
+	}
+}
+
+func TestHostRuntimeReadFileRangeClampsOffsets(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "short.txt")
+	if err := os.WriteFile(filename, []byte("abc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := NewHostRuntime(1024).ReadFileRange(context.Background(), filename, 99, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.StartByte != 3 || got.NextByte != 3 || got.ReturnedBytes != 0 || !got.EndOfFile {
+		t.Fatalf("unexpected clamped range: %#v", got)
+	}
+}

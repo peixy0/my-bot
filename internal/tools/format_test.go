@@ -204,3 +204,27 @@ func TestFormatSkillResultEmptyFields(t *testing.T) {
 		t.Fatalf("expected output to end with empty instructions section, got:\n%s", got)
 	}
 }
+
+func TestFormatReadFileRangeResult(t *testing.T) {
+	got := formatReadFileRangeResult("long.txt", runtime.ReadFileRangeResult{
+		Content:       "abc",
+		TotalBytes:    10,
+		StartByte:     4,
+		ReturnedBytes: 3,
+		NextByte:      7,
+		EndOfFile:     false,
+	})
+	for _, want := range []string{
+		"filename: long.txt",
+		"total_bytes: 10",
+		"start_byte: 4",
+		"returned_bytes: 3",
+		"next_byte: 7",
+		"end_of_file: false",
+		"content:\nabc",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatted result missing %q: %q", want, got)
+		}
+	}
+}

@@ -129,6 +129,39 @@ func (r *ContainerRuntime) ReadFile(ctx context.Context, filename string, startL
 	}, nil
 }
 
+func (r *ContainerRuntime) ReadFileRange(ctx context.Context, filename string, startByte int64, limit int) (ReadFileRangeResult, error) {
+	res, err := r.Execute(ctx, nil, "wc", "-c", "--", filename)
+	if err != nil {
+		return ReadFileRangeResult{}, err
+	}
+	if res.ReturnCode != 0 {
+		return ReadFileRangeResult{}, fmt.Errorf("stat failed: %s", strings.TrimSpace(res.Stderr))
+	}
+	var total int64
+	if _, err := fmt.Sscanf(strings.TrimSpace(res.Stdout), "%d", &total); err != nil {
+		return ReadFileRangeResult{}, fmt.Errorf("parse file size: %w", err)
+	}
+	if startByte < 0 {
+		startByte = 0
+	}
+	if startByte > total {
+		startByte = total
+	}
+	if limit < 0 {
+		limit = 0
+	}
+	res, err = r.Execute(ctx, nil, "dd", "if="+filename, "bs=1", "skip="+fmt.Sprint(startByte), "count="+fmt.Sprint(limit), "status=none")
+	if err != nil {
+		return ReadFileRangeResult{}, err
+	}
+	if res.ReturnCode != 0 {
+		return ReadFileRangeResult{}, fmt.Errorf("read range failed: %s", strings.TrimSpace(res.Stderr))
+	}
+	n := len(res.Stdout)
+	next := startByte + int64(n)
+	return ReadFileRangeResult{Content: res.Stdout, TotalBytes: total, StartByte: startByte, ReturnedBytes: n, NextByte: next, EndOfFile: next >= total}, nil
+}
+
 func (r *ContainerRuntime) WriteFile(ctx context.Context, filename, content string) error {
 	res, err := r.Execute(ctx, nil, "mkdir", "-p", "--", path.Dir(filename))
 	if err != nil {

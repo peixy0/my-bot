@@ -22,6 +22,7 @@ func TestDefaultToolPreparersRejectMissingRequiredArguments(t *testing.T) {
 		"web_search",
 		"fetch",
 		"read_file",
+		"read_file_range",
 		"write_file",
 		"append_file",
 		"edit_file",
@@ -53,6 +54,14 @@ func TestDefaultToolPreparerRejectsMalformedJSON(t *testing.T) {
 	if _, err := preparer([]byte(`{`)); err == nil {
 		t.Fatal("expected malformed JSON error")
 	}
+
+	rangePreparer, ok := registry.Get("read_file_range")
+	if !ok {
+		t.Fatal("read_file_range was not registered")
+	}
+	if _, err := rangePreparer([]byte(`{"filename":"x","start_byte":-1}`)); err == nil {
+		t.Fatal("expected negative start_byte error")
+	}
 }
 
 func TestEditFilePreparerAllowsEmptyReplacement(t *testing.T) {
@@ -69,5 +78,19 @@ func TestEditFilePreparerAllowsEmptyReplacement(t *testing.T) {
 	}
 	if prepared.Description == "" || prepared.Execute == nil {
 		t.Fatalf("unexpected prepared edit_file: %#v", prepared)
+	}
+}
+
+type runtimeWithoutFileRange struct {
+	runtime.Runtime
+}
+
+func TestDefaultToolsetOmitsReadFileRangeWithoutCapability(t *testing.T) {
+	cfg := &config.Config{Tool: config.ToolConfig{MaxOutputChars: 4096}}
+	registry := NewRegistry()
+	rt := runtimeWithoutFileRange{Runtime: runtime.NewHostRuntime(4096)}
+	NewDefaultToolset(rt, NewSkillLoader(""), cfg).Register(registry)
+	if _, ok := registry.Get("read_file_range"); ok {
+		t.Fatal("read_file_range should not be registered without FileRangeReader capability")
 	}
 }
