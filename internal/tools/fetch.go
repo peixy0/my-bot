@@ -18,11 +18,12 @@ import (
 
 type Fetcher struct {
 	client         *http.Client
-	rt             runtime.Runtime
+	fs             runtime.FileSystem
+	truncater      runtime.Truncater
 	maxOutputChars int
 }
 
-func NewFetcher(rt runtime.Runtime, proxyURL string, maxOutputChars int) *Fetcher {
+func NewFetcher(fs runtime.FileSystem, truncater runtime.Truncater, proxyURL string, maxOutputChars int) *Fetcher {
 	transport := &http.Transport{}
 	if proxyURL != "" {
 		u, err := url.Parse(proxyURL)
@@ -37,7 +38,8 @@ func NewFetcher(rt runtime.Runtime, proxyURL string, maxOutputChars int) *Fetche
 			Transport: transport,
 			Timeout:   3 * time.Minute,
 		},
-		rt:             rt,
+		fs:             fs,
+		truncater:      truncater,
 		maxOutputChars: maxOutputChars,
 	}
 }
@@ -73,13 +75,13 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (ToolResult, error) 
 		if err != nil {
 			return ErrorResult(fmt.Errorf("failed to convert HTML to Markdown: %w", err)), nil
 		}
-		return TextResult(f.rt.Truncate(ctx, string(markdown), f.maxOutputChars)), nil
+		return TextResult(f.truncater.Truncate(ctx, string(markdown), f.maxOutputChars)), nil
 
 	case "text/markdown", "text/x-markdown", "text/plain", "application/json":
-		return TextResult(f.rt.Truncate(ctx, string(body), f.maxOutputChars)), nil
+		return TextResult(f.truncater.Truncate(ctx, string(body), f.maxOutputChars)), nil
 
 	default:
-		path, err := f.rt.WriteTmpFile(ctx, string(body))
+		path, err := f.fs.WriteTmpFile(ctx, string(body))
 		if err != nil {
 			return TextResult(fmt.Sprintf("Content-Type: %s\n\n[output not readable]", contentType)), nil
 		}

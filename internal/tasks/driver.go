@@ -15,9 +15,9 @@ func (d FuncDriver) Start(ctx context.Context, info TaskInfo, emit *Emitter) (Co
 	return d(ctx, info, emit)
 }
 
-func NewProcessDriver(rt runtime.Runtime, command string) Driver {
+func NewProcessDriver(executor runtime.Executor, command string) Driver {
 	return FuncDriver(func(ctx context.Context, _ TaskInfo, emit *Emitter) (Controller, error) {
-		proc, err := rt.Spawn(ctx, command)
+		proc, err := executor.Spawn(ctx, command)
 		if err != nil {
 			return nil, err
 		}

@@ -35,10 +35,6 @@ type ReadFileRangeResult struct {
 	EndOfFile     bool
 }
 
-type FileRangeReader interface {
-	ReadFileRange(ctx context.Context, filename string, startByte int64, limit int) (ReadFileRangeResult, error)
-}
-
 type Edit struct {
 	Search  string
 	Replace string
@@ -89,20 +85,41 @@ func newProcessHandle(cmd *exec.Cmd, stdin io.WriteCloser, stdout, stderr io.Rea
 	}
 }
 
-type Runtime interface {
-	Truncate(ctx context.Context, text string, limit int) string
-	TruncateTail(ctx context.Context, text string, limit int) string
+type Executor interface {
 	ExecuteTruncated(ctx context.Context, stdin io.Reader, command ...string) (ExecResult, error)
 	Execute(ctx context.Context, stdin io.Reader, command ...string) (ExecResult, error)
 	Spawn(ctx context.Context, command string) (*ProcessHandle, error)
+}
+
+type FileSystem interface {
 	ReadRawBytes(ctx context.Context, filename string) ([]byte, error)
 	ReadFile(ctx context.Context, filename string, startLine, limit int) (ReadFileResult, error)
+	ReadFileRange(ctx context.Context, filename string, startByte int64, limit int) (ReadFileRangeResult, error)
 	WriteFile(ctx context.Context, filename, content string) error
 	WriteTmpFile(ctx context.Context, content string) (string, error)
 	AppendFile(ctx context.Context, filename, content string) error
-	Glob(ctx context.Context, pattern string, limit int) (GlobResult, error)
 	EditFile(ctx context.Context, filename string, edits []Edit) error
+}
+
+type Globber interface {
+	Glob(ctx context.Context, pattern string, limit int) (GlobResult, error)
+}
+
+type Truncater interface {
+	Truncate(ctx context.Context, text string, limit int) string
+	TruncateTail(ctx context.Context, text string, limit int) string
+}
+
+type OSInfoProvider interface {
 	OSInfo(ctx context.Context) (string, error)
+}
+
+type Runtime interface {
+	Executor
+	FileSystem
+	Globber
+	Truncater
+	OSInfoProvider
 }
 
 func truncate(text string, maxChars int) (string, bool) {
@@ -114,7 +131,7 @@ func truncate(text string, maxChars int) (string, bool) {
 
 func truncateWithRedirection(
 	ctx context.Context,
-	rt Runtime,
+	rt FileSystem,
 	text string,
 	maxChars int,
 ) string {
@@ -141,7 +158,7 @@ func truncateTail(text string, maxChars int) (string, bool) {
 
 func truncateTailWithRedirection(
 	ctx context.Context,
-	rt Runtime,
+	rt FileSystem,
 	text string,
 	maxChars int,
 ) string {
@@ -156,7 +173,7 @@ func truncateTailWithRedirection(
 	return fmt.Sprintf("[output truncated; showing the last %d chars; full output saved to %s]\n\n%s", len(short), path, short)
 }
 
-func writeTmpFile(ctx context.Context, rt Runtime, content string) (string, error) {
+func writeTmpFile(ctx context.Context, rt FileSystem, content string) (string, error) {
 	path := fmt.Sprintf("./tmp/output-%s", uuid.NewString())
 	err := rt.WriteFile(ctx, path, content)
 	return path, err
@@ -192,7 +209,7 @@ func truncateLinesWithNote(
 	return content, cursor - start
 }
 
-func runPythonGlob(ctx context.Context, rt Runtime, pattern string, limit int) (GlobResult, error) {
+func runPythonGlob(ctx context.Context, rt Executor, pattern string, limit int) (GlobResult, error) {
 	const pyScript = `import glob, json, sys
 p = sys.argv[1]
 limit = int(sys.argv[2])
@@ -214,7 +231,7 @@ print(json.dumps({'items': items, 'count': len(items), 'exceeds_limit': exceeds}
 	return parsed, nil
 }
 
-func editFile(ctx context.Context, rt Runtime, filename string, edits []Edit) error {
+func editFile(ctx context.Context, rt FileSystem, filename string, edits []Edit) error {
 	data, err := rt.ReadRawBytes(ctx, filename)
 	if err != nil {
 		return err

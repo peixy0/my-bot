@@ -14,7 +14,10 @@ import (
 const maxHTTPBodySize = 1 << 20
 
 type DefaultToolset struct {
-	rt        runtime.Runtime
+	fs        runtime.FileSystem
+	executor  runtime.Executor
+	globber   runtime.Globber
+	truncater runtime.Truncater
 	skills    *SkillLoader
 	cfg       *config.Config
 	webSearch *WebSearch
@@ -22,11 +25,11 @@ type DefaultToolset struct {
 }
 
 func NewDefaultToolset(rt runtime.Runtime, skills *SkillLoader, cfg *config.Config) *DefaultToolset {
-	d := &DefaultToolset{rt: rt, skills: skills, cfg: cfg}
+	d := &DefaultToolset{fs: rt, executor: rt, globber: rt, truncater: rt, skills: skills, cfg: cfg}
 	if cfg.Tool.WebSearchAPI != "" {
 		d.webSearch = NewWebSearch(cfg.Tool.WebSearchAPI)
 	}
-	d.fetcher = NewFetcher(d.rt, cfg.Tool.FetchProxy, cfg.Tool.MaxOutputChars)
+	d.fetcher = NewFetcher(d.fs, d.truncater, cfg.Tool.FetchProxy, cfg.Tool.MaxOutputChars)
 	return d
 }
 
@@ -36,9 +39,7 @@ func (d *DefaultToolset) Register(r *Registry) {
 	}
 	d.registerFetch(r)
 	d.registerReadFile(r)
-	if rangeReader, ok := d.rt.(runtime.FileRangeReader); ok {
-		d.registerReadFileRange(r, rangeReader)
-	}
+	d.registerReadFileRange(r, d.fs)
 	d.registerWriteFile(r)
 	d.registerAppendFile(r)
 	d.registerEditFile(r)
@@ -172,7 +173,7 @@ func (d *DefaultToolset) registerReadFile(r *Registry) {
 		return PreparedTool{
 			Description: fmt.Sprintf("Reading %s", p.Filename),
 			Execute: func(ctx context.Context) (ToolResult, error) {
-				res, err := d.rt.ReadFile(ctx, p.Filename, p.StartLine, p.Limit)
+				res, err := d.fs.ReadFile(ctx, p.Filename, p.StartLine, p.Limit)
 				if err != nil {
 					return ErrorResult(fmt.Errorf("read file %s: %w", p.Filename, err)), nil
 				}
@@ -182,7 +183,7 @@ func (d *DefaultToolset) registerReadFile(r *Registry) {
 	})
 }
 
-func (d *DefaultToolset) registerReadFileRange(r *Registry, rangeReader runtime.FileRangeReader) {
+func (d *DefaultToolset) registerReadFileRange(r *Registry, fs runtime.FileSystem) {
 	r.Register(ToolSchema{
 		Name:        "read_file_range",
 		Description: "Read a raw byte range from a text file. Use this for files with extremely long lines, minified/generated content, or when read_file() cannot make useful progress because its line-based output is truncated. Continue reading with the returned next_byte value. The range is byte-based, not character-based; do not use this when you need 1-based line numbers for edit_file(). Do NOT use this for binary files.",
@@ -235,7 +236,7 @@ func (d *DefaultToolset) registerReadFileRange(r *Registry, rangeReader runtime.
 		return PreparedTool{
 			Description: fmt.Sprintf("Reading byte range from %s", p.Filename),
 			Execute: func(ctx context.Context) (ToolResult, error) {
-				res, err := rangeReader.ReadFileRange(ctx, p.Filename, p.StartByte, p.Limit)
+				res, err := fs.ReadFileRange(ctx, p.Filename, p.StartByte, p.Limit)
 				if err != nil {
 					return ErrorResult(fmt.Errorf("read file range %s: %w", p.Filename, err)), nil
 				}
@@ -280,7 +281,7 @@ func (d *DefaultToolset) registerWriteFile(r *Registry) {
 		return PreparedTool{
 			Description: fmt.Sprintf("Writing to %s", p.Filename),
 			Execute: func(ctx context.Context) (ToolResult, error) {
-				if err := d.rt.WriteFile(ctx, p.Filename, p.Content); err != nil {
+				if err := d.fs.WriteFile(ctx, p.Filename, p.Content); err != nil {
 					return ErrorResult(fmt.Errorf("write file %s: %w", p.Filename, err)), nil
 				}
 				return TextResult(fmt.Sprintf("wrote %s", p.Filename)), nil
@@ -324,7 +325,7 @@ func (d *DefaultToolset) registerAppendFile(r *Registry) {
 		return PreparedTool{
 			Description: fmt.Sprintf("Appending to %s", p.Filename),
 			Execute: func(ctx context.Context) (ToolResult, error) {
-				if err := d.rt.AppendFile(ctx, p.Filename, p.Content); err != nil {
+				if err := d.fs.AppendFile(ctx, p.Filename, p.Content); err != nil {
 					return ErrorResult(fmt.Errorf("append file %s: %w", p.Filename, err)), nil
 				}
 				return TextResult(fmt.Sprintf("append %s", p.Filename)), nil
@@ -402,7 +403,7 @@ func (d *DefaultToolset) registerEditFile(r *Registry) {
 		return PreparedTool{
 			Description: fmt.Sprintf("Editing %s", p.Filename),
 			Execute: func(ctx context.Context) (ToolResult, error) {
-				if err := d.rt.EditFile(ctx, p.Filename, edits); err != nil {
+				if err := d.fs.EditFile(ctx, p.Filename, edits); err != nil {
 					return ErrorResult(fmt.Errorf("edit file %s: %w", p.Filename, err)), nil
 				}
 				return TextResult(fmt.Sprintf("edited %s", p.Filename)), nil
@@ -481,7 +482,7 @@ func (d *DefaultToolset) registerGrep(r *Registry) {
 		return PreparedTool{
 			Description: fmt.Sprintf("Searching %s for %q", path, p.Pattern),
 			Execute: func(ctx context.Context) (ToolResult, error) {
-				res, err := d.rt.ExecuteTruncated(ctx, nil, "bash", "-l", "-c", sb.String())
+				res, err := d.executor.ExecuteTruncated(ctx, nil, "bash", "-l", "-c", sb.String())
 				if err != nil {
 					return ErrorResult(fmt.Errorf("run grep command: %w", err)), nil
 				}
@@ -537,7 +538,7 @@ func (d *DefaultToolset) registerGlob(r *Registry) {
 		return PreparedTool{
 			Description: fmt.Sprintf("Finding files matching %q", p.Pattern),
 			Execute: func(ctx context.Context) (ToolResult, error) {
-				result, err := d.rt.Glob(ctx, p.Pattern, p.Limit)
+				result, err := d.globber.Glob(ctx, p.Pattern, p.Limit)
 				if err != nil {
 					return ErrorResult(fmt.Errorf("glob pattern %q: %w", p.Pattern, err)), nil
 				}
@@ -575,7 +576,7 @@ func (d *DefaultToolset) registerReadImage(r *Registry) {
 		return PreparedTool{
 			Description: fmt.Sprintf("Reading image %s", p.Filename),
 			Execute: func(ctx context.Context) (ToolResult, error) {
-				data, err := d.rt.ReadRawBytes(ctx, p.Filename)
+				data, err := d.fs.ReadRawBytes(ctx, p.Filename)
 				if err != nil {
 					return ErrorResult(fmt.Errorf("read image %s: %w", p.Filename, err)), nil
 				}

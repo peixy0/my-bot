@@ -9,7 +9,7 @@ import (
 )
 
 type Manager struct {
-	rt             runtime.Runtime
+	truncater      runtime.Truncater
 	maxOutputChars int
 	rootCtx        context.Context
 	rootCancel     context.CancelFunc
@@ -97,10 +97,10 @@ type taskState struct {
 	killRequested bool
 }
 
-func NewManager(rt runtime.Runtime, maxOutputChars int) *Manager {
+func NewManager(truncater runtime.Truncater, maxOutputChars int) *Manager {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	m := &Manager{
-		rt:             rt,
+		truncater:      truncater,
 		maxOutputChars: maxOutputChars,
 		rootCtx:        rootCtx,
 		rootCancel:     rootCancel,
@@ -303,7 +303,7 @@ func (m *Manager) snapshotOf(task *taskState, includeOutput bool) Snapshot {
 		ElapsedSeconds: &elapsed,
 	}
 	if includeOutput {
-		snap.Output = m.rt.TruncateTail(m.rootCtx, task.output, m.maxOutputChars)
+		snap.Output = m.truncater.TruncateTail(m.rootCtx, task.output, m.maxOutputChars)
 	}
 	return snap
 }

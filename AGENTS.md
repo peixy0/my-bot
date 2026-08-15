@@ -57,7 +57,7 @@ internal/
       outbound.go        ← events.Outbound impl (chunked send)
     dedup/               ← generic dedup window (channel-as-single-owner pattern)
   runtime/
-    runtime.go           ← Runtime interface (Execute, Spawn, ReadFile, etc.) + shared helpers
+    runtime.go           ← capability interfaces (Executor, FileSystem, Globber, Truncater, OSInfoProvider) + shared helpers
     host.go              ← local bash execution
     container.go         ← podman/docker execution
   tools/
@@ -125,7 +125,12 @@ Every long-lived goroutine and what it owns. This is the single source of truth 
 | `CompletionClient` | `llm` | LLM provider contract: `Complete(ctx, CompletionRequest) (CompletionResponse, error)` |
 | `Orchestrator` | `engine` | Mode-specific output, prepared-tool dispatch, and in-loop input strategy |
 | `SystemPrompt` | `llm` | Composable prompt builder (`Build(ctx) string`) |
-| `Runtime` | `runtime` | Execution environment abstraction (Execute, Spawn, ReadFile, EditFile, Glob, OSInfo, ...) |
+| `Executor` | `runtime` | Command execution and process lifecycle (`Execute`, `ExecuteTruncated`, `Spawn`) |
+| `FileSystem` | `runtime` | File reads/writes, line and byte-range reads, append, temp files, and edits |
+| `Globber` | `runtime` | File pattern matching; current implementation delegates to `Executor` |
+| `Truncater` | `runtime` | Head/tail output truncation and redirection |
+| `OSInfoProvider` | `runtime` | Runtime environment information |
+| `Runtime` | `runtime` | Composition of runtime capabilities for host/container construction and broad environment owners |
 | `Outbound` | `events` | `Send`, `SendDelta`, `SendFinal`, `StartThinking`, `EndThinking` |
 | `Toolset` | `tools` | `Register(r *Registry)` — every cross-package tool registration goes through this |
 | `Inbound` | `messaging` | `Run(ctx) error` — pushes events into the shared inbox |
@@ -158,7 +163,7 @@ These are non-obvious decisions worth preserving. If you're tempted to "fix" one
 - **`parallel_tool_calls: true` is enabled in every request.** The OpenAI-compatible provider opts into parallel calls at the wire level; `engine/orchestrator.go:runDispatch` further serializes non-`Parallel` tools behind a per-call mutex. All non-parallel tools in a batch share one mutex — this means unrelated non-parallel tools are unnecessarily serialized against each other, not just against their own kind. This is a known suboptimality; the correctness property (non-parallel tools never overlap) is preserved, and the performance impact is negligible in current tool sets where few tools are marked non-parallel. If this becomes a bottleneck, restructure into per-tool-name mutexes or sequential-then-parallel group execution.
 - **Tool errors are LLM messages; only preparation failures skip.** Tool preparers deserialize and validate arguments once, then return a `PreparedTool` whose `Execute` closure captures the validated values. Execution must wrap every business/runtime error the LLM should see into `tools.ErrorResult(err)` and return it with `nil` error. A preparer returns an error only for malformed or invalid model-supplied arguments; `Agent.Run` skips those calls and omits them from the replayed assistant tool-call list. `runDispatch`'s `errgroup` goroutines always `return nil` because execution failures are represented as `CallOutcome` values. Do not change `execOne` to forward execution errors through `errgroup` — that would abort the entire tool batch on a single tool's business error.
 - **Composable system prompts.** Prompts compose workspace `.md` files (`USER.md` / `PERSONA.md` / `RULES.md` / `CONTEXT.md` / `TOOLS.md`, plus per-mode `HEARTBEAT.md` / `CRON.md`); behavior is data-driven, not code-driven. New prompts embed `promptBase` and declare their section list, not file-reading logic. `SubagentPrompt` is the exception: it only reads `TOOLS.md` plus the caller-supplied `extra` block (subagents start without the main agent's persona/rules).
-- **`Runtime` abstraction.** Lets the same tools execute on host bash or in a podman/docker container with no caller changes. Both runtimes expose the full `Runtime` interface including `OSInfo` (host: `runtime.GOOS`/`runtime.GOARCH`/`os.Getwd()`; container: `uname -sm && pwd`). The `Runtime` interface is intentionally monolithic — consumers that need only a subset (e.g. messaging outbound only needs `ReadRawBytes`) currently depend on the full interface. This couples messaging to runtime, which is a known debt (see Architecture Debt section). Do not extract smaller interfaces unless the refactoring also addresses the tool-registration boundary that necessitates `Runtime` in outbound.
+- **Runtime capability interfaces.** `Executor`, `FileSystem`, `Globber`, `Truncater`, and `OSInfoProvider` are the narrow capability boundaries. `Runtime` composes them for host/container construction and broad environment owners. `FileSystem` includes both line-based and byte-range reads. `grep` is an Executor-backed tool, while `glob` depends on the separate `Globber` capability. New consumers should depend on the narrowest interface they need instead of adding methods to `Runtime`.
 - **Messaging outbound holds `Runtime` for platform tools.** `feishu.Outbound` and `websocket.Outbound` both hold a `runtime.Runtime` field used by `send_image`/`send_file` prepared execution closures to call `ReadRawBytes`. This creates a `messaging → runtime` dependency that is **intentionally tolerated** for pragmatic reasons: execution needs file bytes and the outbound is the natural scope for platform-specific tool registration. Do not remove `rt` from outbound without also redesigning the outbound-tool registration mechanism.
 - **Task-first asynchronous execution.** Commands, delegated agents, and fleets all create `Task` objects (`task_id = task-<N>`) and return `task_id` immediately. Progress, output, and termination flow through `internal/tasks`. Flat namespace: every spawned unit — shell command, subagent, fleet child — is just a task with its own controller and lifecycle.
 - **Event-driven task ownership.** `tasks.Manager` is the single owner of task state, using a request/event channel rather than mutexes. Subagents construct their own private `tasks.Manager` inside the driver goroutine so they can be torn down with the rest of their work; the parent session never sees those children — they show up only as the parent task's output.
@@ -236,7 +241,7 @@ These are known design weaknesses that are not bugs but will increase maintenanc
 
 ### LOW: Host/Container read-path duplication
 
-`ProcessHandle` construction is shared through `newProcessHandle`. `ReadFile` post-processing remains duplicated; the implementations differ in file I/O primitives (`os.ReadFile` vs `cat`) and command scaffolding. `read_file_range` is implemented by the optional `runtime.FileRangeReader` capability so test doubles and future runtimes do not have to grow the monolithic `Runtime` interface. Extract the remaining shared read post-processing only when that code changes again.
+`ProcessHandle` construction is shared through `newProcessHandle`. `ReadFile` post-processing remains duplicated; the implementations differ in file I/O primitives (`os.ReadFile` vs `cat`) and command scaffolding. `ReadFileRange` is part of the standard `FileSystem` contract. Extract the remaining shared read post-processing only when that code changes again.
 
 ### LOW: Inconsistent retry policies across messaging channels
 

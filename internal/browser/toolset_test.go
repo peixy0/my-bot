@@ -67,6 +67,9 @@ func (rt testRuntime) ReadRawBytes(_ context.Context, _ string) ([]byte, error) 
 func (rt testRuntime) ReadFile(_ context.Context, _ string, _, _ int) (runtime.ReadFileResult, error) {
 	return runtime.ReadFileResult{}, nil
 }
+func (rt testRuntime) ReadFileRange(_ context.Context, _ string, _ int64, _ int) (runtime.ReadFileRangeResult, error) {
+	return runtime.ReadFileRangeResult{}, nil
+}
 func (rt testRuntime) WriteFile(_ context.Context, _, _ string) error { return nil }
 func (rt testRuntime) WriteTmpFile(_ context.Context, _ string) (string, error) {
 	return rt.tmpPath, nil

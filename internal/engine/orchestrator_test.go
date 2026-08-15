@@ -681,6 +681,9 @@ func (r *nullRuntime) ReadRawBytes(_ context.Context, _ string) ([]byte, error) 
 func (r *nullRuntime) ReadFile(_ context.Context, _ string, _, _ int) (runtime.ReadFileResult, error) {
 	return runtime.ReadFileResult{}, nil
 }
+func (r *nullRuntime) ReadFileRange(_ context.Context, _ string, _ int64, _ int) (runtime.ReadFileRangeResult, error) {
+	return runtime.ReadFileRangeResult{}, nil
+}
 func (r *nullRuntime) WriteFile(_ context.Context, _, _ string) error           { return nil }
 func (r *nullRuntime) WriteTmpFile(_ context.Context, _ string) (string, error) { return "", nil }
 func (r *nullRuntime) AppendFile(_ context.Context, _, _ string) error          { return nil }

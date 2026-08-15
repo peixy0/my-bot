@@ -11,12 +11,12 @@ import (
 )
 
 type CommandToolset struct {
-	rt    runtime.Runtime
-	tasks *tasks.Manager
+	executor runtime.Executor
+	tasks    *tasks.Manager
 }
 
-func NewCommandToolset(rt runtime.Runtime, taskSet *tasks.Manager) *CommandToolset {
-	return &CommandToolset{rt: rt, tasks: taskSet}
+func NewCommandToolset(executor runtime.Executor, taskSet *tasks.Manager) *CommandToolset {
+	return &CommandToolset{executor: executor, tasks: taskSet}
 }
 
 func (s *CommandToolset) Register(r *Registry) {
@@ -62,7 +62,7 @@ func (s *CommandToolset) Register(r *Registry) {
 			Execute: func(ctx context.Context) (ToolResult, error) {
 				snap, err := s.tasks.Start(ctx, tasks.StartOptions{
 					Description: p.Command,
-					Driver:      tasks.NewProcessDriver(s.rt, p.Command),
+					Driver:      tasks.NewProcessDriver(s.executor, p.Command),
 				})
 				if err != nil {
 					return ErrorResult(fmt.Errorf("start command %q: %w", p.Command, err)), nil
