@@ -97,8 +97,6 @@ function findRoot(axNodes: AxNode[], nodeMap: Record<string, AxTreeNode>): AxTre
 }
 
 async function storeAgentRefs(tabId: number, refToBackendId: Map<string, number>): Promise<void> {
-  if (refToBackendId.size === 0) return;
-
   await cdpSend(tabId, "DOM.enable");
 
   const resolved: Array<{ ref: string; objectId: string }> = [];
@@ -112,8 +110,6 @@ async function storeAgentRefs(tabId: number, refToBackendId: Map<string, number>
     }
   }
 
-  if (resolved.length === 0) return;
-
   const winData = (await cdpSend(tabId, "Runtime.evaluate", {
     expression: "window",
     returnByValue: false,
@@ -121,7 +117,7 @@ async function storeAgentRefs(tabId: number, refToBackendId: Map<string, number>
 
   await cdpSend(tabId, "Runtime.callFunctionOn", {
     functionDeclaration: `function() {
-      if (!window.__agentSnapshotRefs) window.__agentSnapshotRefs = {};
+      window.__agentSnapshotRefs = {};
       const refs = ${JSON.stringify(resolved.map((r) => r.ref))};
       for (let i = 0; i < arguments.length; i++) {
         window.__agentSnapshotRefs[refs[i]] = arguments[i];

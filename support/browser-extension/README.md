@@ -19,7 +19,7 @@ browser:
 
 For remote endpoints, terminate TLS in a reverse proxy and use `wss://` with a strong bearer token. The settings page rejects remote `ws://` URLs; plain `ws://` is only accepted for localhost.
 
-The extension requests broad page access because an agent can create a tab for any site and then inspect or control that tab. It only exposes tabs created by the agent's browser scope; it cannot list or operate ordinary Chrome tabs. The `debugger` permission is used by all page interaction tools (snapshot, click, type, select_option, press_key, evaluate) via the Chrome DevTools Protocol to produce `isTrusted=true` events that React, Vue, and native form behaviors recognize. Do not install the extension in a profile whose signed-in sessions you do not want the bot to access.
+The extension requests broad page access because an agent can create a tab for any site and then inspect or control that tab. It only exposes tabs created by the agent's browser scope; it cannot list or operate ordinary Chrome tabs. The `debugger` permission enables snapshots and browser-level interaction through the Chrome DevTools Protocol. Coordinate clicks and key events dispatched through CDP are trusted; DOM-level click and value-setting fallbacks may be untrusted. Do not install the extension in a profile whose signed-in sessions you do not want the bot to access.
 
 ## Connection states
 
@@ -39,4 +39,4 @@ Saving new settings disconnects the active bridge. Select Connect again to apply
 4. Start a browser task, then reload the extension service worker from `chrome://extensions`; confirm the task's owned tabs remain listed.
 5. Try snapshot or input on a Chrome internal page and confirm the tool returns a clear access error.
 6. Open DevTools on an agent-owned page, call `browser_evaluate`, and confirm the debugger attachment failure is reported without leaving a stuck connection.
-7. Use `browser_snapshot`, then `browser_click` on an element in a React or native form; confirm the click triggers the form's submit handler (CDP `isTrusted=true` event).
+7. Use `browser_snapshot`, then `browser_click` on an element in a React or native form; confirm the click triggers the form's submit handler.

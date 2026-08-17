@@ -8,9 +8,9 @@ export async function cdpClick(tabId: number, elementRef: string): Promise<{ cli
 
   const data = (await cdpSend(tabId, "Runtime.evaluate", {
     expression: `(() => {
-      const el = window.__agentSnapshotRefs?.[${JSON.stringify(elementRef)}];
-      if (!el) return JSON.stringify({ error: "stale" });
-      if (!document.body.contains(el)) return JSON.stringify({ error: "stale" });
+      const ref = window.__agentSnapshotRefs?.[${JSON.stringify(elementRef)}];
+      const el = ref instanceof Element ? ref : ref?.parentElement;
+      if (!(el instanceof Element) || !document.documentElement.contains(el)) return JSON.stringify({ error: "stale" });
       el.scrollIntoView({ block: "center", behavior: "instant" });
       const rect = el.getBoundingClientRect();
       const style = window.getComputedStyle(el);
@@ -34,7 +34,21 @@ export async function cdpClick(tabId: number, elementRef: string): Promise<{ cli
     awaitPromise: true,
   })) as CdpEvaluateResult;
 
-  const probe: ClickInfo | ClickError = JSON.parse(String(data.result?.value ?? "{}"));
+  const probe = parseClickProbe(data.result?.value);
+  if (!probe || data.exceptionDetails) {
+    const domClick = await tryDomClick(tabId, elementRef);
+    if (domClick === "clicked") {
+      return { clicked: true };
+    }
+    if (domClick === "stale") {
+      throw new Error("element_ref is stale; call browser_snapshot again");
+    }
+    if (data.exceptionDetails) {
+      throw new Error(formatException(data.exceptionDetails));
+    }
+    throw new Error("could not determine click coordinates; call browser_snapshot again");
+  }
+
   if ("error" in probe) {
     throw new Error("element_ref is stale; call browser_snapshot again");
   }
@@ -49,26 +63,11 @@ export async function cdpClick(tabId: number, elementRef: string): Promise<{ cli
   const { x, y, isHtml, visible } = probe;
 
   if (isHtml && visible !== false) {
-    const clickResult = (await cdpSend(tabId, "Runtime.evaluate", {
-      expression: `(() => {
-        const el = window.__agentSnapshotRefs?.[${JSON.stringify(elementRef)}];
-        if (!el || !document.body.contains(el)) return JSON.stringify({ ok: false, reason: "stale" });
-        try {
-          (el).click();
-          return JSON.stringify({ ok: true });
-        } catch (e) {
-          return JSON.stringify({ ok: false, reason: String(e) });
-        }
-      })()`,
-      returnByValue: true,
-      awaitPromise: true,
-    })) as CdpEvaluateResult;
-
-    const clickInfo = JSON.parse(String(clickResult.result?.value ?? "{}"));
-    if (clickInfo.ok) {
+    const domClick = await tryDomClick(tabId, elementRef);
+    if (domClick === "clicked") {
       return { clicked: true };
     }
-    if (clickInfo.reason === "stale") {
+    if (domClick === "stale") {
       throw new Error("element_ref is stale; call browser_snapshot again");
     }
   }
@@ -91,6 +90,73 @@ export async function cdpClick(tabId: number, elementRef: string): Promise<{ cli
   return { clicked: true };
 }
 
+async function tryDomClick(tabId: number, elementRef: string): Promise<"clicked" | "stale" | "failed"> {
+  const data = (await cdpSend(tabId, "Runtime.evaluate", {
+    expression: `(() => {
+      const ref = window.__agentSnapshotRefs?.[${JSON.stringify(elementRef)}];
+      const el = ref instanceof HTMLElement ? ref : ref?.parentElement;
+      if (!(el instanceof HTMLElement) || !document.documentElement.contains(el)) return "stale";
+      try {
+        el.click();
+        return "clicked";
+      } catch {
+        return "failed";
+      }
+    })()`,
+    returnByValue: true,
+    awaitPromise: true,
+  })) as CdpEvaluateResult;
+
+  if (data.exceptionDetails) return "failed";
+  const result = data.result?.value;
+  return result === "clicked" || result === "stale" || result === "failed" ? result : "failed";
+}
+
+function parseClickProbe(value: unknown): ClickInfo | ClickError | null {
+  if (typeof value !== "string") return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+
+  if (!isPlainObject(parsed)) return null;
+  if (parsed.error === "stale") return { error: "stale" };
+  if (
+    typeof parsed.x !== "number" ||
+    !Number.isFinite(parsed.x) ||
+    typeof parsed.y !== "number" ||
+    !Number.isFinite(parsed.y) ||
+    typeof parsed.w !== "number" ||
+    !Number.isFinite(parsed.w) ||
+    typeof parsed.h !== "number" ||
+    !Number.isFinite(parsed.h) ||
+    typeof parsed.isHtml !== "boolean" ||
+    typeof parsed.visible !== "boolean" ||
+    typeof parsed.pointerEventsNone !== "boolean" ||
+    typeof parsed.disabled !== "boolean"
+  ) {
+    return null;
+  }
+
+  return {
+    x: parsed.x,
+    y: parsed.y,
+    w: parsed.w,
+    h: parsed.h,
+    isHtml: parsed.isHtml,
+    visible: parsed.visible,
+    pointerEventsNone: parsed.pointerEventsNone,
+    disabled: parsed.disabled,
+  };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export async function cdpSetValue(tabId: number, elementRef: string, value: string): Promise<{ set: boolean }> {
   if (typeof value !== "string" || value.length > maxTextLength) {
     throw new Error("value is too long");
@@ -100,8 +166,9 @@ export async function cdpSetValue(tabId: number, elementRef: string, value: stri
 
   const data = (await cdpSend(tabId, "Runtime.evaluate", {
     expression: `(() => {
-      const el = window.__agentSnapshotRefs?.[${JSON.stringify(elementRef)}];
-      if (!el || !document.body.contains(el)) return JSON.stringify({ error: "stale" });
+      const ref = window.__agentSnapshotRefs?.[${JSON.stringify(elementRef)}];
+      const el = ref instanceof HTMLElement ? ref : ref?.parentElement;
+      if (!(el instanceof HTMLElement) || !document.documentElement.contains(el)) return JSON.stringify({ error: "stale" });
       el.scrollIntoView({ block: "center", behavior: "instant" });
       el.focus();
       const tag = el.tagName;
@@ -131,14 +198,42 @@ export async function cdpSetValue(tabId: number, elementRef: string, value: stri
     awaitPromise: true,
   })) as CdpEvaluateResult;
 
-  const info: SetValueResult = JSON.parse(String(data.result?.value ?? "{}"));
+  if (data.exceptionDetails) {
+    throw new Error(formatException(data.exceptionDetails));
+  }
+
+  const info = parseSetValueResult(data.result?.value);
+  if (!info) {
+    throw new Error("set_value failed: invalid page response");
+  }
   if (info.error === "stale") {
     throw new Error("element_ref is stale; call browser_snapshot again");
   }
   if (info.error) {
     throw new Error(info.error);
   }
+  if (!info.set) {
+    throw new Error("set_value failed");
+  }
   return { set: true };
+}
+
+function parseSetValueResult(value: unknown): SetValueResult | null {
+  if (typeof value !== "string") return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+
+  if (!isPlainObject(parsed)) return null;
+  if (typeof parsed.error === "string") return { error: parsed.error };
+  if (typeof parsed.set === "boolean") {
+    return typeof parsed.tag === "string" ? { set: parsed.set, tag: parsed.tag } : { set: parsed.set };
+  }
+  return null;
 }
 
 export async function cdpPressKey(tabId: number, key: string): Promise<{ key: string }> {
